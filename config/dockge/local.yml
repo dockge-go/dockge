@@ -1,0 +1,24 @@
+env: local
+http:
+  host: 127.0.0.1
+  port: 5001
+ssl:
+  cert: ""
+  key: ""
+security:
+  jwt:
+    key: change-me-for-local-development
+dockge:
+  stacks_dir: storage/stacks
+data:
+  db:
+    dsn: storage/dockge.db
+log:
+  log_level: debug
+  mode: console
+  encoding: console
+  log_file_name: "./storage/logs/dockge.log"
+  max_backups: 30
+  max_age: 7
+  max_size: 1024
+  compress: true

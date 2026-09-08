@@ -1,0 +1,23 @@
+env: prod
+http:
+  host: 0.0.0.0
+  port: 5001
+security:
+  jwt:
+    key: change-me-in-production
+dockge:
+  stacks_dir: ./stacks
+data:
+  db:
+    user:
+      driver: sqlite
+      dsn: ./data/dockge.db?_busy_timeout=5000
+log:
+  log_level: info
+  mode: both
+  encoding: json
+  log_file_name: "./logs/dockge.log"
+  max_backups: 30
+  max_age: 28
+  max_size: 1024
+  compress: true
