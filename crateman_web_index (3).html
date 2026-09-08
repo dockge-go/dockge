@@ -1,0 +1,2571 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dockge — Container Management</title>
+  <script>
+  /* 主题预置：必须先于样式表执行，首帧前写入 data-theme，避免明暗闪烁 */
+  (function () {
+    var stored = null;
+    try { stored = localStorage.getItem('dockge.theme'); } catch (e) {}
+    if (stored !== 'dark' && stored !== 'light') {
+      stored = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    document.documentElement.dataset.theme = stored;
+  })();
+  </script>
+  <script>
+  /* i18n 核心 + 主题切换逻辑。字典以 zh 为基准语言，t(key, vars) 支持 {var} 插值。 */
+  (function () {
+    'use strict';
+    var I18N = {
+      zh: {
+        'app.title': 'Dockge — 容器管理',
+        'aria.mainNav': '主导航', 'aria.toggleNav': '切换导航栏', 'aria.search': '搜索', 'aria.theme': '切换明暗主题', 'aria.lang': '界面语言',
+        'common.search': '搜索…', 'common.refresh': '刷新', 'common.close': '关闭', 'common.cancel': '取消',
+        'common.system': '系统', 'common.viewAll': '查看全部', 'common.remove': '移除', 'common.live': '实时',
+        'common.ok': '确认',
+        'common.delete': '删除',
+        'common.totalRunning': '共 {total} 个 · {running} 个运行中', 'common.containersCount': '{n} 个容器',
+        'common.name': '名称', 'common.status': '状态', 'common.actions': '操作', 'common.created': '创建时间',
+        'common.usage': '用量', 'common.driver': '驱动', 'common.subnet': '子网', 'common.image': '镜像',
+        'common.ports': '端口', 'common.uptime': '运行时长', 'common.size': '大小', 'common.tag': '标签',
+        'common.repository': '仓库', 'common.none': '无',
+        'common.secAgo': '{n} 秒前', 'common.minAgo': '{n} 分钟前', 'common.hourAgo': '{n} 小时前', 'common.dayAgo': '{n} 天前',
+        'pg.info': '第 {p} / {n} 页 · 共 {t} 条', 'pg.prev': '上一页', 'pg.next': '下一页',
+        'nav.group.overview': '概览', 'nav.group.resources': '资源', 'nav.group.system': '系统',
+        'nav.dashboard': '仪表盘', 'nav.containers': '容器', 'nav.stacks': '编排栈', 'nav.images': '镜像',
+        'nav.volumes': '数据卷', 'nav.networks': '网络', 'nav.sysinfo': '系统信息',
+        'nav.sysdf': '磁盘占用', 'nav.settings': '设置',
+        'status.running': '运行中', 'status.exited': '已退出', 'status.paused': '已暂停', 'status.dead': '已终止',
+        'status.stopped': '已停止', 'status.upHours': '已运行 {n} 小时', 'status.exitedDetail': '已退出（{code}）{m} 分钟前',
+        'status.exitedHours': '已退出（{code}）{n} 小时前',
+        'dash.labelRunning': '运行中', 'dash.labelStopped': '已停止', 'dash.labelPaused': '已暂停', 'dash.labelImages': '镜像',
+        'dash.newContainer': '新建容器', 'dash.newStack': '新建编排栈', 'dash.containerStatus': '容器状态',
+        'dash.resourceUsage': '资源占用', 'dash.recentContainers': '最近容器',
+        'legend.running': '{n} 运行中', 'legend.paused': '{n} 已暂停', 'legend.stopped': '{n} 已停止',
+        'res.cpu': 'CPU', 'res.memory': '内存', 'res.disk': '磁盘',
+        'ctn.title': '容器', 'ctn.clearStopped': '清空已停止 ({n})', 'ctn.showAll': '显示全部', 'ctn.new': '新建容器',
+        'act.start': '启动', 'act.stop': '停止', 'act.restart': '重启',
+        'toast.actionSent': '已向 {id} 发送 {action} 指令', 'confirm.removeContainer': '确定移除此容器？',
+        'toast.containerRemoved': '容器已移除', 'toast.noStopped': '没有已停止的容器可移除',
+        'confirm.removeStopped': '确定移除 {n} 个已停止容器？', 'toast.removedCount': '{n} 个容器已移除',
+        'ctn.copyToHost': '复制到宿主机', 'ctn.export': '导出', 'ctn.commit': '提交为镜像', 'ctn.rename': '重命名',
+        'ctn.statsCores': '8 核中 2 核', 'ctn.memLimit': '上限 2 GB', 'ctn.na': '暂无',
+        'tab.stats': '统计', 'tab.env': '环境变量', 'tab.net': '网络', 'tab.mounts': '挂载',
+        'tab.logs': '日志', 'tab.exec': '终端',
+        'stat.netIO': '网络 I/O', 'stat.blockIO': '块 I/O', 'stat.read': '读', 'stat.write': '写',
+        'stat.rx': '接收', 'stat.tx': '发送',
+        'ctn.resize': '调整尺寸', 'ctn.removeSession': '结束会话',
+        'ctn.simulated': '在下方输入命令。这是一个模拟终端。',
+        'ctn.simulatedFor': '在下方输入命令。这是 <strong>{name}</strong> 的模拟终端。',
+        'ctn.typeCommand': '输入命令...',
+        'stack.new': '新建编排栈', 'stack.emptyTitle': '暂无编排栈',
+        'stack.noSelection': '从左侧选择一个栈，或新建一个',
+        'stack.createTitle': '新建编排栈', 'stack.namePh': 'my-app', 'stack.create': '创建',
+        'stack.termHint': '部署输出将在此显示',
+        'stack.validate': '校验', 'stack.format': '格式化',
+        'stack.fullscreen': '全屏', 'stack.deploy': '部署',
+        'stack.viewServiceLogs': '查看服务日志', 'stack.terminal': '终端',
+        'toast.stackStopped': '编排栈 "{name}" 已停止',
+        'toast.stackStarted': '编排栈 "{name}" 已启动', 'confirm.removeStack': '确定移除此编排栈？',
+        'toast.stackRemoved': '编排栈已移除', 'toast.yamlValid': 'YAML 格式有效', 'toast.yamlIssue': 'YAML 可能有误 —— 请检查结构',
+        'toast.formatApplied': '已应用格式化', 'toast.deployStarted': '部署已启动', 'toast.deployDone': '部署完成',
+        'img.title': '镜像', 'img.subtitle': '本地镜像库', 'img.pull': '拉取镜像', 'img.emptyTitle': '暂无镜像',
+        'img.clearUnused': '清空未使用镜像 ({n})', 'img.count': '{n} 个镜像', 'img.history': '历史',
+        'confirm.removeImages': '确定移除 {n} 个镜像？', 'toast.noImages': '没有可移除的镜像',
+        'toast.imagesRemoved': '{n} 个镜像已移除', 'toast.imageRemoved': '镜像已移除',
+        'vol.title': '数据卷', 'vol.subtitle': '持久化存储', 'vol.new': '新建数据卷', 'vol.emptyTitle': '暂无数据卷',
+        'vol.clearUnused': '清空未使用卷 ({n})', 'vol.count': '{n} 个数据卷',
+        'confirm.removeVolumes': '确定移除 {n} 个数据卷？', 'toast.noVolumes': '没有可移除的数据卷',
+        'toast.volumesRemoved': '{n} 个数据卷已移除', 'toast.volumeRemoved': '数据卷已移除',
+        'net.title': '网络', 'net.new': '新建网络', 'net.emptyTitle': '暂无网络', 'net.clearUnused': '清空未使用网络 ({n})',
+        'net.count': '{n} 个网络', 'confirm.removeNetworks': '确定移除 {n} 个网络？', 'toast.noNetworks': '没有可移除的网络',
+        'toast.networksRemoved': '{n} 个网络已移除', 'toast.networkRemoved': '网络已移除',
+        'sysinfo.subtitle': 'Podman 系统配置与环境', 'toast.infoRefreshed': '信息已刷新',
+        'th.key': '键', 'th.value': '值',
+        'sysinfo.apiVersion': 'API 版本', 'sysinfo.version': '版本', 'sysinfo.kernel': '内核', 'sysinfo.os': '操作系统',
+        'sysinfo.arch': '架构', 'sysinfo.goVersion': 'Go 版本', 'sysinfo.podmanSocket': 'Podman Socket',
+        'sysinfo.storageDriver': '存储驱动', 'sysinfo.graphRoot': '图存储根目录', 'sysinfo.containerRoot': '容器存储根目录',
+        'sysinfo.cgroupDriver': 'Cgroup 驱动', 'sysinfo.cgroupVersion': 'Cgroup 版本', 'sysinfo.cpus': 'CPU 数',
+        'sysinfo.totalMemory': '总内存',
+        'sysdf.subtitle': '所有资源的存储消耗', 'sysdf.pruneAll': '全部清理', 'sysdf.prune': '清理',
+        'confirm.pruneAll': '确定清理所有未使用数据？', 'toast.prunedAll': '未使用数据已清理',
+        'sysdf.items': '· {n} 项', 'sysdf.reclaimable': '{v} 可回收', 'sysdf.buildCache': '构建缓存',
+        'th.type': '类型', 'th.used': '已用', 'th.reclaimable': '可回收', 'toast.pruned': '{v} 已清理',
+        'set.engineConnection': '引擎连接', 'set.socketPath': 'Socket 路径',
+        'set.socketHelp': 'Docker 或 Podman socket 的路径。', 'set.saveReconnect': '保存并重连',
+        'toast.settingsSaved': '设置已保存', 'set.about': '关于',
+        'set.aboutLine1': '<strong>Dockge</strong> — 容器管理',
+        'set.aboutLine2': 'Go 后端 · 原生 JS SPA · Apple 设计系统',
+        'set.aboutLine3': '灵感来自 Podman Desktop 与 Dockge',
+        'sheet.detail': '详情', 'sheet.logsTitle': '{name} — 日志', 'sheet.terminalTitle': '{name} — 终端',
+        'sheet.historyTitle': '{name} — 历史', 'sheet.newContainer': '新建容器',
+        'sheet.pullImage': '拉取镜像', 'sheet.newVolume': '新建数据卷', 'sheet.newNetwork': '新建网络',
+        'sheet.copyToHost': '复制到宿主机', 'sheet.tagImage': '镜像打标签',
+        'th.layer': '层', 'th.command': '命令',
+        'form.containerName': '容器名称', 'form.imageLabel': '镜像', 'form.hostPort': '宿主端口',
+        'form.containerPort': '容器端口', 'form.commandLabel': '命令（可选）',
+        'form.commandHelp': '留空则使用镜像默认值。',
+        'form.imageRef': '镜像引用', 'form.imageRefHelp': '例如 nginx:latest、ubuntu:22.04',
+        'form.volumeName': '数据卷名称', 'form.networkName': '网络名称', 'form.driver': '驱动',
+        'form.sourcePath': '容器内源路径', 'form.targetPath': '宿主机目标路径',
+        'form.currentTag': '当前标签', 'form.newTag': '新标签',
+        'btn.createStart': '创建并启动', 'btn.pull': '拉取', 'btn.create': '创建',
+        'btn.copy': '复制', 'btn.tag': '打标签',
+        'toast.createdContainer': '容器已创建（模拟）', 'toast.createdStack': '编排栈已创建（模拟）',
+        'toast.pullStarted': '已开始拉取（模拟）', 'toast.createdVolume': '数据卷已创建（模拟）',
+        'toast.createdNetwork': '网络已创建（模拟）', 'toast.copying': '正在复制文件到宿主机（模拟）',
+        'toast.exporting': '正在导出容器文件系统...', 'toast.exported': '容器导出成功',
+        'prompt.termSize': '终端尺寸（宽x高）：', 'toast.invalidSize': '格式无效。请使用 宽x高（如 80x24）',
+        'toast.refreshed': '数据已刷新',
+        'toast.termResized': '终端已调整为 {cols}x{rows}', 'toast.sessionRemoved': '会话已结束',
+        'prompt.imageTag': '镜像标签（如 myapp:v1.2）：', 'toast.committed': '已提交为 {name}',
+        'prompt.renameCtn': '新容器名称：', 'toast.renamed': '已重命名为 {name}',
+        'toast.enterTag': '请输入标签', 'toast.tagged': '已打标签为 {name}',
+        'toast.noLogs': '{name} 暂无日志'
+      },
+      en: {
+        'app.title': 'Dockge — Container Management',
+        'aria.mainNav': 'Main navigation', 'aria.toggleNav': 'Toggle navigation', 'aria.search': 'Search', 'aria.theme': 'Toggle light/dark theme', 'aria.lang': 'UI language',
+        'common.search': 'Search…', 'common.refresh': 'Refresh', 'common.close': 'Close', 'common.cancel': 'Cancel',
+        'common.system': 'System', 'common.viewAll': 'View All', 'common.remove': 'Remove', 'common.live': 'Live',
+        'common.ok': 'OK',
+        'common.delete': 'Delete',
+        'common.totalRunning': '{total} total · {running} running', 'common.containersCount': '{n} containers',
+        'common.name': 'Name', 'common.status': 'Status', 'common.actions': 'Actions', 'common.created': 'Created',
+        'common.usage': 'Usage', 'common.driver': 'Driver', 'common.subnet': 'Subnet', 'common.image': 'Image',
+        'common.ports': 'Ports', 'common.uptime': 'Uptime', 'common.size': 'Size', 'common.tag': 'Tag',
+        'common.repository': 'Repository', 'common.none': 'None',
+        'common.secAgo': '{n}s ago', 'common.minAgo': '{n}m ago', 'common.hourAgo': '{n}h ago', 'common.dayAgo': '{n}d ago',
+        'pg.info': 'Page {p} of {n} · {t} items', 'pg.prev': 'Previous', 'pg.next': 'Next',
+        'nav.group.overview': 'Overview', 'nav.group.resources': 'Resources', 'nav.group.system': 'System',
+        'nav.dashboard': 'Dashboard', 'nav.containers': 'Containers', 'nav.stacks': 'Stacks', 'nav.images': 'Images',
+        'nav.volumes': 'Volumes', 'nav.networks': 'Networks', 'nav.sysinfo': 'System Info',
+        'nav.sysdf': 'Disk Usage', 'nav.settings': 'Settings',
+        'status.running': 'Running', 'status.exited': 'Exited', 'status.paused': 'Paused', 'status.dead': 'Dead',
+        'status.stopped': 'Stopped', 'status.upHours': 'Up {n} hours', 'status.exitedDetail': 'Exited ({code}) {m} minutes ago',
+        'status.exitedHours': 'Exited ({code}) {n} hours ago',
+        'dash.labelRunning': 'Running', 'dash.labelStopped': 'Stopped', 'dash.labelPaused': 'Paused', 'dash.labelImages': 'Images',
+        'dash.newContainer': 'New Container', 'dash.newStack': 'New Stack', 'dash.containerStatus': 'Container Status',
+        'dash.resourceUsage': 'Resource Usage', 'dash.recentContainers': 'Recent Containers',
+        'legend.running': '{n} Running', 'legend.paused': '{n} Paused', 'legend.stopped': '{n} Stopped',
+        'res.cpu': 'CPU', 'res.memory': 'Memory', 'res.disk': 'Disk',
+        'ctn.title': 'Containers', 'ctn.clearStopped': 'Clear stopped ({n})', 'ctn.showAll': 'Show all', 'ctn.new': 'New Container',
+        'act.start': 'Start', 'act.stop': 'Stop', 'act.restart': 'Restart',
+        'toast.actionSent': '{action} sent for {id}', 'confirm.removeContainer': 'Remove this container?',
+        'toast.containerRemoved': 'Container removed', 'toast.noStopped': 'No stopped containers to remove',
+        'confirm.removeStopped': 'Remove {n} stopped container(s)?', 'toast.removedCount': '{n} container(s) removed',
+        'ctn.copyToHost': 'Copy to Host', 'ctn.export': 'Export', 'ctn.commit': 'Commit to Image', 'ctn.rename': 'Rename',
+        'ctn.statsCores': '2 of 8 cores', 'ctn.memLimit': 'of 2 GB limit', 'ctn.na': 'N/A',
+        'tab.stats': 'Stats', 'tab.env': 'Environment', 'tab.net': 'Network', 'tab.mounts': 'Mounts',
+        'tab.logs': 'Logs', 'tab.exec': 'Exec',
+        'stat.netIO': 'Network I/O', 'stat.blockIO': 'Block I/O', 'stat.read': 'Read', 'stat.write': 'Write',
+        'stat.rx': 'RX', 'stat.tx': 'TX',
+        'ctn.resize': 'Resize', 'ctn.removeSession': 'Remove Session',
+        'ctn.simulated': 'Type commands below. This is a simulated terminal.',
+        'ctn.simulatedFor': 'Type commands below. This is a simulated terminal for <strong>{name}</strong>.',
+        'ctn.typeCommand': 'Type command...',
+        'stack.new': 'New Stack', 'stack.emptyTitle': 'No stacks',
+        'stack.noSelection': 'Select a stack from the left, or create one',
+        'stack.createTitle': 'New Stack', 'stack.namePh': 'my-app', 'stack.create': 'Create',
+        'stack.termHint': 'Deploy output appears here',
+        'stack.validate': 'Validate', 'stack.format': 'Format',
+        'stack.fullscreen': 'Fullscreen', 'stack.deploy': 'Deploy',
+        'stack.viewServiceLogs': 'View Service Logs', 'stack.terminal': 'Terminal',
+        'toast.stackStopped': 'Stack "{name}" stopped',
+        'toast.stackStarted': 'Stack "{name}" started', 'confirm.removeStack': 'Remove this stack?',
+        'toast.stackRemoved': 'Stack removed', 'toast.yamlValid': 'YAML looks valid', 'toast.yamlIssue': 'Possible YAML issue — check structure',
+        'toast.formatApplied': 'Format applied', 'toast.deployStarted': 'Deploy started', 'toast.deployDone': 'Deploy finished',
+        'img.title': 'Images', 'img.subtitle': 'Local image library', 'img.pull': 'Pull Image', 'img.emptyTitle': 'No images',
+        'img.clearUnused': 'Clear unused images ({n})', 'img.count': '{n} images', 'img.history': 'History',
+        'confirm.removeImages': 'Remove {n} image(s)?', 'toast.noImages': 'No removable images',
+        'toast.imagesRemoved': '{n} image(s) removed', 'toast.imageRemoved': 'Image removed',
+        'vol.title': 'Volumes', 'vol.subtitle': 'Persistent storage', 'vol.new': 'New Volume', 'vol.emptyTitle': 'No volumes',
+        'vol.clearUnused': 'Clear unused volumes ({n})', 'vol.count': '{n} volumes',
+        'confirm.removeVolumes': 'Remove {n} volume(s)?', 'toast.noVolumes': 'No removable volumes',
+        'toast.volumesRemoved': '{n} volume(s) removed', 'toast.volumeRemoved': 'Volume removed',
+        'net.title': 'Networks', 'net.new': 'New Network', 'net.emptyTitle': 'No networks', 'net.clearUnused': 'Clear unused networks ({n})',
+        'net.count': '{n} networks', 'confirm.removeNetworks': 'Remove {n} network(s)?', 'toast.noNetworks': 'No removable networks',
+        'toast.networksRemoved': '{n} network(s) removed', 'toast.networkRemoved': 'Network removed',
+        'sysinfo.subtitle': 'Podman system configuration and environment', 'toast.infoRefreshed': 'Info refreshed',
+        'th.key': 'Key', 'th.value': 'Value',
+        'sysinfo.apiVersion': 'API Version', 'sysinfo.version': 'Version', 'sysinfo.kernel': 'Kernel', 'sysinfo.os': 'OS',
+        'sysinfo.arch': 'Arch', 'sysinfo.goVersion': 'Go version', 'sysinfo.podmanSocket': 'Podman socket',
+        'sysinfo.storageDriver': 'Storage driver', 'sysinfo.graphRoot': 'Graph root', 'sysinfo.containerRoot': 'Container root',
+        'sysinfo.cgroupDriver': 'Cgroup driver', 'sysinfo.cgroupVersion': 'Cgroup version', 'sysinfo.cpus': 'CPUs',
+        'sysinfo.totalMemory': 'Total memory',
+        'sysdf.subtitle': 'Storage consumption across all resources', 'sysdf.pruneAll': 'Prune All', 'sysdf.prune': 'Prune',
+        'confirm.pruneAll': 'Prune all unused data?', 'toast.prunedAll': 'Pruned all unused data',
+        'sysdf.items': '· {n} items', 'sysdf.reclaimable': '{v} reclaimable', 'sysdf.buildCache': 'Build cache',
+        'th.type': 'Type', 'th.used': 'Used', 'th.reclaimable': 'Reclaimable', 'toast.pruned': '{v} pruned',
+        'set.engineConnection': 'Engine Connection', 'set.socketPath': 'Socket Path',
+        'set.socketHelp': 'Path to Docker or Podman socket.', 'set.saveReconnect': 'Save & Reconnect',
+        'toast.settingsSaved': 'Settings saved', 'set.about': 'About',
+        'set.aboutLine1': '<strong>Dockge</strong> — Container Management',
+        'set.aboutLine2': 'Go backend · Vanilla JS SPA · Apple design system',
+        'set.aboutLine3': 'Inspired by Podman Desktop & Dockge',
+        'sheet.detail': 'Detail', 'sheet.logsTitle': '{name} — Logs', 'sheet.terminalTitle': '{name} — Terminal',
+        'sheet.historyTitle': '{name} — History', 'sheet.newContainer': 'New Container',
+        'sheet.pullImage': 'Pull Image', 'sheet.newVolume': 'New Volume', 'sheet.newNetwork': 'New Network',
+        'sheet.copyToHost': 'Copy to Host', 'sheet.tagImage': 'Tag Image',
+        'th.layer': 'Layer', 'th.command': 'Command',
+        'form.containerName': 'Container Name', 'form.imageLabel': 'Image', 'form.hostPort': 'Host Port',
+        'form.containerPort': 'Container Port', 'form.commandLabel': 'Command (optional)',
+        'form.commandHelp': 'Leave empty to use image default.',
+        'form.imageRef': 'Image Reference', 'form.imageRefHelp': 'e.g. nginx:latest, ubuntu:22.04',
+        'form.volumeName': 'Volume Name', 'form.networkName': 'Network Name', 'form.driver': 'Driver',
+        'form.sourcePath': 'Source Path (in container)', 'form.targetPath': 'Target Path (on host)',
+        'form.currentTag': 'Current tag', 'form.newTag': 'New tag',
+        'btn.createStart': 'Create & Start', 'btn.pull': 'Pull', 'btn.create': 'Create',
+        'btn.copy': 'Copy', 'btn.tag': 'Tag',
+        'toast.createdContainer': 'Container created (mock)', 'toast.createdStack': 'Stack created (mock)',
+        'toast.pullStarted': 'Pull started (mock)', 'toast.createdVolume': 'Volume created (mock)',
+        'toast.createdNetwork': 'Network created (mock)', 'toast.copying': 'Copying files to host (mock)',
+        'toast.exporting': 'Exporting container filesystem...', 'toast.exported': 'Container exported successfully',
+        'prompt.termSize': 'Terminal size (WxH):', 'toast.invalidSize': 'Invalid format. Use WxH (e.g. 80x24)',
+        'toast.refreshed': 'Data refreshed',
+        'toast.termResized': 'Terminal resized to {cols}x{rows}', 'toast.sessionRemoved': 'Exec session removed',
+        'prompt.imageTag': 'Image tag (e.g. myapp:v1.2):', 'toast.committed': 'Committed as {name}',
+        'prompt.renameCtn': 'New container name:', 'toast.renamed': 'Renamed to {name}',
+        'toast.enterTag': 'Enter a tag', 'toast.tagged': 'Tagged as {name}',
+        'toast.noLogs': 'No logs available for {name}'
+      }
+    };
+    var LANG_KEY = 'dockge.lang';
+    var current = 'zh';
+    try { var stored = localStorage.getItem(LANG_KEY); if (stored === 'en' || stored === 'zh') current = stored; } catch (e) {}
+
+    function t(key, vars) {
+      var dict = I18N[current] || I18N.zh;
+      var val = dict[key];
+      if (val === undefined) val = I18N.zh[key];
+      if (val === undefined) return key;
+      if (vars) for (var k in vars) val = val.split('{' + k + '}').join(String(vars[k]));
+      return val;
+    }
+    function applyStaticI18n() {
+      document.documentElement.lang = current === 'en' ? 'en-US' : 'zh-CN';
+      document.title = t('app.title');
+      document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
+      document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph'))); });
+      document.querySelectorAll('[data-i18n-aria]').forEach(function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria'))); });
+      document.querySelectorAll('[data-i18n-title]').forEach(function (el) { el.setAttribute('title', t(el.getAttribute('data-i18n-title'))); });
+    }
+    function updateLangSwitchUI() {
+      var zh = document.getElementById('lang-zh'), en = document.getElementById('lang-en');
+      if (zh) zh.classList.toggle('active', current === 'zh');
+      if (en) en.classList.toggle('active', current === 'en');
+    }
+    function setUiLang(lang) {
+      if (lang !== 'zh' && lang !== 'en') return;
+      current = lang;
+      try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
+      applyStaticI18n();
+      updateLangSwitchUI();
+      if (window.renderCurrentView) window.renderCurrentView();
+      if (window.refreshTopbarTitle) window.refreshTopbarTitle();
+    }
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      var sun = document.getElementById('icon-sun'), moon = document.getElementById('icon-moon');
+      if (sun) sun.style.display = theme === 'dark' ? '' : 'none';
+      if (moon) moon.style.display = theme === 'dark' ? 'none' : '';
+    }
+    function toggleTheme() {
+      var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('dockge.theme', next); } catch (e) {}
+      applyTheme(next);
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+      applyStaticI18n();
+      updateLangSwitchUI();
+      var btn = document.getElementById('btn-theme');
+      if (btn) btn.addEventListener('click', toggleTheme);
+      if (window.matchMedia) {
+        var media = window.matchMedia('(prefers-color-scheme: dark)');
+        var follow = function () {
+          var manual = null;
+          try { manual = localStorage.getItem('dockge.theme'); } catch (e) {}
+          if (manual !== 'dark' && manual !== 'light') applyTheme(media.matches ? 'dark' : 'light');
+        };
+        if (media.addEventListener) media.addEventListener('change', follow);
+      }
+      applyTheme(document.documentElement.dataset.theme || 'light');
+    });
+    window.__t = t;
+    window.setUiLang = setUiLang;
+    window.toggleTheme = toggleTheme;
+  })();
+  </script>
+  <style>
+/* ─────────────────────────────────────────────────────────────────────────
+ * Dockge · Apple-inspired design system
+ * ─────────────────────────────────────────────────────────────────── */
+:root {
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --surface-warm: #fbfbfd;
+  --surface-dark: #1d1d1f;
+  --fg: #1d1d1f;
+  --fg-2: #424245;
+  --muted: #6e6e73;
+  --meta: #86868b;
+  --border: #d2d2d7;
+  --border-soft: #e8e8ed;
+  --accent: #0071e3;
+  --accent-on: #ffffff;
+  --accent-hover: #0077ed;
+  --accent-active: #0066cc;
+  --success: #16a34a;
+  --warn: #eab308;
+  --danger: #dc2626;
+  --info: #0071e3;
+  --font-display: "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-body: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --text-xs: 12px; --text-sm: 14px; --text-base: 17px;
+  --text-lg: 21px; --text-xl: 28px; --text-2xl: 40px;
+  --text-3xl: 56px;
+  --leading-body: 1.47; --leading-tight: 1.05;
+  --tracking-display: -0.015em;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px;
+  --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px; --space-12: 48px; --space-16: 64px;
+  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 18px; --radius-pill: 980px;
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 12px 32px rgba(0, 0, 0, 0.08);
+  --focus-ring: 0 0 0 4px color-mix(in oklab, var(--accent), transparent 65%);
+  --motion-fast: 150ms; --motion-base: 220ms;
+  --ease-standard: cubic-bezier(0.28, 0, 0.22, 1);
+  --sidebar-width: 240px; --topbar-height: 48px;
+}
+/* 暗色主题：仅覆盖配色变量，布局与字体不变；终端/编辑器/日志等控制台区域保持深色 */
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-warm: #1c1c1e;
+  --surface-dark: #2c2c2e;
+  --fg: #f5f5f7;
+  --fg-2: #d1d1d6;
+  --muted: #98989d;
+  --meta: #7c7c80;
+  --border: #38383a;
+  --border-soft: #2a2a2c;
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --accent-active: #0060df;
+  --success: #30d158;
+  --warn: #ffd60a;
+  --danger: #ff453a;
+  --info: #0a84ff;
+  --elev-raised: 0 12px 32px rgba(0, 0, 0, 0.65);
+}
+:root[data-theme="dark"] .warning-banner {
+  background: color-mix(in oklab, var(--warn), transparent 92%);
+  border-color: color-mix(in oklab, var(--warn), transparent 65%);
+  color: #ffe08a;
+}
+:root[data-theme="dark"] .toast { color: #f5f5f7; }
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  letter-spacing: -0.022em;
+  -webkit-font-smoothing: antialiased;
+}
+.app-shell { display: flex; flex-direction: row; height: 100dvh; overflow: hidden; }
+
+/* Sidebar */
+.sidebar {
+  width: var(--sidebar-width); flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.sidebar-brand {
+  height: var(--topbar-height);
+  display: flex; align-items: center; padding: 0 var(--space-5); gap: var(--space-3);
+  border-bottom: 1px solid var(--border-soft); flex-shrink: 0;
+}
+.sidebar-brand-name {
+  font-family: var(--font-display); font-size: var(--text-base);
+  font-weight: 600; letter-spacing: var(--tracking-display); color: var(--fg);
+}
+.sidebar-nav { flex: 1; overflow-y: auto; padding: var(--space-3) 0; }
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.nav-group { margin-bottom: var(--space-3); }
+.nav-group-label {
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em; padding: var(--space-2) var(--space-5);
+}
+.nav-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-5); margin: 0 var(--space-2);
+  border-radius: var(--radius-sm); color: var(--fg-2);
+  font-size: var(--text-sm); font-weight: 500; cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+  border: none; background: none; width: 100%; text-align: left;
+}
+.nav-item:hover { background: var(--border-soft); color: var(--fg); }
+.nav-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.nav-item.active { background: var(--accent); color: var(--accent-on); }
+.nav-item.active:hover { background: var(--accent-hover); }
+.nav-item-icon { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.85; }
+.nav-item-badge {
+  margin-inline-start: auto; background: var(--border); color: var(--muted);
+  font-size: var(--text-xs); font-weight: 600; padding: 1px 6px;
+  border-radius: var(--radius-pill); min-width: 20px; text-align: center;
+}
+.nav-item.active .nav-item-badge {
+  background: color-mix(in oklab, var(--accent-on), transparent 20%); color: var(--accent-on);
+}
+.sidebar-footer {
+  padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border-soft); flex-shrink: 0;
+}
+.engine-badge { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--muted); }
+.engine-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+
+/* Main */
+.main-content { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.topbar {
+  height: var(--topbar-height); display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-4);
+  border-bottom: 1px solid var(--border-soft); background: var(--bg); flex-shrink: 0;
+}
+.topbar-title {
+  font-family: var(--font-display); font-size: var(--text-lg);
+  font-weight: 600; letter-spacing: -0.011em; color: var(--fg);
+}
+.topbar-spacer { flex: 1; }
+.topbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+.lang-switch {
+  display: flex; align-items: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
+}
+.lang-btn {
+  padding: 6px 10px; font-size: var(--text-xs); font-weight: 600; line-height: 1.2;
+  background: transparent; border: none; color: var(--muted); cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.lang-btn + .lang-btn { border-inline-start: 1px solid var(--border); }
+.lang-btn:hover { background: var(--surface); color: var(--fg); }
+.lang-btn:active { transform: scale(0.94); }
+.lang-btn.active { background: var(--accent); color: var(--accent-on); }
+.lang-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.content-area { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.content-area::-webkit-scrollbar { width: 6px; }
+.content-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* View */
+.view-section { padding: var(--space-6); max-width: 1200px; margin: 0 auto; width: 100%; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-5); }
+.section-title { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.007em; margin: 0; }
+.section-subtitle { font-size: var(--text-sm); color: var(--muted); margin-top: var(--space-1); }
+
+/* Stats */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-8); }
+.stat-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-5);
+  transition: box-shadow var(--motion-base) var(--ease-standard);
+}
+.stat-card:hover { box-shadow: var(--elev-raised); }
+.stat-card-label { font-size: var(--text-xs); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--space-2); }
+.stat-card-value { font-family: var(--font-display); font-size: var(--text-3xl); font-weight: 600; letter-spacing: var(--tracking-display); line-height: 1.05; }
+.stat-card-value.running { color: var(--success); }
+.stat-card-value.stopped { color: var(--meta); }
+.stat-card-value.warning { color: var(--warn); }
+
+/* Table */
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.data-table thead th {
+  text-align: left; font-size: var(--text-xs); font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em; padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.data-table tbody tr { border-bottom: 1px solid var(--border-soft); transition: background-color var(--motion-fast) var(--ease-standard); cursor: pointer; }
+.data-table tbody tr:last-child { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--surface); }
+.data-table tbody tr:active { background: color-mix(in oklab, var(--fg), transparent 93%); }
+.data-table tbody tr:focus-visible { outline: none; box-shadow: inset var(--focus-ring); border-radius: var(--radius-sm); }
+.data-table td { padding: var(--space-3) var(--space-4); vertical-align: middle; }
+
+/* Status badge */
+.status-badge {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 2px var(--space-3); border-radius: var(--radius-pill);
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: -0.01em;
+}
+.status-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-running { background: color-mix(in oklab, var(--success), transparent 90%); color: var(--success); }
+.status-running::before { background: var(--success); }
+.status-exited { background: color-mix(in oklab, var(--meta), transparent 85%); color: var(--meta); }
+.status-exited::before { background: var(--meta); }
+.status-paused { background: color-mix(in oklab, var(--warn), transparent 85%); color: var(--warn); }
+.status-paused::before { background: var(--warn); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 7px 14px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  font-family: var(--font-body); font-size: var(--text-sm); font-weight: 500;
+  line-height: 1.2; cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn:active { transform: scale(0.98); }
+.btn-primary { background: var(--accent); color: var(--accent-on); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+.btn-secondary:hover { background: var(--surface); border-color: var(--meta); }
+.btn-ghost { background: transparent; color: var(--muted); border-color: transparent; padding: var(--space-2) var(--space-3); }
+.btn-ghost:hover { background: var(--surface); color: var(--fg); }
+.btn-danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: color-mix(in oklab, var(--danger), transparent 92%); }
+.btn-icon {
+  padding: var(--space-2); border-radius: var(--radius-sm); background: transparent;
+  border: none; color: var(--muted); cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.btn-icon:hover { background: var(--surface); color: var(--fg); }
+.btn-icon:active { transform: scale(0.92); }
+.btn-icon:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn-pill {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 8px 18px; border: none; border-radius: var(--radius-pill);
+  font-family: var(--font-body); font-size: var(--text-sm); font-weight: 500;
+  line-height: 1.2; cursor: pointer; text-decoration: none;
+  transition: background-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.btn-pill:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn-pill:active { transform: scale(0.98); }
+.btn-pill-primary { background: var(--accent); color: var(--accent-on); }
+.btn-pill-primary:hover { background: var(--accent-hover); }
+.btn-pill-secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-pill-secondary:hover { background: color-mix(in oklab, var(--accent), transparent 94%); }
+
+/* Sheet */
+.sheet-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  z-index: 100; display: flex; align-items: center; justify-content: flex-end;
+  opacity: 0; pointer-events: none; transition: opacity var(--motion-base) var(--ease-standard);
+}
+.sheet-overlay.open { opacity: 1; pointer-events: auto; }
+.sheet {
+  width: 560px; max-width: 100vw; background: var(--bg);
+  border-start-end-radius: var(--radius-lg); border-end-end-radius: var(--radius-lg);
+  box-shadow: var(--elev-raised); display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform var(--motion-base) var(--ease-standard); overflow: hidden;
+}
+.sheet-overlay.open .sheet { transform: translateX(0); }
+.sheet-header {
+  padding: var(--space-5) var(--space-6); border-bottom: 1px solid var(--border-soft);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-shrink: 0;
+}
+.sheet-title { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.007em; margin: 0; }
+.sheet-body { flex: 1; overflow-y: auto; padding: var(--space-6); }
+.sheet-footer {
+  padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border-soft);
+  display: flex; justify-content: flex-end; gap: var(--space-3); flex-shrink: 0;
+}
+
+/* Form */
+.form-group { margin-bottom: var(--space-5); }
+.form-label { display: block; font-size: var(--text-sm); font-weight: 500; color: var(--fg); margin-bottom: var(--space-2); letter-spacing: -0.016em; }
+.form-input, .form-textarea, .form-select {
+  width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: var(--text-base); line-height: 1.4;
+  outline: none; transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+}
+.form-input:hover, .form-textarea:hover, .form-select:hover { border-color: var(--meta); }
+.form-input:focus, .form-textarea:focus, .form-select:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.form-input::placeholder, .form-textarea::placeholder { color: var(--muted); }
+.form-textarea { resize: vertical; min-height: 120px; font-family: var(--font-mono); font-size: var(--text-sm); }
+.form-help { font-size: var(--text-xs); color: var(--muted); margin-top: var(--space-2); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+
+/* Empty state */
+.empty-state { text-align: center; padding: var(--space-16) var(--space-6); color: var(--muted); }
+.empty-state-icon { width: 48px; height: 48px; margin: 0 auto var(--space-4); opacity: 0.4; }
+.empty-state-title { font-family: var(--font-display); font-size: var(--text-lg); font-weight: 600; color: var(--fg-2); margin-bottom: var(--space-2); }
+.empty-state-desc { font-size: var(--text-sm); max-width: 320px; margin: 0 auto var(--space-6); line-height: 1.5; }
+
+/* Toast */
+.toast-container { position: fixed; bottom: var(--space-6); right: var(--space-6); z-index: 200; display: flex; flex-direction: column; gap: var(--space-2); }
+.toast {
+  background: var(--surface-dark); color: #fff; padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md); font-size: var(--text-sm); font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: toast-in var(--motion-base) var(--ease-standard) forwards;
+  max-width: 320px;
+}
+.toast.success { border-left: 3px solid var(--success); }
+.toast.error   { border-left: 3px solid var(--danger); }
+.toast.info    { border-left: 3px solid var(--info); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* iOS-style alert dialog */
+.dialog-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  z-index: 150; display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity var(--motion-base) var(--ease-standard);
+}
+.dialog-overlay.open { opacity: 1; pointer-events: auto; }
+.dialog-alert {
+  width: 300px; max-width: calc(100vw - 48px); background: color-mix(in oklab, var(--bg), transparent 8%);
+  border-radius: var(--radius-lg); box-shadow: var(--elev-raised); overflow: hidden;
+  transform: scale(0.94); transition: transform var(--motion-base) var(--ease-standard);
+}
+.dialog-overlay.open .dialog-alert { transform: scale(1); }
+.dialog-message {
+  padding: var(--space-5) var(--space-4) var(--space-4); text-align: center;
+  font-size: var(--text-sm); line-height: 1.5; color: var(--fg);
+}
+.dialog-actions { border-top: 1px solid var(--border-soft); }
+.dialog-btn {
+  display: block; width: 100%; padding: var(--space-3); border: none; background: none;
+  font-family: var(--font-body); font-size: var(--text-base); font-weight: 600;
+  color: var(--accent); cursor: pointer; text-align: center;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.dialog-btn + .dialog-btn { border-top: 1px solid var(--border-soft); }
+.dialog-btn:hover { background: var(--surface); }
+.dialog-btn:active { background: var(--border-soft); }
+.dialog-btn.destructive { color: var(--danger); }
+.dialog-btn:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
+
+/* iOS-style switch */
+.switch { position: relative; display: inline-block; width: 40px; height: 24px; flex-shrink: 0; }
+.switch input {
+  position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer;
+}
+.switch::before {
+  content: ""; position: absolute; inset: 0; border-radius: var(--radius-pill);
+  background: var(--border); transition: background-color var(--motion-base) var(--ease-standard);
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+  border-radius: 50%; background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+.switch:has(input:checked)::before { background: var(--success); }
+.switch:has(input:checked)::after { transform: translateX(16px); }
+.switch input:focus-visible::before { box-shadow: var(--focus-ring); }
+.switch-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-sm); cursor: pointer;
+}
+
+/* View navigation transition */
+.content-area.nav-anim .view-section { animation: view-in var(--motion-base) var(--ease-standard); }
+@keyframes view-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Pagination */
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: var(--space-4);
+  padding: var(--space-4) 0 var(--space-2); font-size: var(--text-sm); color: var(--muted);
+}
+.pagination .pg-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 30px; height: 30px; padding: 0 var(--space-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg);
+  color: var(--fg-2); font-size: var(--text-sm); cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
+}
+.pagination .pg-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--meta); }
+.pagination .pg-btn:active:not(:disabled) { transform: scale(0.96); }
+.pagination .pg-btn:disabled { opacity: 0.35; cursor: default; }
+.pagination .pg-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Stacks workbench (split layout) */
+.stacks-split {
+  display: grid; grid-template-columns: 240px 1fr; gap: var(--space-4);
+  height: calc(100dvh - var(--topbar-height) - var(--space-12)); min-height: 420px;
+}
+.stack-list {
+  display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.stack-list-head { padding: var(--space-3); border-bottom: 1px solid var(--border-soft); }
+.stack-list-head .btn { width: 100%; justify-content: center; }
+.stack-list-body { flex: 1; overflow-y: auto; padding: var(--space-2); }
+.stack-list-body::-webkit-scrollbar { width: 4px; }
+.stack-list-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.stack-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: 100%; padding: var(--space-2) var(--space-3); margin-bottom: 2px;
+  border: none; border-radius: var(--radius-sm); background: none; text-align: left;
+  font-family: var(--font-body); font-size: var(--text-sm); font-weight: 500; color: var(--fg-2); cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.stack-item:hover { background: var(--surface); color: var(--fg); }
+.stack-item:active { transform: scale(0.98); }
+.stack-item.active { background: var(--accent); color: var(--accent-on); }
+.stack-item-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--meta); flex-shrink: 0; }
+.stack-item-dot.up { background: var(--success); }
+.stack-list .pagination { padding: var(--space-2); border-top: 1px solid var(--border-soft); font-size: var(--text-xs); }
+.workbench {
+  display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden; min-width: 0;
+}
+.wb-head {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-soft);
+}
+.wb-title { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.007em; }
+.wb-actions { margin-inline-start: auto; display: flex; gap: var(--space-2); align-items: center; }
+.wb-services {
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border-soft);
+}
+.service-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: var(--radius-pill);
+  background: var(--surface); border: 1px solid var(--border-soft);
+  font-size: var(--text-xs); font-weight: 600; font-family: var(--font-mono); color: var(--fg-2);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.service-pill:hover { border-color: var(--accent); color: var(--fg); }
+.service-pill:active { transform: scale(0.96); }
+.service-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.service-pill .dot.down { background: var(--meta); }
+.wb-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--space-3) var(--space-5); }
+.wb-editor .editor-wrap { flex: 1; min-height: 120px; }
+.wb-terminal {
+  height: 200px; flex-shrink: 0; margin: 0 var(--space-5) var(--space-4);
+  background: #0d0d0d; color: #e8e8ed; border-radius: var(--radius-md);
+  font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.7;
+  padding: var(--space-3); overflow-y: auto;
+}
+.wb-terminal::-webkit-scrollbar { width: 4px; }
+.wb-terminal::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+.wb-terminal .t-dim { color: #6e6e73; }
+.wb-terminal .t-ok { color: #30d158; }
+.wb-empty {
+  display: flex; align-items: center; justify-content: center; flex: 1;
+  color: var(--muted); font-size: var(--text-sm);
+}
+
+/* Container detail page */
+.crumb {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: none; padding: 4px 8px; margin-inline-start: -8px;
+  border-radius: var(--radius-sm); font-family: var(--font-body); font-size: var(--text-sm);
+  font-weight: 500; color: var(--accent); cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.crumb:hover { background: var(--surface); }
+.crumb:active { transform: scale(0.98); }
+.summary-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+.summary-cell {
+  background: var(--surface); border-radius: var(--radius-md); padding: var(--space-4);
+}
+.summary-cell-label {
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--space-1);
+}
+.summary-cell-value { font-size: var(--text-sm); font-weight: 500; word-break: break-all; }
+
+@media (max-width: 900px) {
+  .stacks-split { grid-template-columns: 1fr; height: auto; }
+  .stack-list { max-height: 200px; }
+  .stack-list-body { display: flex; gap: var(--space-2); overflow-x: auto; }
+  .stack-item { width: auto; margin-bottom: 0; white-space: nowrap; }
+}
+
+/* Log viewer */
+.log-viewer {
+  background: #0d0d0d; color: #e8e8e8; font-family: var(--font-mono);
+  font-size: var(--text-xs); line-height: 1.6; padding: var(--space-4);
+  border-radius: var(--radius-md); overflow-y: auto; max-height: 300px;
+  white-space: pre-wrap; word-break: break-all;
+}
+.log-viewer::-webkit-scrollbar { width: 6px; }
+.log-viewer::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: var(--space-5); }
+.tab {
+  padding: var(--space-3) var(--space-5); font-size: var(--text-sm); font-weight: 500;
+  color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent;
+  margin-bottom: -1px; transition: color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
+  background: none; border-top: none; border-left: none; border-right: none;
+}
+.tab:hover { color: var(--fg); }
+.tab:focus-visible { outline: none; box-shadow: inset var(--focus-ring); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Search */
+.search-box { position: relative; max-width: 280px; }
+.search-box input {
+  width: 100%; padding: 7px 12px 7px 34px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); font-family: var(--font-body);
+  font-size: var(--text-sm); color: var(--fg); outline: none;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.search-box input:hover { border-color: var(--meta); background: var(--bg); }
+.search-box input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); background: var(--bg); }
+.search-box input::placeholder { color: var(--muted); }
+.search-box-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+
+/* Spinner */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+/* Hamburger */
+.hamburger {
+  display: none; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0; border: none; background: none;
+  color: var(--fg); cursor: pointer; border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.hamburger:hover { background: var(--surface); }
+.hamburger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Sidebar backdrop (mobile) */
+.sidebar-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  z-index: 49; opacity: 0; pointer-events: none;
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+.sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+
+/* Dashboard charts */
+.chart-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-5);
+}
+.chart-card-title {
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--space-3);
+}
+.bar-stacked {
+  display: flex; height: 24px; border-radius: var(--radius-pill);
+  overflow: hidden; background: var(--surface);
+}
+.bar-stacked .bar-seg {
+  height: 100%; transition: width var(--motion-base) var(--ease-standard);
+}
+.bar-stacked .bar-seg.running { background: var(--success); }
+.bar-stacked .bar-seg.paused { background: var(--warn); }
+.bar-stacked .bar-seg.exited { background: var(--meta); opacity: 0.5; }
+.chart-legend {
+  display: flex; gap: var(--space-4); margin-top: var(--space-3);
+  font-size: var(--text-xs); color: var(--muted);
+}
+.chart-legend-item { display: flex; align-items: center; gap: var(--space-1); }
+.chart-legend-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.resource-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.resource-row:last-child { margin-bottom: 0; }
+.resource-label {
+  font-size: var(--text-sm); font-weight: 500; width: 70px; flex-shrink: 0;
+}
+.resource-track {
+  flex: 1; height: 8px; background: var(--surface); border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.resource-fill {
+  height: 100%; border-radius: var(--radius-pill);
+  transition: width var(--motion-base) var(--ease-standard);
+}
+.resource-fill.cpu { background: var(--accent); }
+.resource-fill.mem { background: var(--success); }
+.resource-fill.disk { background: var(--fg-2); }
+.resource-val {
+  font-size: var(--text-xs); font-weight: 600; color: var(--fg-2);
+  width: 48px; text-align: right; flex-shrink: 0;
+}
+
+/* Stats tab */
+.stat-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4);
+}
+.stat-cell {
+  background: var(--surface); border-radius: var(--radius-md); padding: var(--space-4);
+}
+.stat-cell-label {
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--space-2);
+}
+.stat-cell-value {
+  font-family: var(--font-display); font-size: var(--text-xl);
+  font-weight: 600; letter-spacing: -0.01em; margin-bottom: var(--space-2);
+}
+.stat-bar-track {
+  height: 6px; background: var(--border-soft); border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.stat-bar-fill {
+  height: 100%; border-radius: var(--radius-pill);
+  transition: width var(--motion-base) var(--ease-standard);
+}
+.stat-bar-fill.cpu { background: var(--accent); }
+.stat-bar-fill.mem { background: var(--success); }
+.stat-detail {
+  font-size: var(--text-xs); color: var(--muted); margin-top: var(--space-1);
+}
+.stat-io-row {
+  display: flex; justify-content: space-between; padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-soft); font-size: var(--text-sm);
+}
+.stat-io-row:last-child { border-bottom: none; }
+
+/* Search dropdown */
+.search-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--elev-raised);
+  max-height: 380px; overflow-y: auto; z-index: 60;
+  display: none; margin-top: var(--space-1);
+}
+.search-dropdown.open { display: block; }
+.search-group { padding: var(--space-2) 0; }
+.search-group + .search-group { border-top: 1px solid var(--border-soft); }
+.search-group-label {
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted);
+  padding: var(--space-1) var(--space-3); text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.search-result-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); cursor: pointer;
+  font-size: var(--text-sm); color: var(--fg);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.search-result-item:hover, .search-result-item.active {
+  background: var(--surface);
+}
+.search-result-item .sr-name { font-weight: 500; }
+.search-result-item .sr-meta {
+  font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono);
+}
+
+/* Stack editor */
+.editor-toolbar {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-soft);
+  background: var(--surface); border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.editor-toolbar .btn-ghost { font-size: var(--text-xs); padding: var(--space-1) var(--space-3); }
+.editor-wrap {
+  display: flex; border: 1px solid var(--border); border-radius: 0 0 var(--radius-md) var(--radius-md);
+  overflow: hidden; background: #0d0d0d;
+}
+.editor-lines {
+  padding: var(--space-3) var(--space-2); background: #161616;
+  color: var(--meta); font-family: var(--font-mono); font-size: var(--text-sm);
+  line-height: 1.6; text-align: right; user-select: none; min-width: 40px;
+  border-right: 1px solid #222;
+}
+.editor-textarea {
+  flex: 1; background: #0d0d0d; color: #e8e8e8;
+  font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6;
+  padding: var(--space-3); border: none; outline: none; resize: none;
+  tab-size: 2; white-space: pre; overflow-x: auto;
+}
+.editor-preview {
+  display: none; flex: 1; background: #0d0d0d; color: #e8e8e8;
+  font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6;
+  padding: var(--space-3); overflow: auto; white-space: pre; word-break: break-all;
+}
+.editor-fullscreen {
+  position: fixed !important; inset: 0 !important; z-index: 150;
+  border-radius: 0 !important; margin: 0 !important;
+  display: flex; flex-direction: column;
+}
+.editor-fullscreen .editor-toolbar { border-radius: 0; }
+.editor-fullscreen .editor-wrap { border-radius: 0; flex: 1; }
+.editor-fullscreen .editor-textarea,
+.editor-fullscreen .editor-preview { flex: 1; }
+/* Syntax colors */
+.syn-key { color: #78c8ff; }
+.syn-str { color: #a5d6a7; }
+.syn-num { color: #ffcc66; }
+.syn-comment { color: #666; }
+.syn-punct { color: #888; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .hamburger { display: flex; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
+    transform: translateX(-100%);
+    transition: transform var(--motion-base) var(--ease-standard);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .view-section { padding: var(--space-4); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .form-row { grid-template-columns: 1fr; }
+  .sheet { width: 100vw; }
+  .stat-grid { grid-template-columns: 1fr; }
+  .search-box { max-width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ── System App Styles ─────────────────────────────────────────────────── */
+.row-system { opacity: 0.55; pointer-events: none; }
+.row-system:hover { background: transparent !important; }
+.badge-system {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--border-soft); color: var(--muted);
+  font-size: var(--text-xs); font-weight: 500;
+}
+.badge-system svg { width: 10px; height: 10px; }
+.live-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--success); margin-inline-start: 6px;
+  animation: livePulse 2s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+.btn-clear {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: var(--radius-pill);
+  background: var(--surface); border: 1px solid var(--border-soft);
+  color: var(--danger); font-size: var(--text-sm); font-weight: 500;
+  cursor: pointer; transition: background var(--motion-fast) var(--ease-standard),
+  border-color var(--motion-fast) var(--ease-standard);
+}
+.btn-clear:hover { background: color-mix(in oklab, var(--danger), transparent 93%); border-color: var(--danger); }
+.btn-clear svg { width: 14px; height: 14px; }
+.warning-banner {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4);
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md);
+  font-size: var(--text-sm); color: #92400e;
+  }
+
+/* Terminal */
+.terminal {
+  background: #1d1d1f; color: #e8e8ed; border-radius: var(--radius-md);
+  padding: var(--space-4); font-family: var(--font-mono); font-size: var(--text-xs);
+  max-height: 360px; overflow-y: auto; line-height: 1.6;
+}
+.terminal-line { white-space: pre-wrap; word-break: break-all; }
+.terminal-line .prompt { color: var(--success); }
+.terminal-input-row { display: flex; align-items: center; gap: var(--space-2); }
+.terminal-input {
+  background: transparent; border: none; color: #e8e8ed;
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  outline: none; flex: 1;
+}
+.terminal-cursor {
+  display: inline-block; width: 8px; height: 14px;
+  background: var(--success); animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Log viewer enhanced */
+.log-viewer {
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md); padding: var(--space-3);
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  max-height: 320px; overflow-y: auto; line-height: 1.6;
+  white-space: pre-wrap; color: var(--fg-2);
+}
+.log-toolbar { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
+.log-toolbar .log-count { font-size: var(--text-xs); color: var(--muted); margin-inline-start: auto; }
+/* Log-only sheet */
+.log-only-viewer {
+  background: #0d0d0d; color: #e8e8ed; font-family: var(--font-mono);
+  font-size: var(--text-xs); line-height: 1.6; padding: var(--space-4);
+  border-radius: var(--radius-md); max-height: 400px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+}
+.log-only-viewer::-webkit-scrollbar { width: 4px; }
+.log-only-viewer::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation" data-i18n-aria="aria.mainNav">
+      <div class="sidebar-brand">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <path d="M8 21h8M12 17v4"/>
+          <path d="M7 8h2m2 0h2m2 0h2M7 11h10"/>
+        </svg>
+        <span class="sidebar-brand-name">Dockge</span>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-group">
+          <div class="nav-group-label" data-i18n="nav.group.overview">概览</div>
+          <button class="nav-item active" data-route="dashboard" aria-current="page">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <span data-i18n="nav.dashboard">Dashboard</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label" data-i18n="nav.group.resources">资源</div>
+          <button class="nav-item" data-route="containers">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <span data-i18n="nav.containers">Containers</span>
+            <span class="nav-item-badge" id="nav-containers-count">3/7</span>
+          </button>
+          <button class="nav-item" data-route="stacks">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            <span data-i18n="nav.stacks">Stacks</span>
+            <span class="nav-item-badge" id="nav-stacks-count">2</span>
+          </button>
+          <button class="nav-item" data-route="images">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            <span data-i18n="nav.images">Images</span>
+            <span class="nav-item-badge" id="nav-images-count">8</span>
+          </button>
+          <button class="nav-item" data-route="volumes">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            <span data-i18n="nav.volumes">Volumes</span>
+          </button>
+          <button class="nav-item" data-route="networks">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            <span data-i18n="nav.networks">Networks</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label" data-i18n="nav.group.system">系统</div>
+          <button class="nav-item" data-route="sysinfo">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span data-i18n="nav.sysinfo">System Info</span>
+          </button>
+          <button class="nav-item" data-route="sysdf">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+            <span data-i18n="nav.sysdf">Disk Usage</span>
+          </button>
+          <button class="nav-item" data-route="settings">
+            <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span data-i18n="nav.settings">Settings</span>
+          </button>
+        </div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="engine-badge">
+          <span class="engine-dot"></span>
+          <span id="engine-label">Podman 5.2.2</span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="topbar">
+        <button class="hamburger" id="hamburger-btn" aria-label="Toggle navigation" data-i18n-aria="aria.toggleNav" aria-expanded="false">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <h1 class="topbar-title" id="page-title">Dashboard</h1>
+        <div class="topbar-spacer"></div>
+        <div class="topbar-actions">
+          <div class="search-box">
+            <svg class="search-box-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="search" placeholder="搜索…" id="global-search" aria-label="Search" data-i18n-ph="common.search" data-i18n-aria="aria.search" autocomplete="off" />
+            <div class="search-dropdown" id="search-dropdown"></div>
+          </div>
+          <div class="lang-switch" role="group" aria-label="Language" data-i18n-aria="aria.lang">
+            <button type="button" class="lang-btn" id="lang-zh" onclick="setUiLang('zh')">中</button>
+            <button type="button" class="lang-btn" id="lang-en" onclick="setUiLang('en')">EN</button>
+          </div>
+          <button class="btn-icon" id="btn-theme" aria-label="Toggle theme" data-i18n-aria="aria.theme">
+            <svg id="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg id="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button class="btn-icon" id="btn-refresh" aria-label="刷新" title="Refresh" data-i18n-aria="common.refresh" data-i18n-title="common.refresh">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="content-area" id="content-area"></div>
+    </div>
+  </div>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <!-- Sheet -->
+  <div class="sheet-overlay" id="sheet-overlay">
+    <div class="sheet">
+      <div class="sheet-header">
+        <h2 class="sheet-title" id="sheet-title" data-i18n="sheet.detail">Detail</h2>
+        <button class="btn-icon" id="sheet-close" aria-label="Close" data-i18n-aria="common.close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="sheet-body" id="sheet-body"></div>
+      <div class="sheet-footer" id="sheet-footer"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- iOS-style confirm / input dialog -->
+  <div class="dialog-overlay" id="dialog-overlay" role="alertdialog" aria-modal="true">
+    <div class="dialog-alert">
+      <div class="dialog-message" id="dialog-message"></div>
+      <input class="form-input" id="dialog-input" style="display:none; margin: 0 var(--space-4) var(--space-3);" />
+      <div class="dialog-actions">
+        <button type="button" class="dialog-btn" id="dialog-cancel"></button>
+        <button type="button" class="dialog-btn destructive" id="dialog-ok"></button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+(function() {
+  'use strict';
+
+  const t = window.__t;
+  window.t = t; // inline onclick 属性在全局作用域执行，需全局可见
+
+  // ─── Mock Data ──────────────────────────────────────────────────────────
+  // 状态文案在渲染时经 ctrStatusText 动态生成，确保切换语言后立即跟随
+  const MOCK_CONTAINERS = [
+    { Id: 'a1b2c3d4e5f6', Names: ['/nginx-web'], Image: 'nginx:latest', State: 'running', upHours: 3, Created: Date.now() - 3*3600000, Ports: [{PrivatePort: 80, PublicPort: 8080, Type: 'tcp', IP: '0.0.0.0'}], system: false },
+    { Id: 'b2c3d4e5f6a1', Names: ['/postgres-main'], Image: 'postgres:16', State: 'running', upHours: 3, Created: Date.now() - 3*3600000, Ports: [{PrivatePort: 5432, PublicPort: 5432, Type: 'tcp', IP: '0.0.0.0'}], system: false },
+    { Id: 'c3d4e5f6a1b2', Names: ['/redis-cache'], Image: 'redis:7-alpine', State: 'running', upHours: 3, Created: Date.now() - 3*3600000, Ports: [{PrivatePort: 6379, Type: 'tcp'}], system: true },
+    { Id: 'd4e5f6a1b2c3', Names: ['/worker-jobs'], Image: 'crate/worker:latest', State: 'exited', exitCode: 0, exitHoursAgo: 2, Created: Date.now() - 5*3600000, Ports: [], system: false },
+    { Id: 'e5f6a1b2c3d4', Names: ['/monitoring'], Image: 'prom/prometheus:latest', State: 'paused', Created: Date.now() - 86400000, Ports: [{PrivatePort: 9090, PublicPort: 9090, Type: 'tcp'}], system: true },
+    { Id: 'f6a1b2c3d4e5', Names: ['/backup-svc'], Image: 'crate/backup:latest', State: 'exited', exitCode: 1, exitHoursAgo: 24, Created: Date.now() - 172800000, Ports: [], system: false },
+    { Id: 'a7b8c9d0e1f2', Names: ['/api-gateway'], Image: 'crate/api:3.2.1', State: 'running', upHours: 12, Created: Date.now() - 12*3600000, Ports: [{PrivatePort: 3000, PublicPort: 3000, Type: 'tcp'}], system: false },
+  ];
+
+  const MOCK_IMAGES = [
+    { Id: 'sha256:abc123', RepoTags: ['nginx:latest'], Repository: 'nginx', Size: 187000000, Created: Date.now() - 86400000, system: false },
+    { Id: 'sha256:def456', RepoTags: ['postgres:16'], Repository: 'postgres', Size: 412000000, Created: Date.now() - 172800000, system: false },
+    { Id: 'sha256:ghi789', RepoTags: ['redis:7-alpine'], Repository: 'redis', Size: 32000000, Created: Date.now() - 259200000, system: true },
+    { Id: 'sha256:jkl012', RepoTags: ['crate/worker:latest'], Repository: 'crate/worker', Size: 245000000, Created: Date.now() - 345600000, system: false },
+    { Id: 'sha256:mno345', RepoTags: ['prom/prometheus:latest'], Repository: 'prom/prometheus', Size: 256000000, Created: Date.now() - 432000000, system: true },
+    { Id: 'sha256:pqr678', RepoTags: ['crate/api:3.2.1'], Repository: 'crate/api', Size: 198000000, Created: Date.now() - 518400000, system: false },
+    { Id: 'sha256:stu901', RepoTags: ['alpine:3.19'], Repository: 'alpine', Size: 7800000, Created: Date.now() - 604800000, system: false },
+    { Id: 'sha256:vwx234', RepoTags: ['node:20-slim'], Repository: 'node', Size: 267000000, Created: Date.now() - 691200000, system: false },
+  ];
+
+  const MOCK_VOLUMES = [
+    { Name: 'postgres_data', Driver: 'local', Mountpoint: '/var/lib/postgresql/data', Usage: '2.1GB', system: false },
+    { Name: 'redis_data', Driver: 'local', Mountpoint: '/var/lib/redis', Usage: '128MB', system: true },
+    { Name: 'nginx_conf', Driver: 'local', Mountpoint: '/etc/nginx/conf.d', Usage: '4KB', system: false },
+    { Name: 'app_uploads', Driver: 'local', Mountpoint: '/data/uploads', Usage: '890MB', system: false },
+  ];
+
+  const MOCK_NETWORKS = [
+    { ID: 'net001', Name: 'bridge', Driver: 'bridge', Subnet: '172.17.0.0/16', Containers: 3, system: true },
+    { ID: 'net002', Name: 'host', Driver: 'host', Subnet: '—', Containers: 1, system: true },
+    { ID: 'net003', Name: 'app_frontend', Driver: 'bridge', Subnet: '172.18.0.0/16', Containers: 2, system: false },
+    { ID: 'net004', Name: 'app_backend', Driver: 'bridge', Subnet: '172.19.0.0/16', Containers: 2, system: false },
+  ];
+
+  const MOCK_STACKS = [
+    { id: 'stack-1', name: 'web-app', compose_path: '/opt/stacks/web-app/compose.yaml', status: 'up', containers: 4, created: Date.now() - 86400000,
+      compose: 'services:\n  web:\n    image: nginx:latest\n    ports:\n      - "8080:80"\n    volumes:\n      - ./html:/usr/share/nginx/html\n  api:\n    image: crate/api:3.2.1\n    ports:\n      - "3000:3000"\n    environment:\n      - DATABASE_URL=postgres://db\n  db:\n    image: postgres:16\n    volumes:\n      - pg_data:/var/lib/postgresql/data\n\nvolumes:\n  pg_data:' },
+    { id: 'stack-2', name: 'monitoring', compose_path: '/opt/stacks/monitoring/compose.yaml', status: 'down', containers: 2, created: Date.now() - 172800000,
+      compose: 'services:\n  prometheus:\n    image: prom/prometheus:latest\n    ports:\n      - "9090:9090"\n  grafana:\n    image: grafana/grafana:latest\n    ports:\n      - "3001:3000"' },
+  ];
+
+  // 数据契约：资源清单通过 REST 获取；容器状态、主机状态与日志分别使用专用长连接。
+  const state = {
+    route: 'dashboard',
+    containers: MOCK_CONTAINERS,
+    images: MOCK_IMAGES,
+    volumes: MOCK_VOLUMES,
+    networks: MOCK_NETWORKS,
+    stacks: MOCK_STACKS,
+    filters: { containers: { all: false } },
+    pagination: { containers: 1, images: 1, volumes: 1, networks: 1, stacks: 1 },
+    selectedStack: null,
+    detailContainerId: null,
+  };
+
+  // ─── Helpers ────────────────────────────────────────────────────────────
+  function formatBytes(b) {
+    if (!b) return '0 B';
+    const k = 1024, s = ['B','KB','MB','GB','TB'];
+    const i = Math.floor(Math.log(b)/Math.log(k));
+    return parseFloat((b/Math.pow(k,i)).toFixed(1)) + ' ' + s[i];
+  }
+  function timeAgo(ms) {
+    if (!ms) return '—';
+    const s = Math.floor((Date.now()-ms)/1000);
+    if (s < 60) return t('common.secAgo', {n: s});
+    if (s < 3600) return t('common.minAgo', {n: Math.floor(s/60)});
+    if (s < 86400) return t('common.hourAgo', {n: Math.floor(s/3600)});
+    return t('common.dayAgo', {n: Math.floor(s/86400)});
+  }
+  function shortId(id) { return id.slice(0,12); }
+  function trName(n) { return (n||'').replace(/^\//,'').split('/').pop(); }
+  function parsePorts(ports) {
+    if (!ports) return [];
+    return ports.map(p => p.PrivatePort ? (p.PublicPort ? `${p.IP||''}${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`) : '').filter(Boolean);
+  }
+  function ctrStatus(c) {
+    if (c.State === 'running') return 'running';
+    if (c.State === 'paused') return 'paused';
+    return 'exited';
+  }
+  function ctrStatusLabel(c) {
+    return { running:t('status.running'), exited:t('status.exited'), paused:t('status.paused'), dead:t('status.dead') }[c.State] || c.State;
+  }
+  function ctrStatusText(c) {
+    if (c.State === 'running') return t('status.upHours', { n: c.upHours || 1 });
+    if (c.State === 'paused') return t('status.paused');
+    if (c.exitMinAgo != null) return t('status.exitedDetail', { code: c.exitCode || 0, m: c.exitMinAgo });
+    return t('status.exitedHours', { code: c.exitCode || 0, n: c.exitHoursAgo || 1 });
+  }
+  function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  // ─── Pagination ─────────────────────────────────────────────────────────
+  const PAGE_SIZE = 15;
+  function paginate(arr, key) {
+    const total = arr.length;
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    let page = state.pagination[key] || 1;
+    if (page > pages) { page = pages; state.pagination[key] = page; }
+    return { slice: arr.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE), page, pages, total };
+  }
+  function paginationHtml(key, pg) {
+    if (pg.pages <= 1) return '';
+    return `<div class="pagination">
+      <button class="pg-btn" onclick="gotoPage('${key}',${pg.page-1})" aria-label="${t('pg.prev')}" ${pg.page<=1?'disabled':''}>‹</button>
+      <span>${t('pg.info',{p:pg.page,n:pg.pages,t:pg.total})}</span>
+      <button class="pg-btn" onclick="gotoPage('${key}',${pg.page+1})" aria-label="${t('pg.next')}" ${pg.page>=pg.pages?'disabled':''}>›</button>
+    </div>`;
+  }
+  function gotoPage(key, p) { state.pagination[key] = p; renderCurrentView(); }
+
+  // ─── Toast ──────────────────────────────────────────────────────────────
+  function toast(msg, type='info') {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity 200ms'; setTimeout(()=>el.remove(),200); }, 3500);
+  }
+
+  // ─── iOS-style Confirm / Input Dialog ───────────────────────────────────
+  let dialogCallback = null;
+  const dialogOverlay = () => document.getElementById('dialog-overlay');
+  const dialogInputEl = () => document.getElementById('dialog-input');
+  function confirmDialog(message, onConfirm) {
+    dialogInputEl().style.display = 'none';
+    document.getElementById('dialog-message').textContent = message;
+    document.getElementById('dialog-cancel').textContent = t('common.cancel');
+    document.getElementById('dialog-ok').textContent = t('common.ok');
+    document.getElementById('dialog-ok').classList.add('destructive');
+    dialogCallback = onConfirm;
+    dialogOverlay().classList.add('open');
+    document.getElementById('dialog-ok').focus();
+  }
+  function dialogInput(message, placeholder, onSubmit) {
+    const input = dialogInputEl();
+    input.style.display = '';
+    input.value = '';
+    input.placeholder = placeholder || '';
+    document.getElementById('dialog-message').textContent = message;
+    document.getElementById('dialog-cancel').textContent = t('common.cancel');
+    document.getElementById('dialog-ok').textContent = t('stack.create');
+    document.getElementById('dialog-ok').classList.remove('destructive');
+    dialogCallback = function () { const v = input.value.trim(); if (v) onSubmit(v); };
+    dialogOverlay().classList.add('open');
+    input.focus();
+  }
+  function closeDialog() {
+    dialogOverlay().classList.remove('open');
+    dialogCallback = null;
+  }
+  document.getElementById('dialog-cancel').addEventListener('click', closeDialog);
+  document.getElementById('dialog-ok').addEventListener('click', function () {
+    var cb = dialogCallback;
+    closeDialog();
+    if (cb) cb();
+  });
+  dialogInputEl().addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('dialog-ok').click(); }
+  });
+  document.getElementById('dialog-overlay').addEventListener('click', function (e) {
+    if (e.target === e.currentTarget) closeDialog();
+  });
+
+  // ─── Sheet ──────────────────────────────────────────────────────────────
+  function openSheet(title, body, footer='') {
+    document.getElementById('sheet-title').textContent = title;
+    document.getElementById('sheet-body').innerHTML = body;
+    document.getElementById('sheet-footer').innerHTML = footer;
+    document.getElementById('sheet-overlay').classList.add('open');
+  }
+  function closeSheet() { document.getElementById('sheet-overlay').classList.remove('open'); }
+  document.getElementById('sheet-close').addEventListener('click', closeSheet);
+  document.getElementById('sheet-overlay').addEventListener('click', e => { if(e.target===e.currentTarget) closeSheet(); });
+
+  // ─── Mobile Nav ─────────────────────────────────────────────────────────
+  const sidebarEl = document.querySelector('.sidebar');
+  const backdropEl = document.getElementById('sidebar-backdrop');
+  const hamburgerBtn = document.getElementById('hamburger-btn');
+
+  function openSidebar() {
+    sidebarEl.classList.add('open');
+    backdropEl.classList.add('open');
+    hamburgerBtn.setAttribute('aria-expanded', 'true');
+  }
+  function closeSidebar() {
+    sidebarEl.classList.remove('open');
+    backdropEl.classList.remove('open');
+    hamburgerBtn.setAttribute('aria-expanded', 'false');
+  }
+  hamburgerBtn.addEventListener('click', () => {
+    sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
+  });
+  backdropEl.addEventListener('click', closeSidebar);
+
+  // ─── System Badge Helper ──────────────────────────────────────────────
+  const lockSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+  function sysBadge(c) { return c.system ? `<span class="badge-system">${lockSvg} ${t('common.system')}</span>` : ''; }
+  function rowCls(c) { return c.system ? ' class="row-system"' : ''; }
+
+  // ─── Views ──────────────────────────────────────────────────────────────
+  function renderDashboard() {
+    const running = state.containers.filter(c=>c.State==='running').length;
+    const stopped = state.containers.filter(c=>c.State==='exited').length;
+    const paused = state.containers.filter(c=>c.State==='paused').length;
+    const total = state.containers.length || 1;
+    const rows = state.containers.slice(0,5).map(c => {
+      const s = ctrStatus(c), ports = parsePorts(c.Ports).slice(0,2);
+      return `<tr${rowCls(c)} onclick="${c.system?'':`openContainerDetail('${c.Id}')`}" tabindex="0" onkeydown="if(event.key==='Enter')${c.system?'':`openContainerDetail('${c.Id}')`}" style="${c.system?'pointer-events:none':''}">
+        <td><div style="font-weight:500">${esc(trName(c.Names[0]))} ${sysBadge(c)}</div><div style="font-size:var(--text-xs);color:var(--muted);font-family:var(--font-mono)">${shortId(c.Id)}</div></td>
+        <td><span class="status-badge status-${s}">${ctrStatusLabel(c)}</span>${s==='running'?'<span class="live-dot" title="'+t('common.live')+'"></span>':''}</td>
+        <td><span style="font-size:var(--text-xs);color:var(--muted)">${esc(trName(c.Image))}</span></td>
+        <td><span style="font-size:var(--text-xs);color:var(--muted)">${ports.join(', ')||'—'}</span></td>
+        <td><span style="font-size:var(--text-xs);color:var(--muted)">${esc(ctrStatusText(c))}</span></td>
+      </tr>`;
+    }).join('');
+    return `<div class="view-section">
+      <div class="stats-grid">
+        <div class="stat-card" onclick="navigateTo('containers')" style="cursor:pointer">
+          <div class="stat-card-label">${t('dash.labelRunning')} <span class="live-dot"></span></div>
+          <div class="stat-card-value running">${running}</div>
+        </div>
+        <div class="stat-card" onclick="navigateTo('containers')" style="cursor:pointer">
+          <div class="stat-card-label">${t('dash.labelStopped')}</div>
+          <div class="stat-card-value stopped">${stopped}</div>
+        </div>
+        <div class="stat-card" onclick="navigateTo('containers')" style="cursor:pointer">
+          <div class="stat-card-label">${t('dash.labelPaused')}</div>
+          <div class="stat-card-value warning">${paused}</div>
+        </div>
+        <div class="stat-card" onclick="navigateTo('images')" style="cursor:pointer">
+          <div class="stat-card-label">${t('dash.labelImages')}</div>
+          <div class="stat-card-value">${state.images.length}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-6)">
+        <button class="btn-pill btn-pill-primary" onclick="navigateTo('containers');setTimeout(showNewContainerSheet,100)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          ${t('dash.newContainer')}
+        </button>
+        <button class="btn-pill btn-pill-secondary" onclick="navigateTo('stacks')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          ${t('dash.newStack')}
+        </button>
+        <button class="btn btn-secondary" onclick="refreshAll()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          ${t('common.refresh')}
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);margin-bottom:var(--space-6)">
+        <div class="chart-card">
+          <div class="chart-card-title">${t('dash.containerStatus')}</div>
+          <div class="bar-stacked" style="margin-top:var(--space-3)">
+            <div class="bar-seg running" style="width:${(running/total)*100}%" title="${t('legend.running',{n:running})}"></div>
+            <div class="bar-seg paused" style="width:${(paused/total)*100}%" title="${t('legend.paused',{n:paused})}"></div>
+            <div class="bar-seg exited" style="width:${(stopped/total)*100}%" title="${t('legend.stopped',{n:stopped})}"></div>
+          </div>
+          <div class="chart-legend">
+            <span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--success)"></span>${t('legend.running',{n:running})}</span>
+            <span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--warn)"></span>${t('legend.paused',{n:paused})}</span>
+            <span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--meta)"></span>${t('legend.stopped',{n:stopped})}</span>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">${t('dash.resourceUsage')}</div>
+          <div style="margin-top:var(--space-3)">
+          <div class="resource-row"><span class="resource-label">${t('res.cpu')}</span><div class="resource-track"><div class="resource-fill cpu" style="width:34%"></div></div><span class="resource-val">34%</span></div>
+          <div class="resource-row"><span class="resource-label">${t('res.memory')}</span><div class="resource-track"><div class="resource-fill mem" style="width:62%"></div></div><span class="resource-val">62%</span></div>
+          <div class="resource-row"><span class="resource-label">${t('res.disk')}</span><div class="resource-track"><div class="resource-fill disk" style="width:45%"></div></div><span class="resource-val">45%</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="section-header">
+        <div><h2 class="section-title">${t('dash.recentContainers')}</h2><p class="section-subtitle">${t('common.totalRunning',{total:state.containers.length,running})}</p></div>
+        <button class="btn btn-secondary" onclick="navigateTo('containers')">${t('common.viewAll')}</button>
+      </div>
+      <table class="data-table"><thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('common.image')}</th><th>${t('common.ports')}</th><th>${t('common.uptime')}</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+  }
+
+  function renderContainers() {
+    const all = state.filters.containers.all;
+    const running = state.containers.filter(c=>c.State==='running').length;
+    const stoppedNonSys = state.containers.filter(c=>c.State==='exited'&&!c.system).length;
+    // 行操作键收敛为 日志/终端/启停；重启与删除在详情 footer，整行点击即详情
+    const renderRow = (c) => {
+      const s=ctrStatus(c), ports=parsePorts(c.Ports);
+      const isSys = c.system;
+      const logBtn = `<button class="btn-icon" style="color:var(--accent)" title="${t('tab.logs')}" onclick="event.stopPropagation();showContainerLogs('${esc(c.Id)}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></button>`;
+      const termBtn = `<button class="btn-icon" style="color:var(--success)" title="${t('tab.exec')}" onclick="event.stopPropagation();showContainerTerminal('${esc(c.Id)}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>`;
+      const toggleBtn = s==='running'
+        ? `<button class="btn-icon" onclick="event.stopPropagation();doAction('${c.Id}','stop')" title="${t('act.stop')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`
+        : `<button class="btn-icon" onclick="event.stopPropagation();doAction('${c.Id}','start')" title="${t('act.start')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>`;
+      const actBtns = isSys ? `<span class="badge-system">${lockSvg} ${t('common.system')}</span>` : `${logBtn}${termBtn}${toggleBtn}`;
+      return `<tr${rowCls(c)} onclick="${isSys?'':`openContainerDetail('${c.Id}')`}" tabindex="0" onkeydown="if(event.key==='Enter')${isSys?'':`openContainerDetail('${c.Id}')`}" style="${isSys?'pointer-events:none':''}">
+        <td><div style="font-weight:500">${esc(trName(c.Names[0]))} ${sysBadge(c)}</div><div style="font-size:var(--text-xs);color:var(--muted);font-family:var(--font-mono)">${shortId(c.Id)}</div></td>
+        <td><span class="status-badge status-${s}">${ctrStatusLabel(c)}</span>${s==='running'?'<span class="live-dot" title="'+t('common.live')+'"></span>':''}</td>
+        <td><span style="font-size:var(--text-sm)">${esc(trName(c.Image))}</span></td>
+        <td><span style="font-size:var(--text-xs);color:var(--muted)">${ports.join(', ')||'—'}</span></td>
+        <td><span style="font-size:var(--text-xs);color:var(--muted)">${esc(ctrStatusText(c))}</span></td>
+        <td onclick="event.stopPropagation()" style="${isSys?'pointer-events:auto':''}"><div style="display:flex;gap:2px">${actBtns}</div></td></tr>`;
+    };
+    if (!all) {
+      const pg = paginate(state.containers.filter(c=>c.State==='running'), 'containers');
+      const rows = pg.slice.map(c=>renderRow(c)).join('');
+      return `<div class="view-section">
+        <div class="section-header">
+          <div><h2 class="section-title">${t('ctn.title')} <span class="live-dot"></span></h2><p class="section-subtitle">${t('common.totalRunning',{total:state.containers.length,running})}</p></div>
+          <div style="display:flex;gap:var(--space-3);align-items:center">
+            <button class="btn-clear" onclick="clearStoppedContainers()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> ${t('ctn.clearStopped',{n:stoppedNonSys})}</button>
+            <label class="switch-row"><span class="switch"><input type="checkbox" ${all?'checked':''} onchange="toggleAll(this.checked)" aria-label="${t('ctn.showAll')}" /></span> ${t('ctn.showAll')}</label>
+            <button class="btn btn-primary" onclick="showNewContainerSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('ctn.new')}</button>
+          </div>
+        </div>
+        <table class="data-table"><thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('common.image')}</th><th>${t('common.ports')}</th><th>${t('common.uptime')}</th><th style="width:120px">${t('common.actions')}</th></tr></thead><tbody>${rows}</tbody></table>
+        ${paginationHtml('containers', pg)}
+      </div>`;
+    }
+    const pg = paginate(state.containers, 'containers');
+    const rows = pg.slice.map(c => renderRow(c)).join('');
+    return `<div class="view-section">
+      <div class="section-header">
+        <div><h2 class="section-title">${t('ctn.title')} <span class="live-dot"></span></h2><p class="section-subtitle">${t('common.totalRunning',{total:state.containers.length,running})}</p></div>
+        <div style="display:flex;gap:var(--space-3);align-items:center">
+          <button class="btn-clear" onclick="clearStoppedContainers()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> ${t('ctn.clearStopped',{n:stoppedNonSys})}</button>
+          <label class="switch-row"><span class="switch"><input type="checkbox" ${all?'checked':''} onchange="toggleAll(this.checked)" aria-label="${t('ctn.showAll')}" /></span> ${t('ctn.showAll')}</label>
+          <button class="btn btn-primary" onclick="showNewContainerSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('ctn.new')}</button>
+        </div>
+      </div>
+      <table class="data-table"><thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('common.image')}</th><th>${t('common.ports')}</th><th>${t('common.uptime')}</th><th style="width:120px">${t('common.actions')}</th></tr></thead><tbody>${rows}</tbody></table>
+      ${paginationHtml('containers', pg)}
+    </div>`;
+  }
+
+  function defaultComposeYaml(name) {
+    return `services:\n  app:\n    image: nginx:latest\n    ports:\n      - "8080:80"`;
+  }
+
+  // ─── Stacks Workbench (split layout, per original Dockge) ──────────────
+  function renderStacks() {
+    const pg = paginate(state.stacks, 'stacks');
+    const items = pg.slice.map(s => `
+      <button class="stack-item ${state.selectedStack===s.id?'active':''}" onclick="selectStack('${esc(s.id)}')">
+        <span class="stack-item-dot ${s.status==='up'?'up':''}"></span>${esc(s.name)}
+      </button>`).join('');
+    const sel = state.stacks.find(x=>x.id===state.selectedStack);
+    return `<div class="view-section" style="max-width:1400px">
+      <div class="stacks-split">
+        <div class="stack-list">
+          <div class="stack-list-head"><button class="btn btn-primary" onclick="createStack()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('stack.new')}</button></div>
+          <div class="stack-list-body">${items || `<div style="padding:var(--space-3);color:var(--muted);font-size:var(--text-sm)">${t('stack.emptyTitle')}</div>`}</div>
+          ${paginationHtml('stacks', pg)}
+        </div>
+        ${sel ? renderStackWorkbench(sel) : `<div class="workbench"><div class="wb-empty">${t('stack.noSelection')}</div></div>`}
+      </div>
+    </div>`;
+  }
+
+  function renderStackWorkbench(s) {
+    const services = stackServices(s).map(svc => ({ ...svc, status: s.status==='up' ? 'running' : 'exited' }));
+    const pills = services.map(svc => `
+      <button class="service-pill" title="${t('stack.viewServiceLogs')}" onclick="showServiceLogs('${esc(s.name)}','${esc(svc.name)}')">
+        <span class="dot ${svc.status==='running'?'':'down'}"></span>${esc(svc.name)}
+      </button>`).join('');
+    const composeYaml = s.compose != null ? s.compose : defaultComposeYaml(s.name);
+    const lineNums = composeYaml.split('\n').map((_,i) => i+1).join('\n');
+    const deployLog = (s._deployLog && s._deployLog.length)
+      ? s._deployLog.map(l => `<div>${l.startsWith('$') ? `<span class="t-dim">${esc(l)}</span>` : esc(l)}</div>`).join('')
+      : `<div class="t-dim">$ ${t('stack.termHint')}</div>`;
+    return `<div class="workbench">
+      <div class="wb-head">
+        <span class="wb-title">${esc(s.name)}</span>
+        <span class="status-badge ${s.status==='up'?'status-running':'status-exited'}">${s.status==='up'?t('status.running'):t('status.stopped')}</span>
+        <div class="wb-actions">
+          <button class="btn btn-secondary" onclick="showStackLogs('${esc(s.id)}')">${t('stack.viewServiceLogs')}</button>
+          <button class="btn btn-secondary" onclick="doStackAction('${esc(s.id)}','${s.status}')">${s.status==='up'?t('act.stop'):t('act.start')}</button>
+          <button class="btn btn-danger" onclick="removeStack('${esc(s.id)}')">${t('common.delete')}</button>
+          <button class="btn btn-primary" onclick="deployStack('${esc(s.id)}')">${t('stack.deploy')}</button>
+        </div>
+      </div>
+      <div class="wb-services">${pills}</div>
+      <div class="wb-editor">
+        <div class="editor-toolbar" id="editor-toolbar-${s.id}">
+          <button class="btn btn-ghost" onclick="editorValidate('${s.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> ${t('stack.validate')}</button>
+          <button class="btn btn-ghost" onclick="editorFormat('${s.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="3" y2="18"/></svg> ${t('stack.format')}</button>
+          <button class="btn btn-ghost" id="editor-fullscreen-btn-${s.id}" onclick="editorFullscreen('${s.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> ${t('stack.fullscreen')}</button>
+        </div>
+        <div class="editor-wrap" id="editor-wrap-${s.id}">
+          <div class="editor-lines" id="editor-lines-${s.id}">${esc(lineNums)}</div>
+          <textarea class="editor-textarea" id="editor-ta-${s.id}" rows="10" spellcheck="false" oninput="editorSyncLines('${s.id}')">${esc(composeYaml)}</textarea>
+          <div class="editor-preview" id="editor-preview-${s.id}"></div>
+        </div>
+      </div>
+      <div class="wb-terminal" id="wb-terminal">${deployLog}</div>
+    </div>`;
+  }
+
+  function selectStack(id) { state.selectedStack = id; renderCurrentView(); }
+
+  function createStack() {
+    dialogInput(t('stack.createTitle'), t('stack.namePh'), function (name) {
+      const s = {
+        id: 'stack-' + Date.now(), name,
+        compose_path: '/opt/stacks/' + name + '/compose.yaml',
+        status: 'down', containers: 0, created: Date.now(),
+        compose: defaultComposeYaml(name)
+      };
+      state.stacks.unshift(s);
+      state.pagination.stacks = 1;
+      state.selectedStack = s.id;
+      renderCurrentView();
+      toast(t('toast.createdStack'), 'success');
+    });
+  }
+
+  function deployStack(id) {
+    const s = state.stacks.find(x=>x.id===id);
+    if (!s) return;
+    const ta = document.getElementById('editor-ta-' + id);
+    if (ta) s.compose = ta.value; // 部署前把编辑器内容落回栈数据
+    const term = document.getElementById('wb-terminal');
+    if (!term) return;
+    const svc = stackServices(s);
+    const log = [
+      '$ docker compose up -d',
+      '[+] Running ' + (svc.length + 1) + '/' + (svc.length + 1),
+      ' ⠿ Network ' + s.name + '_default  Created'
+    ].concat(svc.map(x => ' ⠿ Container ' + s.name + '-' + x.name + '-1  Started'));
+    s._deployLog = [];
+    term.innerHTML = '';
+    toast(t('toast.deployStarted'), 'info');
+    log.forEach((line, i) => {
+      setTimeout(() => {
+        s._deployLog.push(line);
+        term.insertAdjacentHTML('beforeend', '<div>' + (line.startsWith('$') ? '<span class="t-dim">' + esc(line) + '</span>' : esc(line)) + '</div>');
+        term.scrollTop = term.scrollHeight;
+        if (i === log.length - 1) {
+          s.status = 'up';
+          renderCurrentView();
+          toast(t('toast.deployDone'), 'success');
+        }
+      }, 280 * (i + 1));
+    });
+  }
+
+  function renderImages() {
+    if (!state.images.length) return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('img.title')}</h2><p class="section-subtitle">${t('img.subtitle')}</p></div><button class="btn btn-primary" onclick="showPullImageSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('img.pull')}</button></div><div class="empty-state"><div class="empty-state-title">${t('img.emptyTitle')}</div></div></div>`;
+    const unusedCount = state.images.filter(i=>!i.system).length;
+    const pg = paginate(state.images, 'images');
+    const rows = pg.slice.map(img => {
+      const isSys = img.system;
+      return `<tr${rowCls(img)}>
+        <td><div style="font-weight:500">${esc(trName(img.Repository||img.RepoTags?.[0]?.split(':')[0]))} ${sysBadge(img)}</div><div style="font-size:var(--text-xs);color:var(--muted);font-family:var(--font-mono)">${shortId(img.Id)}</div></td>
+        <td><span style="font-size:var(--text-sm)">${esc(img.RepoTags?.[0]||'<missing>')}</span></td>
+        <td><span style="font-size:var(--text-sm);color:var(--muted)">${formatBytes(img.Size)}</span></td>
+        <td><span style="font-size:var(--text-xs);color:var(--muted)">${timeAgo(img.Created)}</span></td>
+        <td onclick="event.stopPropagation()">${isSys?'<span class="badge-system">'+lockSvg+' '+t('common.system')+'</span>':`<button class="btn-icon" onclick="event.stopPropagation();showImageHistory('${esc(img.Id)}')" title="${t('img.history')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button><button class="btn-icon" onclick="event.stopPropagation();showTagImageSheet('${esc(img.Id)}','${esc(img.RepoTags?.[0]||'')}')" title="${t('common.tag')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></button><button class="btn-icon" style="color:var(--danger)" onclick="event.stopPropagation();removeImage('${esc(img.Id)}')" title="${t('common.remove')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('img.title')}</h2><p class="section-subtitle">${t('img.count',{n:state.images.length})}</p></div>
+      <div style="display:flex;gap:var(--space-3);align-items:center">
+        <button class="btn-clear" onclick="clearUnusedImages()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> ${t('img.clearUnused',{n:unusedCount})}</button>
+        <button class="btn btn-primary" onclick="showPullImageSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('img.pull')}</button>
+      </div>
+    </div>
+    <table class="data-table"><thead><tr><th>${t('common.repository')}</th><th>${t('common.tag')}</th><th>${t('common.size')}</th><th>${t('common.created')}</th><th style="width:80px"></th></tr></thead><tbody>${rows}</tbody></table>
+    ${paginationHtml('images', pg)}</div>`;
+  }
+
+  function renderVolumes() {
+    if (!state.volumes.length) return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('vol.title')}</h2><p class="section-subtitle">${t('vol.subtitle')}</p></div><button class="btn btn-primary" onclick="showCreateVolumeSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('vol.new')}</button></div><div class="empty-state"><div class="empty-state-title">${t('vol.emptyTitle')}</div></div></div>`;
+    const unusedCount = state.volumes.filter(v=>!v.system).length;
+    const pg = paginate(state.volumes, 'volumes');
+    const rows = pg.slice.map(v => {
+      const isSys = v.system;
+      return `<tr${rowCls(v)}>
+        <td><div style="font-weight:500">${esc(v.Name)} ${sysBadge(v)}</div></td>
+        <td><span style="font-size:var(--text-sm);color:var(--muted)">${esc(v.Driver)}</span></td>
+        <td><span style="font-size:var(--text-sm);color:var(--muted)">${esc(v.Usage||'—')}</span></td>
+        <td onclick="event.stopPropagation()">${isSys?'<span class="badge-system">'+lockSvg+' '+t('common.system')+'</span>':`<button class="btn-icon" style="color:var(--danger)" onclick="removeVolume('${esc(v.Name)}')" title="${t('common.remove')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('vol.title')}</h2><p class="section-subtitle">${t('vol.count',{n:state.volumes.length})}</p></div>
+      <div style="display:flex;gap:var(--space-3);align-items:center">
+        <button class="btn-clear" onclick="clearUnusedVolumes()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> ${t('vol.clearUnused',{n:unusedCount})}</button>
+        <button class="btn btn-primary" onclick="showCreateVolumeSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('vol.new')}</button>
+      </div>
+    </div>
+    <table class="data-table"><thead><tr><th>${t('common.name')}</th><th>${t('common.driver')}</th><th>${t('common.usage')}</th><th style="width:80px"></th></tr></thead><tbody>${rows}</tbody></table>
+    ${paginationHtml('volumes', pg)}</div>`;
+  }
+
+  function renderNetworks() {
+    if (!state.networks.length) return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('net.title')}</h2></div><button class="btn btn-primary" onclick="showCreateNetworkSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('net.new')}</button></div><div class="empty-state"><div class="empty-state-title">${t('net.emptyTitle')}</div></div></div>`;
+    const unusedCount = state.networks.filter(n=>!n.system).length;
+    const pg = paginate(state.networks, 'networks');
+    const rows = pg.slice.map(n => {
+      const isSys = n.system;
+      return `<tr${rowCls(n)}>
+        <td><div style="font-weight:500">${esc(n.Name)} ${sysBadge(n)}</div><div style="font-size:var(--text-xs);color:var(--muted);font-family:var(--font-mono)">${shortId(n.ID)}</div></td>
+        <td><span style="font-size:var(--text-sm)">${esc(n.Driver)}</span></td>
+        <td><span style="font-size:var(--text-sm);color:var(--muted)">${esc(n.Subnet)}</span></td>
+        <td><span style="font-size:var(--text-sm)">${t('common.containersCount',{n:n.Containers})}</span></td>
+        <td onclick="event.stopPropagation()">${isSys?'<span class="badge-system">'+lockSvg+' '+t('common.system')+'</span>':`<button class="btn-icon" style="color:var(--danger)" onclick="removeNetwork('${esc(n.ID)}')" title="${t('common.remove')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('net.title')}</h2><p class="section-subtitle">${t('net.count',{n:state.networks.length})}</p></div>
+      <div style="display:flex;gap:var(--space-3);align-items:center">
+        <button class="btn-clear" onclick="clearUnusedNetworks()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> ${t('net.clearUnused',{n:unusedCount})}</button>
+        <button class="btn btn-primary" onclick="showCreateNetworkSheet()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ${t('net.new')}</button>
+      </div>
+    </div>
+    <table class="data-table"><thead><tr><th>${t('common.name')}</th><th>${t('common.driver')}</th><th>${t('common.subnet')}</th><th>${t('nav.containers')}</th><th style="width:80px"></th></tr></thead><tbody>${rows}</tbody></table>
+    ${paginationHtml('networks', pg)}</div>`;
+  }
+
+  function renderSettings() {
+    return `<div class="view-section"><h2 class="section-title" style="margin-bottom:var(--space-6)">${t('nav.settings')}</h2>
+    <div style="max-width:560px;display:flex;flex-direction:column;gap:var(--space-6)">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5)">
+        <h3 style="margin:0 0 var(--space-4);font-size:var(--text-base);font-weight:600">${t('set.engineConnection')}</h3>
+        <div class="form-group"><label class="form-label">${t('set.socketPath')}</label>
+          <input class="form-input" value="/run/podman/podman.sock" placeholder="/var/run/docker.sock" />
+          <p class="form-help">${t('set.socketHelp')}</p>
+        </div>
+        <button class="btn btn-primary" onclick="toast(t('toast.settingsSaved'),'success')">${t('set.saveReconnect')}</button>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius-lg);padding:var(--space-5)">
+        <h3 style="margin:0 0 var(--space-3);font-size:var(--text-base);font-weight:600">${t('set.about')}</h3>
+        <div style="font-size:var(--text-sm);color:var(--fg-2);line-height:1.8">
+          <div>${t('set.aboutLine1')}</div>
+          <div>${t('set.aboutLine2')}</div>
+          <div style="margin-top:var(--space-3);color:var(--muted)">${t('set.aboutLine3')}</div>
+        </div>
+      </div>
+    </div></div>`;
+  }
+
+  // ─── System Info View ───────────────────────────────────────────────────
+  function renderSysInfo() {
+    const infoRows = [
+      [t('sysinfo.apiVersion'), '3.4.4'], [t('sysinfo.version'), '5.2.2'], [t('sysinfo.kernel'), '6.6.12-linuxkit'],
+      [t('sysinfo.os'), 'Linux'], [t('sysinfo.arch'), 'amd64'], [t('sysinfo.goVersion'), 'go1.21.4'],
+      [t('sysinfo.podmanSocket'), '/run/podman/podman.sock'], [t('sysinfo.storageDriver'), 'overlay'],
+      [t('sysinfo.graphRoot'), '/var/lib/containers/storage'], [t('sysinfo.containerRoot'), '/run/containers/storage'],
+      [t('sysinfo.cgroupDriver'), 'systemd'], [t('sysinfo.cgroupVersion'), '2'],
+      [t('sysinfo.cpus'), '8'], [t('sysinfo.totalMemory'), '16.00 GiB'],
+    ];
+    const rows = infoRows.map(([k,v], i) =>
+      `<tr style="${i%2===0?'':`background:var(--surface)`}">
+        <td style="width:200px;font-size:var(--text-sm);color:var(--muted);padding:var(--space-2) var(--space-4)">${k}</td>
+        <td style="font-size:var(--text-sm);font-family:var(--font-mono);font-weight:500">${v}</td>
+      </tr>`
+    ).join('');
+    return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('nav.sysinfo')}</h2><p class="section-subtitle">${t('sysinfo.subtitle')}</p></div><button class="btn btn-secondary" onclick="toast(t('toast.infoRefreshed'),'success')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ${t('common.refresh')}</button></div>
+    <table class="data-table"><thead><tr><th>${t('th.key')}</th><th>${t('th.value')}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  // ─── Disk Usage View ────────────────────────────────────────────────────
+  function renderSysDf() {
+    const items = [
+      { label:t('img.title'), used:'3.2 GB', reclaimed:'890 MB', count:8 },
+      { label:t('vol.title'), used:'3.0 GB', reclaimed:'0 B', count:4 },
+      { label:t('sysdf.buildCache'), used:'1.1 GB', reclaimed:'1.1 GB', count:24 },
+      { label:t('ctn.title'), used:'48 MB', reclaimed:'12 MB', count:7 },
+    ];
+    const rows = items.map((it,i) =>
+      `<tr style="${i%2===0?'':`background:var(--surface)`}">
+        <td style="font-weight:500">${it.label}</td>
+        <td><span style="font-size:var(--text-sm)">${it.used}</span> <span style="font-size:var(--text-xs);color:var(--muted)">${t('sysdf.items',{n:it.count})}</span></td>
+        <td><span style="font-size:var(--text-sm);color:${it.reclaimed!=='0 B'?'var(--danger)':'var(--muted)'}">${t('sysdf.reclaimable',{v:it.reclaimed})}</span></td>
+        <td>${it.reclaimed!=='0 B'?`<button class="btn btn-secondary" style="padding:4px 12px;font-size:var(--text-xs)" onclick="sysdfPrune('${it.label}')">${t('sysdf.prune')}</button>`:''}</td>
+      </tr>`
+    ).join('');
+    return `<div class="view-section"><div class="section-header"><div><h2 class="section-title">${t('nav.sysdf')}</h2><p class="section-subtitle">${t('sysdf.subtitle')}</p></div><button class="btn btn-danger" style="padding:6px 14px;font-size:var(--text-sm)" onclick="sysdfPruneAll()">${t('sysdf.pruneAll')}</button></div>
+    <table class="data-table"><thead><tr><th>${t('th.type')}</th><th>${t('th.used')}</th><th>${t('th.reclaimable')}</th><th style="width:100px"></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  // ─── Router ─────────────────────────────────────────────────────────────
+  const viewRenderers = { dashboard: renderDashboard, containers: renderContainers, stacks: renderStacks, images: renderImages, volumes: renderVolumes, networks: renderNetworks, sysinfo: renderSysInfo, sysdf: renderSysDf, settings: renderSettings, 'container-detail': renderContainerDetail };
+  function topbarTitle(route) {
+    if (route === 'container-detail') {
+      const c = state.containers.find(x=>x.Id===state.detailContainerId);
+      return c ? trName(c.Names[0]) : t('nav.containers');
+    }
+    return t('nav.' + route) || route;
+  }
+
+  function navigateTo(route) {
+    state.route = route;
+    const navRoute = route === 'container-detail' ? 'containers' : route;
+    document.querySelectorAll('.nav-item').forEach(el => { el.classList.toggle('active', el.dataset.route===navRoute); el.removeAttribute('aria-current'); });
+    const active = document.querySelector(`.nav-item[data-route="${navRoute}"]`);
+    if (active) active.setAttribute('aria-current','page');
+    document.getElementById('page-title').textContent = topbarTitle(route);
+    const area = document.getElementById('content-area');
+    area.classList.add('nav-anim');  // 仅导航播放视图过渡；轮询/操作刷新走 renderCurrentView 不触发
+    area.innerHTML = viewRenderers[route]();
+  }
+  function refreshTopbarTitle() { document.getElementById('page-title').textContent = topbarTitle(state.route); }
+  window.refreshTopbarTitle = refreshTopbarTitle;
+
+  // ─── Actions ────────────────────────────────────────────────────────────
+  function doAction(id, action) {
+    toast(t('toast.actionSent', { action: t('act.' + action), id: shortId(id) }), 'success');
+    const c = state.containers.find(x=>x.Id===id);
+    if (c) {
+      c.State = action==='start'?'running':action==='stop'?'exited':c.State;
+      if (action === 'start') c.upHours = c.upHours || 1;
+      if (action === 'stop') { c.exitCode = 0; c.exitMinAgo = 1; }
+    }
+    renderCurrentView();
+  }
+  function doRemove(id) {
+    confirmDialog(t('confirm.removeContainer'), function () {
+      state.containers = state.containers.filter(c=>c.Id!==id);
+      toast(t('toast.containerRemoved'), 'success');
+      updateNavCounts();
+      renderCurrentView();
+    });
+  }
+  function doStackAction(id, currentStatus) {
+    const s = state.stacks.find(x=>x.id===id);
+    if (!s) return;
+    if (currentStatus === 'up') {
+      s.status = 'down';
+      toast(t('toast.stackStopped', { name: s.name }), 'info');
+    } else {
+      s.status = 'up';
+      toast(t('toast.stackStarted', { name: s.name }), 'success');
+    }
+    renderCurrentView();
+  }
+  function removeStack(id) {
+    confirmDialog(t('confirm.removeStack'), function () {
+      state.stacks = state.stacks.filter(s=>s.id!==id);
+      if (state.selectedStack === id) state.selectedStack = null;
+      toast(t('toast.stackRemoved'), 'success');
+      renderCurrentView();
+    });
+  }
+
+  function toggleAll(v) { state.filters.containers.all = v; state.pagination.containers = 1; renderCurrentView(); }
+  function sysdfPruneAll() {
+    confirmDialog(t('confirm.pruneAll'), function () { toast(t('toast.prunedAll'), 'success'); });
+  }
+  function sysdfPrune(label) {
+    confirmDialog(t('confirm.pruneAll'), function () { toast(t('toast.pruned', { v: label }), 'success'); });
+  }
+  function refreshAll() { toast(t('toast.refreshed'), 'info'); updateNavCounts(); renderCurrentView(); }
+  function renderCurrentView() { const area = document.getElementById('content-area'); area.classList.remove('nav-anim'); area.innerHTML = viewRenderers[state.route](); }
+
+  // ─── Clear / Remove Actions ────────────────────────────────────────────
+  function clearStoppedContainers() {
+    const stopped = state.containers.filter(c=>c.State==='exited'&&!c.system);
+    if (!stopped.length) return toast(t('toast.noStopped'),'info');
+    confirmDialog(t('confirm.removeStopped',{n:stopped.length}), function () {
+      state.containers = state.containers.filter(c=>!(c.State==='exited'&&!c.system));
+      toast(t('toast.removedCount',{n:stopped.length}), 'success');
+      updateNavCounts(); renderCurrentView();
+    });
+  }
+  function removeImage(id) {
+    state.images = state.images.filter(i=>i.Id!==id);
+    toast(t('toast.imageRemoved'),'success'); updateNavCounts(); renderCurrentView();
+  }
+  function clearUnusedImages() {
+    const unused = state.images.filter(i=>!i.system);
+    if (!unused.length) return toast(t('toast.noImages'),'info');
+    confirmDialog(t('confirm.removeImages',{n:unused.length}), function () {
+      state.images = state.images.filter(i=>i.system);
+      toast(t('toast.imagesRemoved',{n:unused.length}), 'success'); updateNavCounts(); renderCurrentView();
+    });
+  }
+  function removeVolume(name) {
+    state.volumes = state.volumes.filter(v=>v.Name!==name);
+    toast(t('toast.volumeRemoved'),'success'); renderCurrentView();
+  }
+  function clearUnusedVolumes() {
+    const unused = state.volumes.filter(v=>!v.system);
+    if (!unused.length) return toast(t('toast.noVolumes'),'info');
+    confirmDialog(t('confirm.removeVolumes',{n:unused.length}), function () {
+      state.volumes = state.volumes.filter(v=>v.system);
+      toast(t('toast.volumesRemoved',{n:unused.length}), 'success'); renderCurrentView();
+    });
+  }
+  function removeNetwork(id) {
+    state.networks = state.networks.filter(n=>n.ID!==id);
+    toast(t('toast.networkRemoved'),'success'); renderCurrentView();
+  }
+  function clearUnusedNetworks() {
+    const unused = state.networks.filter(n=>!n.system);
+    if (!unused.length) return toast(t('toast.noNetworks'),'info');
+    confirmDialog(t('confirm.removeNetworks',{n:unused.length}), function () {
+      state.networks = state.networks.filter(n=>n.system);
+      toast(t('toast.networksRemoved',{n:unused.length}), 'success'); renderCurrentView();
+    });
+  }
+
+  // ─── Container Detail (push page) ─────────────────────────────────────
+  function openContainerDetail(id) {
+    state.detailContainerId = id;
+    navigateTo('container-detail');
+  }
+  function renderContainerDetail() {
+    const c = state.containers.find(x=>x.Id===state.detailContainerId);
+    if (!c) { navigateTo('containers'); return ''; }
+    const s = ctrStatus(c), ports = parsePorts(c.Ports);
+    const isSys = c.system;
+    const envVars = [`PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin`, `CONTAINER_NAME=${trName(c.Names[0])}`, `LOG_LEVEL=info`, `APP_ENV=production`];
+    const mounts = [{name:'var_lib_postgresql', dest:'/var/lib/postgresql/data', type:'volume', mode:'rw'}, {name:'./config', dest:'/etc/app/config', type:'bind', mode:'ro'}];
+    const nets = [{name:'app_frontend', ip:'172.18.0.2'}, {name:'bridge', ip:'172.17.0.2'}];
+    const toggleBtn = s==='running'
+      ? `<button class="btn btn-secondary" onclick="doAction('${c.Id}','stop')">${t('act.stop')}</button>`
+      : `<button class="btn btn-primary" onclick="doAction('${c.Id}','start')">${t('act.start')}</button>`;
+    const tools = isSys ? '' : `
+      <button class="btn btn-ghost" style="font-size:var(--text-xs)" onclick="showCopyToHostSheet('${esc(c.Id)}')">${t('ctn.copyToHost')}</button>
+      <button class="btn btn-ghost" style="font-size:var(--text-xs)" onclick="exportContainer('${esc(c.Id)}')">${t('ctn.export')}</button>
+      <button class="btn btn-ghost" style="font-size:var(--text-xs)" onclick="commitContainer('${esc(c.Id)}')">${t('ctn.commit')}</button>
+      <button class="btn btn-ghost" style="font-size:var(--text-xs)" onclick="renameContainer('${esc(c.Id)}')">${t('ctn.rename')}</button>`;
+    return `<div class="view-section">
+      <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-5)">
+        <button class="crumb" onclick="navigateTo('containers')">‹ ${t('nav.containers')}</button>
+        <span style="color:var(--meta)">/</span>
+        <span style="font-family:var(--font-display);font-size:var(--text-xl);font-weight:600">${esc(trName(c.Names[0]))}</span>
+        <span class="status-badge status-${s}">${ctrStatusLabel(c)}</span>${s==='running'?'<span class="live-dot"></span>':''}
+        <div style="margin-inline-start:auto;display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+          <button class="btn btn-secondary" onclick="showContainerLogs('${esc(c.Id)}')">${t('tab.logs')}</button>
+          <button class="btn btn-secondary" onclick="showContainerTerminal('${esc(c.Id)}')">${t('tab.exec')}</button>
+          ${toggleBtn}
+          <button class="btn btn-secondary" onclick="doAction('${c.Id}','restart')">${t('act.restart')}</button>
+          <button class="btn btn-danger" onclick="doRemove('${c.Id}')">${t('common.remove')}</button>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-cell"><div class="summary-cell-label">${t('common.image')}</div><div class="summary-cell-value">${esc(trName(c.Image))}</div></div>
+        <div class="summary-cell"><div class="summary-cell-label">${t('common.ports')}</div><div class="summary-cell-value" style="font-family:var(--font-mono);font-size:var(--text-xs)">${ports.join(', ')||t('common.none')}</div></div>
+        <div class="summary-cell"><div class="summary-cell-label">${t('common.uptime')}</div><div class="summary-cell-value">${esc(ctrStatusText(c))}</div></div>
+        <div class="summary-cell"><div class="summary-cell-label">${t('common.created')}</div><div class="summary-cell-value">${new Date(c.Created).toLocaleString()}</div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+        <div class="tabs" style="margin-bottom:0;flex:1">
+          <button class="tab active" onclick="switchTab(this,'tab-stats')">${t('tab.stats')}</button>
+          <button class="tab" onclick="switchTab(this,'tab-env')">${t('tab.env')}</button>
+          <button class="tab" onclick="switchTab(this,'tab-net')">${t('tab.net')}</button>
+          <button class="tab" onclick="switchTab(this,'tab-mounts')">${t('tab.mounts')}</button>
+        </div>
+        ${tools}
+      </div>
+      <div id="tab-stats">
+        <div class="stat-grid">
+          <div class="stat-cell">
+            <div class="stat-cell-label">${t('res.cpu')}</div>
+            <div class="stat-cell-value">${s==='running'?(Math.random()*40+5).toFixed(1):'0.00'}%</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill cpu" style="width:${s==='running'?(Math.random()*40+5).toFixed(0):'0'}%"></div></div>
+            <div class="stat-detail">${s==='running'?t('ctn.statsCores'):t('ctn.na')}</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-cell-label">${t('res.memory')}</div>
+            <div class="stat-cell-value">${s==='running'?(Math.random()*512+64).toFixed(0):'0'} MB</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill mem" style="width:${s==='running'?(Math.random()*50+10).toFixed(0):'0'}%"></div></div>
+            <div class="stat-detail">${t('ctn.memLimit')}</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-cell-label">${t('stat.netIO')}</div>
+            <div class="stat-cell-value" style="font-size:var(--text-lg)">${s==='running'?'1.2 MB':'0 B'}</div>
+            <div class="stat-io-row"><span style="color:var(--muted)">${t('stat.rx')}</span><span>${s==='running'?'820 KB':'0 B'}</span></div>
+            <div class="stat-io-row"><span style="color:var(--muted)">${t('stat.tx')}</span><span>${s==='running'?'380 KB':'0 B'}</span></div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-cell-label">${t('stat.blockIO')}</div>
+            <div class="stat-cell-value" style="font-size:var(--text-lg)">${s==='running'?'24.5 MB':'0 B'}</div>
+            <div class="stat-io-row"><span style="color:var(--muted)">${t('stat.read')}</span><span>${s==='running'?'18.2 MB':'0 B'}</span></div>
+            <div class="stat-io-row"><span style="color:var(--muted)">${t('stat.write')}</span><span>${s==='running'?'6.3 MB':'0 B'}</span></div>
+          </div>
+        </div>
+      </div>
+      <div id="tab-env" style="display:none">
+        <div style="font-family:var(--font-mono);font-size:var(--text-xs);background:var(--surface);border-radius:var(--radius-md);padding:var(--space-4);max-height:240px;overflow-y:auto">
+          ${envVars.map(e=>{const i=e.indexOf('=');return `<div style="display:flex;gap:var(--space-3);padding:2px 0"><span style="color:var(--accent);flex-shrink:0">${esc(i>0?e.slice(0,i):e)}</span><span style="color:var(--fg-2)">= ${esc(i>0?e.slice(i+1):'')}</span></div>`;}).join('')}
+        </div>
+      </div>
+      <div id="tab-net" style="display:none">
+        ${nets.map(n=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--border-soft);font-size:var(--text-sm)">
+          <div><strong>${esc(n.name)}</strong><span style="color:var(--muted);margin-inline-start:var(--space-3);font-family:var(--font-mono);font-size:var(--text-xs)">${n.ip}</span></div>
+        </div>`).join('')}
+      </div>
+      <div id="tab-mounts" style="display:none">
+        ${mounts.map(m=>`<div style="padding:var(--space-2) 0;border-bottom:1px solid var(--border-soft);font-size:var(--text-sm)"><div><strong>${esc(m.name)}</strong></div><div style="color:var(--muted);font-size:var(--text-xs);font-family:var(--font-mono)">${esc(m.dest)} · ${esc(m.type)} · ${esc(m.mode)}</div></div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  function switchTab(btn, tabId) {
+    btn.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    btn.classList.add('active');
+    btn.closest('.sheet-body').querySelectorAll('[id^="tab-"]').forEach(el=>el.style.display='none');
+    document.getElementById(tabId).style.display='block';
+  }
+
+  function editorSyncLines(id) {
+    const ta = document.getElementById('editor-ta-'+id);
+    const ln = document.getElementById('editor-lines-'+id);
+    if (!ta || !ln) return;
+    const count = ta.value.split('\n').length;
+    ln.innerHTML = esc(Array.from({length:count},(_,i)=>i+1).join('\n'));
+  }
+
+  function editorValidate(id) {
+    const ta = document.getElementById('editor-ta-'+id);
+    if (!ta) return;
+    const val = ta.value;
+    if (val.includes('services:') && val.includes('image:')) toast(t('toast.yamlValid'),'success');
+    else toast(t('toast.yamlIssue'),'info');
+  }
+
+  function editorFormat(id) {
+    const ta = document.getElementById('editor-ta-'+id);
+    if (!ta) return;
+    ta.value = ta.value.replace(/\t/g, '  ').replace(/ +\n/g, '\n');
+    editorSyncLines(id);
+    toast(t('toast.formatApplied'),'success');
+  }
+
+  function editorFullscreen(id) {
+    const wrap = document.getElementById('editor-wrap-'+id);
+    const toolbar = document.getElementById('editor-toolbar-'+id);
+    const preview = document.getElementById('editor-preview-'+id);
+    const ta = document.getElementById('editor-ta-'+id);
+    if (!wrap) return;
+    const isFS = wrap.classList.contains('editor-fullscreen');
+    if (isFS) {
+      wrap.classList.remove('editor-fullscreen');
+      toolbar.classList.remove('editor-fullscreen');
+      if (preview) preview.style.display = 'none';
+      if (ta) ta.style.display = '';
+      const btn = document.getElementById('editor-fullscreen-btn-'+id);
+      if (btn) btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> ' + t('stack.fullscreen');
+    } else {
+      wrap.classList.add('editor-fullscreen');
+      toolbar.classList.add('editor-fullscreen');
+    }
+  }
+
+  // ─── Terminal Handler ──────────────────────────────────────────────────
+  function handleTermInput(event, cid) {
+    if (event.key !== 'Enter') return;
+    var input = event.target;
+    var cmd = input.value.trim();
+    input.value = '';
+    if (!cmd) return;
+    var term = document.getElementById('terminal-' + cid);
+    if (!term) return;
+    var inputRow = term.querySelector('.terminal-input-row');
+    var cmdLine = document.createElement('div');
+    cmdLine.className = 'terminal-line';
+    cmdLine.innerHTML = '<span class="prompt">root@' + cid.slice(0,12) + ':/# </span>' + esc(cmd);
+    term.insertBefore(cmdLine, inputRow);
+    var outputs = {
+      'ls': 'bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var',
+      'pwd': '/',
+      'whoami': 'root',
+      'cat /etc/os-release': 'PRETTY_NAME="Debian GNU/Linux 12"\nVERSION_ID="12"\nID=debian',
+      'ps aux': 'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nroot         1  0.0  0.1  12345 6789 ?        Ss   10:23   0:01 /sbin/init',
+      'df -h': 'Filesystem      Size  Used Avail Use% Mounted on\noverlay          50G   12G   36G  25% /\ntmpfs            64M     0   64M   0% /dev',
+      'free -h': '              total        used        free      shared  buff/cache   available\nMem:          2.0Gi       512Mi       1.2Gi        64Mi       256Mi       1.4Gi\nSwap:            0B          0B          0B',
+      'uptime': ' 10:45:23 up 3 days, 22:15, 1 user, load average: 0.12, 0.08, 0.05'
+    };
+    var output = outputs[cmd] || ('bash: ' + cmd.split(' ')[0] + ': command not found');
+    var outLine = document.createElement('div');
+    outLine.className = 'terminal-line';
+    if (cmd.startsWith('cat')) outLine.style.color = 'var(--fg-2)';
+    outLine.textContent = output;
+    term.insertBefore(outLine, inputRow);
+    term.scrollTop = term.scrollHeight;
+  }
+
+  // ─── Service Log/Exec Helpers ──────────────────────────────────────────
+  const SERVICE_LOGS = {
+    'web': '[web] INFO  nginx: starting\n[web] INFO  nginx: listening on :80\n[web] INFO  nginx: worker process started\n[web] INFO  GET / 200 (3ms)\n[web] INFO  GET /assets/app.js 200 (1ms)\n[web] WARN  upstream timeout on /api',
+    'api': '[api] INFO  Express server started on port 3000\n[api] INFO  Connected to postgres://db:5432/app\n[api] INFO  GET /api/health 200 (2ms)\n[api] INFO  POST /api/users 201 (45ms)\n[api] WARN  Slow query detected: 890ms\n[api] INFO  GET /api/users 200 (12ms)',
+    'db': '[db] INFO  PostgreSQL 16.2 started\n[db] INFO  database system is ready to accept connections\n[db] LOG   checkpoint starting\n[db] LOG   checkpoint complete\n[db] LOG   automatic vacuum of table "users"\n[db] INFO  connection received: host=api port=43210'
+  };
+  function stackServices(stack) {
+    // 仅解析 services: 段下的直接子键（两空格缩进），遇下一个顶层键（如 volumes:）即止
+    const yaml = stack.compose != null ? stack.compose : defaultComposeYaml(stack.name);
+    const lines = yaml.split('\n');
+    const names = [];
+    let inServices = false;
+    for (const line of lines) {
+      if (/^services:\s*$/.test(line)) { inServices = true; continue; }
+      if (inServices) {
+        const m = line.match(/^ {2}([A-Za-z0-9_-]+):\s*$/);
+        if (m) { names.push(m[1]); continue; }
+        if (/^\S/.test(line)) break; // 下一个顶层键，services 段结束
+      }
+    }
+    return names.map(n => ({ name: n }));
+  }
+  function showStackLogs(id) {
+    const s = state.stacks.find(x=>x.id===id);
+    if (!s) return;
+    const aggregated = stackServices(s)
+      .map(svc => SERVICE_LOGS[svc.name] || t('toast.noLogs', { name: svc.name }))
+      .join('\n\n');
+    const body = '<div class="log-only-viewer">' + esc(aggregated) + '</div>';
+    openSheet(t('sheet.logsTitle', { name: s.name }), body, '<button class="btn btn-secondary" onclick="closeSheet()">' + t('common.close') + '</button>');
+  }
+
+  function showServiceLogs(stackName, serviceName) {
+    var logData = SERVICE_LOGS[serviceName] || t('toast.noLogs', { name: serviceName });
+    var body = '<div class="log-only-viewer">' + esc(logData) + '</div>';
+    openSheet(t('sheet.logsTitle', { name: stackName + ' / ' + serviceName }), body,
+      '<button class="btn btn-secondary" onclick="closeSheet()">' + t('common.close') + '</button>' +
+      '<button class="btn btn-secondary" onclick="showServiceExec(\'' + esc(stackName) + '\',\'' + esc(serviceName) + '\')">' + t('stack.terminal') + '</button>');
+  }
+
+  function showContainerLogs(id) {
+    const c = state.containers.find(x=>x.Id===id);
+    if (!c) return;
+    const logs = '[${new Date().toISOString()}] INFO  Starting application v3.2.1\n[${new Date().toISOString()}] INFO  Loading configuration from /etc/app/config\n[${new Date().toISOString()}] INFO  Database connection established\n[${new Date().toISOString()}] INFO  Listening on :3000\n[${new Date().toISOString()}] INFO  Health check passed\n[${new Date().toISOString()}] WARN  High memory usage: 78%\n[${new Date().toISOString()}] INFO  Request: GET /api/health → 200 (2ms)';
+    const body = '<div class="log-only-viewer">' + esc(logs) + '</div>';
+    openSheet(t('sheet.logsTitle', { name: trName(c.Names[0]) }), body, '<button class="btn btn-secondary" onclick="closeSheet()">' + t('common.close') + '</button>');
+  }
+
+  // ─── Container Terminal (standalone sheet) ─────────────────────────────
+  function terminalHtml(cid) {
+    const sid = shortId(cid);
+    return `<div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2)">
+          <button class="btn btn-secondary" style="font-size:var(--text-xs);padding:4px 10px" onclick="resizeTerminal('${cid}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> ${t('ctn.resize')}</button>
+          <button class="btn btn-secondary" style="font-size:var(--text-xs);padding:4px 10px" onclick="removeExecSession('${cid}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> ${t('ctn.removeSession')}</button>
+        </div>
+        <div class="terminal" id="terminal-${cid}">
+          <div class="terminal-line"><span class="prompt">root@${sid}:/# </span>welcome</div>
+          <div class="terminal-line" style="color:var(--muted)">${t('ctn.simulated')}</div>
+          <div class="terminal-input-row">
+            <span class="prompt">root@${sid}:/#&nbsp;</span>
+            <input class="terminal-input" id="term-input-${cid}" placeholder="${t('ctn.typeCommand')}" onkeydown="handleTermInput(event,'${cid}')" autofocus />
+          </div>
+        </div>`;
+  }
+  function showContainerTerminal(id) {
+    const c = state.containers.find(x=>x.Id===id);
+    if (!c) return;
+    openSheet(t('sheet.terminalTitle', { name: trName(c.Names[0]) }), terminalHtml(id), '<button class="btn btn-secondary" onclick="closeSheet()">' + t('common.close') + '</button>');
+    const input = document.getElementById('term-input-' + id);
+    if (input) input.focus();
+  }
+
+  function showServiceExec(stackName, serviceName) {
+    var shortSvc = serviceName.slice(0,12);
+    var svcId = stackName + '-' + serviceName;
+    var body = '<div class="terminal" id="svc-terminal-' + shortSvc + '">' +
+      '<div class="terminal-line"><span class="prompt">root@' + shortSvc + ':/# </span>welcome</div>' +
+      '<div class="terminal-line" style="color:var(--muted)">' + t('ctn.simulatedFor', { name: esc(serviceName) }) + '</div>' +
+      '<div class="terminal-input-row">' +
+      '<span class="prompt">root@' + shortSvc + ':/#&nbsp;</span>' +
+      '<input class="terminal-input" id="svc-term-input-' + shortSvc + '" placeholder="' + t('ctn.typeCommand') + '" onkeydown="handleSvcTermInput(event,\'' + esc(shortSvc) + '\')" autofocus />' +
+      '</div></div>';
+    openSheet(t('sheet.terminalTitle', { name: stackName + ' / ' + serviceName }), body, '<button class="btn btn-secondary" onclick="closeSheet()">' + t('common.close') + '</button>');
+  }
+
+  function handleSvcTermInput(event, shortSvc) {
+    if (event.key !== 'Enter') return;
+    var input = event.target;
+    var cmd = input.value.trim();
+    input.value = '';
+    if (!cmd) return;
+    var term = document.getElementById('svc-terminal-' + shortSvc);
+    if (!term) return;
+    var inputRow = term.querySelector('.terminal-input-row');
+    var cmdLine = document.createElement('div');
+    cmdLine.className = 'terminal-line';
+    cmdLine.innerHTML = '<span class="prompt">root@' + shortSvc + ':/# </span>' + esc(cmd);
+    term.insertBefore(cmdLine, inputRow);
+    var outputs = {
+      'ls': 'bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var',
+      'pwd': '/',
+      'whoami': 'root',
+      'ps aux': 'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nroot         1  0.0  0.1  12345 6789 ?        Ss   10:23   0:01 /sbin/init',
+      'df -h': 'Filesystem      Size  Used Avail Use% Mounted on\noverlay          50G   12G   36G  25% /',
+      'free -h': '              total        used        free      shared  buff/cache   available\nMem:          2.0Gi       512Mi       1.2Gi        64Mi       256Mi       1.4Gi\nSwap:            0B          0B          0B',
+      'uptime': ' 10:45:23 up 3 days, 22:15, 1 user, load average: 0.12, 0.08, 0.05'
+    };
+    var output = outputs[cmd] || ('bash: ' + cmd.split(' ')[0] + ': command not found');
+    var outLine = document.createElement('div');
+    outLine.className = 'terminal-line';
+    outLine.textContent = output;
+    term.insertBefore(outLine, inputRow);
+    term.scrollTop = term.scrollHeight;
+  }
+
+  // Expose functions for inline onclick handlers
+  window.editorSyncLines = editorSyncLines;
+  window.editorValidate = editorValidate;
+  window.editorFormat = editorFormat;
+  window.editorFullscreen = editorFullscreen;
+  window.selectStack = selectStack;
+  window.createStack = createStack;
+  window.deployStack = deployStack;
+  window.gotoPage = gotoPage;
+  window.__state = state; // 调试/验证接口
+  window.showContainerTerminal = showContainerTerminal;
+  window.openContainerDetail = openContainerDetail;
+  window.showStackLogs = showStackLogs;
+  window.doStackAction = doStackAction;
+  window.removeStack = removeStack;
+  window.showStackLogs = showStackLogs;
+  window.navigateTo = navigateTo;
+  window.renderCurrentView = renderCurrentView;
+  window.doAction = doAction;
+  window.doRemove = doRemove;
+  window.toggleAll = toggleAll;
+  window.refreshAll = refreshAll;
+  window.showNewContainerSheet = showNewContainerSheet;
+  window.showPullImageSheet = showPullImageSheet;
+  window.showCreateVolumeSheet = showCreateVolumeSheet;
+  window.showCreateNetworkSheet = showCreateNetworkSheet;
+  window.switchTab = switchTab;
+  window.closeSheet = closeSheet;
+  window.toast = toast;
+  window.clearStoppedContainers = clearStoppedContainers;
+  window.removeImage = removeImage;
+  window.showImageHistory = showImageHistory;
+  window.showTagImageSheet = showTagImageSheet;
+  window.tagImage = tagImage;
+  window.commitContainer = commitContainer;
+  window.renameContainer = renameContainer;
+  window.renderSysInfo = renderSysInfo;
+  window.renderSysDf = renderSysDf;
+  window.sysdfPruneAll = sysdfPruneAll;
+  window.sysdfPrune = sysdfPrune;
+  window.clearUnusedImages = clearUnusedImages;
+  window.removeVolume = removeVolume;
+  window.clearUnusedVolumes = clearUnusedVolumes;
+  window.removeNetwork = removeNetwork;
+  window.clearUnusedNetworks = clearUnusedNetworks;
+  window.handleTermInput = handleTermInput;
+  window.showServiceLogs = showServiceLogs;
+  window.showContainerLogs = showContainerLogs;
+  window.showContainerTerminal = showContainerTerminal;
+  window.showServiceExec = showServiceExec;
+  window.handleSvcTermInput = handleSvcTermInput;
+  window.showCopyToHostSheet = showCopyToHostSheet;
+  window.exportContainer = exportContainer;
+  window.resizeTerminal = resizeTerminal;
+  window.removeExecSession = removeExecSession;
+
+  // ─── Sheet Forms ────────────────────────────────────────────────────────
+  function showNewContainerSheet() {
+    const html = `<div class="form-group"><label class="form-label">${t('form.containerName')}</label><input class="form-input" placeholder="my-container" /></div>
+      <div class="form-group"><label class="form-label">${t('form.imageLabel')}</label><input class="form-input" placeholder="nginx:latest" list="img-list" /><datalist id="img-list">${state.images.map(i=>`<option value="${esc(i.RepoTags?.[0]||'')}">`).join('')}</datalist></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">${t('form.hostPort')}</label><input class="form-input" placeholder="8080" /></div>
+        <div class="form-group"><label class="form-label">${t('form.containerPort')}</label><input class="form-input" placeholder="80" /></div>
+      </div>
+      <div class="form-group"><label class="form-label">${t('form.commandLabel')}</label><input class="form-input" placeholder='/bin/sh -c "echo hello"'/><p class="form-help">${t('form.commandHelp')}</p></div>`;
+    const footer = `<button class="btn btn-secondary" onclick="closeSheet()">${t('common.cancel')}</button><button class="btn btn-primary" onclick="toast(t('toast.createdContainer'),'success');closeSheet()">${t('btn.createStart')}</button>`;
+    openSheet(t('sheet.newContainer'), html, footer);
+  }
+
+  function showPullImageSheet() {
+    const html = `<div class="form-group"><label class="form-label">${t('form.imageRef')}</label><input class="form-input" placeholder="nginx:latest" autofocus /><p class="form-help">${t('form.imageRefHelp')}</p></div>`;
+    const footer = `<button class="btn btn-secondary" onclick="closeSheet()">${t('common.cancel')}</button><button class="btn btn-primary" onclick="toast(t('toast.pullStarted'),'info');setTimeout(closeSheet,800)">${t('btn.pull')}</button>`;
+    openSheet(t('sheet.pullImage'), html, footer);
+  }
+
+  function showCreateVolumeSheet() {
+    const html = `<div class="form-group"><label class="form-label">${t('form.volumeName')}</label><input class="form-input" placeholder="my-data" /></div>`;
+    const footer = `<button class="btn btn-secondary" onclick="closeSheet()">${t('common.cancel')}</button><button class="btn btn-primary" onclick="toast(t('toast.createdVolume'),'success');closeSheet()">${t('btn.create')}</button>`;
+    openSheet(t('sheet.newVolume'), html, footer);
+  }
+
+  function showCreateNetworkSheet() {
+    const html = `<div class="form-group"><label class="form-label">${t('form.networkName')}</label><input class="form-input" placeholder="my-network" /></div>
+      <div class="form-group"><label class="form-label">${t('form.driver')}</label><select class="form-select"><option>bridge</option><option>host</option><option>overlay</option></select></div>`;
+    const footer = `<button class="btn btn-secondary" onclick="closeSheet()">${t('common.cancel')}</button><button class="btn btn-primary" onclick="toast(t('toast.createdNetwork'),'success');closeSheet()">${t('btn.create')}</button>`;
+    openSheet(t('sheet.newNetwork'), html, footer);
+  }
+
+  function showCopyToHostSheet(id) {
+    const html = `<div class="form-group"><label class="form-label">${t('form.sourcePath')}</label><input class="form-input" placeholder="/app/data" /></div>
+      <div class="form-group"><label class="form-label">${t('form.targetPath')}</label><input class="form-input" placeholder="/home/user/data" /></div>`;
+    const footer = `<button class="btn btn-secondary" onclick="closeSheet()">${t('common.cancel')}</button><button class="btn btn-primary" onclick="toast(t('toast.copying'),'info');closeSheet()">${t('btn.copy')}</button>`;
+    openSheet(t('sheet.copyToHost'), html, footer);
+  }
+
+  function exportContainer(id) {
+    toast(t('toast.exporting'), 'info');
+    setTimeout(() => { toast(t('toast.exported'), 'success'); }, 1500);
+  }
+
+  function resizeTerminal(cid) {
+    const size = prompt(t('prompt.termSize'), '80x24');
+    if (!size) return;
+    const match = size.match(/^(\d+)x(\d+)$/);
+    if (!match) return toast(t('toast.invalidSize'), 'error');
+    const term = document.getElementById('terminal-' + cid);
+    if (term) {
+      const cols = parseInt(match[1]);
+      const rows = parseInt(match[2]);
+      term.style.width = Math.min(cols * 8, 600) + 'px';
+      term.style.maxHeight = Math.min(rows * 20, 400) + 'px';
+      toast(t('toast.termResized',{cols,rows}), 'success');
+    }
+  }
+
+  function removeExecSession(cid) {
+    toast(t('toast.sessionRemoved'), 'info');
+    closeSheet();
+  }
+
+  // ─── Network listing is read-only in container detail; connect/disconnect removed ──
+
+  // ─── Container Commit ───────────────────────────────────────────────────
+  function commitContainer(id) {
+    const c = state.containers.find(x=>x.Id===id);
+    if (!c) return;
+    const name = prompt(t('prompt.imageTag'), trName(c.Image) + ':latest');
+    if (!name) return;
+    state.images.push({
+      Id: 'sha256:' + Math.random().toString(36).slice(2,10),
+      Repository: name.split(':')[0],
+      RepoTags: [name],
+      Size: Math.floor(Math.random()*200+50)*1000000,
+      Created: Date.now(),
+      system: false
+    });
+    toast(t('toast.committed',{name}), 'success');
+    addEvent('image', 'create', name, 'success');
+    closeSheet();
+  }
+
+  // ─── Container Rename ───────────────────────────────────────────────────
+  function renameContainer(id) {
+    const c = state.containers.find(x=>x.Id===id);
+    if (!c) return;
+    const name = prompt(t('prompt.renameCtn'), trName(c.Names[0]));
+    if (!name) return;
+    c.Names = ['/'+name.trim()];
+    toast(t('toast.renamed',{name}), 'success');
+    renderCurrentView();
+  }
+
+  // ─── Image History ──────────────────────────────────────────────────────
+  function showImageHistory(id) {
+    const img = state.images.find(x=>x.Id===id);
+    if (!img) return;
+    const layers = [
+      { id: 'sha256:'+Math.random().toString(36).slice(2,8), cmd: '/bin/sh -c #(nop) ADD file in /', size: '12 MB', when: '2 days ago' },
+      { id: 'sha256:'+Math.random().toString(36).slice(2,8), cmd: '/bin/sh -c #(nop)  CMD ["node"]', size: '4 KB',  when: '2 days ago' },
+      { id: 'sha256:'+Math.random().toString(36).slice(2,8), cmd: 'RUN apk add --no-cache python3', size: '2.1 MB', when: '3 days ago' },
+      { id: 'sha256:'+Math.random().toString(36).slice(2,8), cmd: 'RUN apk add --no-cache nodejs', size: '5.4 MB', when: '3 days ago' },
+      { id: 'sha256:'+Math.random().toString(36).slice(2,8), cmd: 'FROM node:20-slim', size: '4.4 MB', when: '3 days ago' },
+    ];
+    const rows = layers.map((l,i)=>`<tr${i%2===0?'':` style="background:var(--surface)"}`}>
+      <td><span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--accent)">${l.id}</span></td>
+      <td><span style="font-size:var(--text-sm)">${esc(l.cmd)}</span></td>
+      <td><span style="font-size:var(--text-sm);color:var(--muted)">${l.size}</span></td>
+      <td><span style="font-size:var(--text-xs);color:var(--muted)">${l.when}</span></td>
+    </tr>`).join('');
+    openSheet(t('sheet.historyTitle',{name:img.RepoTags?.[0]||shortId(img.Id)}),
+      `<table class="data-table"><thead><tr><th>${t('th.layer')}</th><th>${t('th.command')}</th><th>${t('common.size')}</th><th>${t('common.created')}</th></tr></thead><tbody>${rows}</tbody></table>`,
+      '<button class="btn btn-secondary" onclick="closeSheet()">' + t('common.close') + '</button>'
+    );
+  }
+
+  // ─── Image Tag ──────────────────────────────────────────────────────────
+  function showTagImageSheet(imgId, currentTag) {
+    const html = `<div class="form-group"><label class="form-label">${t('form.currentTag')}</label><input class="form-input" value="${esc(currentTag||'')}" readonly /></div>
+      <div class="form-group"><label class="form-label">${t('form.newTag')}</label><input class="form-input" id="img-tag-input" placeholder="nginx:1.25-alpine" /></div>`;
+    const footer = `<button class="btn btn-secondary" onclick="closeSheet()">${t('common.cancel')}</button><button class="btn btn-primary" onclick="tagImage('${esc(imgId)}')">${t('btn.tag')}</button>`;
+    openSheet(t('sheet.tagImage'), html, footer);
+  }
+  function tagImage(imgId) {
+    const input = document.getElementById('img-tag-input');
+    if (!input || !input.value.trim()) return toast(t('toast.enterTag'),'error');
+    const img = state.images.find(x=>x.Id===imgId);
+    if (img && img.RepoTags) img.RepoTags.push(input.value.trim());
+    toast(t('toast.tagged',{name:input.value}), 'success');
+    addEvent('image', 'tag', input.value, 'success');
+    closeSheet();
+    renderCurrentView();
+  }
+
+  // ─── Nav ────────────────────────────────────────────────────────────────
+  function updateNavCounts() {
+    const r = state.containers.filter(c=>c.State==='running').length;
+    document.getElementById('nav-containers-count').textContent = `${r}/${state.containers.length}`;
+    document.getElementById('nav-images-count').textContent = state.images.length;
+    document.getElementById('nav-stacks-count').textContent = state.stacks.length;
+  }
+
+  document.querySelectorAll('.nav-item').forEach(el => el.addEventListener('click', () => { navigateTo(el.dataset.route); closeSidebar(); }));
+
+  document.getElementById('btn-refresh').addEventListener('click', refreshAll);
+
+  // ─── Enhanced Search ───────────────────────────────────────────────────
+  const searchInput = document.getElementById('global-search');
+  const searchDropdown = document.getElementById('search-dropdown');
+  let searchActiveIdx = -1;
+  let searchResults = [];
+
+  function searchAll(q) {
+    const results = [];
+    state.containers.forEach(c => {
+      const name = trName(c.Names[0]);
+      if (name.toLowerCase().includes(q) || c.Image.toLowerCase().includes(q) || shortId(c.Id).includes(q)) {
+        results.push({ group: t('nav.containers'), name, meta: c.Image, route: 'containers', action: () => openContainerDetail(c.Id) });
+      }
+    });
+    state.images.forEach(img => {
+      const tag = img.RepoTags?.[0] || '';
+      if (tag.toLowerCase().includes(q) || (img.Repository||'').toLowerCase().includes(q)) {
+        results.push({ group: t('nav.images'), name: tag || shortId(img.Id), meta: formatBytes(img.Size), route: 'images' });
+      }
+    });
+    state.volumes.forEach(v => {
+      if (v.Name.toLowerCase().includes(q)) {
+        results.push({ group: t('nav.volumes'), name: v.Name, meta: v.Usage, route: 'volumes' });
+      }
+    });
+    state.stacks.forEach(s => {
+      if (s.name.toLowerCase().includes(q)) {
+        results.push({ group: t('nav.stacks'), name: s.name, meta: s.status, route: 'stacks', action: () => selectStack(s.id) });
+      }
+    });
+    return results;
+  }
+
+  function renderSearchDropdown(results) {
+    if (!results.length) { searchDropdown.classList.remove('open'); searchDropdown.innerHTML = ''; return; }
+    const groups = {};
+    results.forEach(r => { (groups[r.group] = groups[r.group] || []).push(r); });
+    let html = '', idx = 0;
+    for (const [group, items] of Object.entries(groups)) {
+      html += `<div class="search-group"><div class="search-group-label">${esc(group)}</div>`;
+      items.forEach(item => {
+        html += `<div class="search-result-item" data-idx="${idx}" data-route="${item.route}">
+          <span class="sr-name">${esc(item.name)}</span><span class="sr-meta">${esc(item.meta)}</span>
+        </div>`;
+        idx++;
+      });
+      html += '</div>';
+    }
+    searchDropdown.innerHTML = html;
+    searchDropdown.classList.add('open');
+    searchResults = results;
+    searchActiveIdx = -1;
+  }
+
+  function highlightSearchItem(idx) {
+    searchDropdown.querySelectorAll('.search-result-item').forEach(el => el.classList.remove('active'));
+    if (idx >= 0 && idx < searchResults.length) {
+      const el = searchDropdown.querySelector(`[data-idx="${idx}"]`);
+      if (el) { el.classList.add('active'); el.scrollIntoView({ block: 'nearest' }); }
+    }
+    searchActiveIdx = idx;
+  }
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    if (!q) { searchDropdown.classList.remove('open'); searchResults = []; return; }
+    renderSearchDropdown(searchAll(q));
+  });
+
+  searchInput.addEventListener('keydown', e => {
+    const items = searchDropdown.querySelectorAll('.search-result-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); highlightSearchItem(Math.min(searchActiveIdx + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); highlightSearchItem(Math.max(searchActiveIdx - 1, 0)); }
+    else if (e.key === 'Enter' && searchActiveIdx >= 0) {
+      e.preventDefault();
+      const r = searchResults[searchActiveIdx];
+      if (r) {
+        navigateTo(r.route);
+        if (r.action) setTimeout(r.action, 80);
+        searchDropdown.classList.remove('open');
+        searchInput.value = '';
+        searchInput.blur();
+      }
+    } else if (e.key === 'Escape') {
+      searchDropdown.classList.remove('open');
+      searchInput.blur();
+    }
+  });
+
+  searchInput.addEventListener('blur', () => {
+    setTimeout(() => searchDropdown.classList.remove('open'), 150);
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeSheet(); closeDialog(); }
+    if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('global-search')?.focus(); }
+  });
+
+  // ─── LiveFeed (simulated WebSocket) ────────────────────────────────────
+  // 单一长连接事件源驱动 容器状态/事件流/仪表盘统计；系统自发变化不打扰用户（无 toast），
+  // 只体现在数据与事件流中；用户主动操作的反馈才使用 toast。
+  const liveFeed = {
+    timer: null,
+    start() { this.timer = setInterval(() => this.tick(), 6000); },
+    tick() {
+      if (Math.random() < 0.3) return; // 静默周期：长连接并非每拍都有事件
+      const pool = state.containers.filter(c => !c.system && c.State === 'running');
+      if (!pool.length) return;
+      const c = pool[Math.floor(Math.random() * pool.length)];
+      const name = trName(c.Names[0]);
+      const roll = Math.random();
+      if (roll < 0.6) {
+        addEvent('container', 'health', name, 'success');
+      } else if (roll < 0.9) {
+        c.upHours = c.upHours || 1;
+        addEvent('container', 'restart', name, 'success');
+      } else {
+        c.State = 'exited'; c.exitCode = 137; c.exitMinAgo = 1;
+        addEvent('container', 'die', name, 'error');
+      }
+      updateNavCounts();
+      renderCurrentView();
+    },
+  };
+  liveFeed.start();
+
+  // ─── Init ───────────────────────────────────────────────────────────────
+  updateNavCounts();
+  navigateTo('dashboard');
+})();
+  </script>
+</body>
+</html>
