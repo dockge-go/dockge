@@ -23,7 +23,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-const tokenTTL = time.Hour * 24 * 7
+// SessionTTL 是本地会话（JWT 与 dockge_token cookie）的有效期。
+const SessionTTL = time.Hour * 24 * 7
 
 // 登录限流：单个「IP+账号」键在窗口期内的最大尝试次数与键容量上限。
 const (
@@ -50,13 +51,9 @@ type AuthService interface {
 	// IsAdmin 报告指定用户是否为管理员。
 	IsAdmin(ctx context.Context, uid uint) (bool, error)
 	// ProxyLogin 把受信反代注入的身份换成本地会话。
-	ProxyLogin(ctx context.Context, headers map[string]string, remoteAddr string) (*v1.LoginResponseData, error)
+	ProxyLogin(ctx context.Context, username string, remoteAddr string) (*v1.LoginResponseData, error)
 	// OIDCLogin 把验签后的 OIDC 身份换成本地会话。
 	OIDCLogin(ctx context.Context, username string, admin bool) (*v1.LoginResponseData, error)
-	// SessionFor 为已认证用户签发会话（OIDC 票据兑换用）。
-	SessionFor(ctx context.Context, uid uint) (*v1.LoginResponseData, error)
-	// ExternalAuthStatus 返回外部认证模式开关，供登录页探测。
-	ExternalAuthStatus() v1.ExternalAuthStatusData
 	// GetDisableAuth 读取免登录模式开关。
 	GetDisableAuth(ctx context.Context) bool
 	// ToggleDisableAuth 切换免登录模式。
@@ -70,21 +67,15 @@ type authService struct {
 	*Service
 	loginLimiter *rate.KeyedLimiter
 	proxyCfg     authproxy.Config
-	oidc         *OIDCService
 }
 
 // NewAuthService 构造认证服务（含按 IP+账号的登录限流器），由注入容器调用。
 func NewAuthService(i do.Injector) (AuthService, error) {
 	conf := do.MustInvoke[*viper.Viper](i)
-	oidc, err := NewOIDCService(i)
-	if err != nil {
-		return nil, err
-	}
 	return &authService{
 		Service:      do.MustInvoke[*Service](i),
 		loginLimiter: rate.NewKeyed(loginRateLimit, loginRateWindow, loginMaxKeys),
 		proxyCfg:     authproxy.FromViper(conf),
-		oidc:         oidc,
 	}, nil
 }
 
@@ -268,24 +259,19 @@ func (s *authService) IsAdmin(ctx context.Context, uid uint) (bool, error) {
 
 // ProxyLogin 受信反代模式：来源命中受信网段时读取身份头，映射为本地会话。
 // 伪造来源（非受信 IP 携带身份头）一律拒绝。
-func (s *authService) ProxyLogin(ctx context.Context, headers map[string]string, remoteAddr string) (*v1.LoginResponseData, error) {
-	if !s.proxyCfg.Enabled {
-		return nil, &v1.Error{Code: 404, Message: "反向代理认证未启用"}
-	}
+func (s *authService) ProxyLogin(ctx context.Context, username string, remoteAddr string) (*v1.LoginResponseData, error) {
 	if !s.proxyCfg.TrustedIP(remoteAddr) {
 		return nil, v1.ErrUnauthorized
 	}
-	identity, ok := s.proxyCfg.FromHeaders(headers)
-	if !ok {
+	if username == "" {
 		return nil, v1.ErrUnauthorized
 	}
-	return s.externalLogin(ctx, identity.User, model.SourceProxy, false, s.proxyCfg.AutoProvision)
+	return s.externalLogin(ctx, username, model.SourceProxy, false, s.proxyCfg.AutoProvision)
 }
 
-// OIDCLogin 把验签后的 OIDC 身份映射为本地用户并签发会话。
+// OIDCLogin 把验签后的 OIDC 身份映射为本地用户并签发会话（OIDC 身份始终自动开通）。
 func (s *authService) OIDCLogin(ctx context.Context, username string, admin bool) (*v1.LoginResponseData, error) {
-	auto := s.oidc != nil && s.oidc.Enabled()
-	return s.externalLogin(ctx, username, model.SourceOIDC, admin, auto)
+	return s.externalLogin(ctx, username, model.SourceOIDC, admin, true)
 }
 
 // externalLogin 是 ProxyLogin/OIDCLogin 的公共主体：
@@ -329,26 +315,6 @@ func (s *authService) externalLogin(ctx context.Context, username, source string
 	return s.session(&user)
 }
 
-// SessionFor 为已认证用户签发会话（OIDC 一次性票据兑换用）。
-func (s *authService) SessionFor(ctx context.Context, uid uint) (*v1.LoginResponseData, error) {
-	user, err := s.repo.GetUser(ctx, uid)
-	if err != nil {
-		return nil, v1.ErrUnauthorized
-	}
-	if !user.Active {
-		return nil, v1.ErrUnauthorized
-	}
-	return s.session(&user)
-}
-
-// ExternalAuthStatus 返回外部认证模式开关，供登录页决定展示哪些入口。
-func (s *authService) ExternalAuthStatus() v1.ExternalAuthStatusData {
-	return v1.ExternalAuthStatusData{
-		Proxy: s.proxyCfg.Enabled,
-		OIDC:  s.oidc != nil && s.oidc.Enabled(),
-	}
-}
-
 // GetDisableAuth 读取免登录模式开关。
 func (s *authService) GetDisableAuth(ctx context.Context) bool {
 	v, err := s.repo.GetSetting(ctx, "disableAuth")
@@ -384,7 +350,7 @@ func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, err
 	}
 	for _, u := range users {
 		if u.Active {
-			token, err := s.jwt.GenToken(u.ID, u.Password, time.Now().Add(tokenTTL))
+			token, err := s.jwt.GenToken(u.ID, u.Password, time.Now().Add(SessionTTL))
 			if err != nil {
 				return nil, v1.ErrInternalServerError
 			}
@@ -399,7 +365,7 @@ func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, err
 
 // session 签发绑定密码哈希的本地 JWT。
 func (s *authService) session(user *model.DockgeUser) (*v1.LoginResponseData, error) {
-	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(tokenTTL))
+	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(SessionTTL))
 	if err != nil {
 		return nil, v1.ErrInternalServerError
 	}

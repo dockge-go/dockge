@@ -319,16 +319,3 @@ type UpdateUserRequest struct {
 type ResetUserPasswordRequest struct {
 	NewPassword string `json:"newPassword" binding:"required,min=6"`
 }
-
-// -------- 外部认证 --------
-
-// ExternalAuthStatusData 是登录页探测外部认证模式的响应。
-type ExternalAuthStatusData struct {
-	Proxy bool `json:"proxy"`
-	OIDC  bool `json:"oidc"`
-}
-
-// OIDCExchangeRequest 是一次性票据兑换本地 JWT 的请求体。
-type OIDCExchangeRequest struct {
-	Code string `json:"code" binding:"required"`
-}
