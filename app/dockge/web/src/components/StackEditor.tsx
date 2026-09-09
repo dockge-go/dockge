@@ -1,5 +1,6 @@
 import { Show, createMemo } from "solid-js";
 import { Check, Maximize2, Minimize2 } from "lucide-solid";
+import { t } from "../i18n";
 
 export function StackEditor(props: {
   file: "compose" | "env";
@@ -25,18 +26,18 @@ export function StackEditor(props: {
     <section class={`stack-editor ${props.fullscreen ? "editor-fullscreen" : ""}`}>
       <header class="stack-editor-toolbar">
         <span class={`editor-validation ${valid() ? "valid" : "invalid"}`}>
-          <Check size={13} /> {valid() ? "YAML 结构有效" : "缺少 services 段"}
+          <Check size={13} /> {valid() ? t("editor.validYaml") : t("editor.missingServices")}
         </span>
         <span class="toolbar-spacer" />
         <button class="btn btn-ghost" onClick={() => props.onFullscreenChange(!props.fullscreen)}>
           <Show when={props.fullscreen} fallback={<Maximize2 size={13} />}><Minimize2 size={13} /></Show>
-          {props.fullscreen ? "退出全屏" : "全屏"}
+          {props.fullscreen ? t("editor.exitFullscreen") : t("editor.fullscreen")}
         </button>
       </header>
       <div class="stack-editor-surface">
         <pre class="stack-editor-lines">{lineNumbers()}</pre>
         <textarea
-          aria-label={props.file === "compose" ? "Compose YAML" : "环境变量"}
+          aria-label={props.file === "compose" ? "Compose YAML" : t("tab.env")}
           spellcheck={false}
           readOnly={props.readonly}
           value={content()}
@@ -45,8 +46,8 @@ export function StackEditor(props: {
       </div>
       <footer class="stack-editor-status">
         <span>{props.file === "compose" ? "compose.yaml" : ".env"}</span>
-        <span>{content().split("\n").length} 行</span>
-        <Show when={props.readonly}><span>只读</span></Show>
+        <span>{t("editor.lines", { n: content().split("\n").length })}</span>
+        <Show when={props.readonly}><span>{t("editor.readonly")}</span></Show>
       </footer>
       <Show when={props.output}>
         <pre class="operation-output">{props.output}</pre>

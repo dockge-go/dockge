@@ -5,6 +5,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { getToken } from "../api/api";
+import { t } from "../i18n";
 
 export function TerminalPane(props: { name: string; type: "exec" | "compose-logs" }) {
   let host!: HTMLDivElement;
@@ -39,7 +40,7 @@ export function TerminalPane(props: { name: string; type: "exec" | "compose-logs
       `${proto}://${location.host}/v1/terminal/${encodeURIComponent(props.name)}/${props.type}${tail ? `${tail}&token=` : "?token="}${encodeURIComponent(getToken())}`,
     );
     ws.onmessage = (ev) => term.write(String(ev.data));
-    ws.onclose = () => term.write("\r\n\x1b[33m会话已结束\x1b[0m\r\n");
+    ws.onclose = () => term.write(`\r\n\x1b[33m${t("term.sessionEnded")}\x1b[0m\r\n`);
     ws.onopen = () =>
       send(JSON.stringify({ type: "resize", data: { rows: term.rows, cols: term.cols } }));
     term.onData((d) => {
