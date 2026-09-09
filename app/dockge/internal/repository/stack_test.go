@@ -1,6 +1,14 @@
 package repository
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"dockge/app/dockge/internal/model"
+)
 
 // TestTrimStackOutput 校验 compose 输出的首尾空白行规整。
 func TestTrimStackOutput(t *testing.T) {
@@ -19,6 +27,24 @@ func TestTrimStackOutput(t *testing.T) {
 				t.Errorf("TrimStackOutput(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSaveRemovesStaleEnv 校验保存时 env 为空须删除残留 .env：
+// 否则 UI 清空后旧文件复活，compose 读取坏内容导致栈永远无法启动。
+func TestSaveRemovesStaleEnv(t *testing.T) {
+	r := &Repository{stacksDir: t.TempDir()}
+	ctx := context.Background()
+	stack := &model.Stack{Name: "te", Yaml: "services: {}\n", Env: "A=1\n", ComposeFileName: "compose.yaml"}
+	if err := r.Save(ctx, stack, true); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	stack.Env = ""
+	if err := r.Save(ctx, stack, false); err != nil {
+		t.Fatalf("save with empty env: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(r.stacksDir, "te", ".env")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale .env should be removed after saving empty env, stat err = %v", err)
 	}
 }
 

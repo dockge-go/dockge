@@ -166,6 +166,8 @@ func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) e
 		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(stack.Env), 0o600); err != nil {
 			return fmt.Errorf("write .env: %w", err)
 		}
+	} else if err := os.Remove(filepath.Join(dir, ".env")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale .env: %w", err)
 	}
 	return nil
 }
