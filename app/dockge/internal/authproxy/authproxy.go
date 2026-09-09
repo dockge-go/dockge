@@ -1,60 +1,36 @@
 // Package authproxy 实现「受信反向代理头」认证模式：
-// Traefik forwardAuth + Authelia/Authentik 等在转发请求时注入 Remote-* 身份头，
+// Traefik forwardAuth + Authelia/Authentik 等在转发请求时注入身份头，
 // dockge 仅在请求来源命中受信网段时读取这些头，映射到本地用户并签发本地 JWT。
+// 配置命名空间：security.auth.proxy.{trusted_proxies, username_header, auto_provision}。
 package authproxy
 
 import (
 	"net/netip"
-	"strings"
 
 	"github.com/spf13/viper"
 )
 
 // Config 是受信反代认证模式的配置。
 type Config struct {
-	Enabled        bool
-	TrustedProxies []netip.Prefix
-	HeaderUser     string
-	HeaderEmail    string
-	HeaderName     string
-	HeaderGroups   string
-	AutoProvision  bool
+	TrustedProxies []netip.Prefix // 受信来源网段；为空时拒绝一切代理认证（fail-closed）
+	UsernameHeader string         // 携带用户名的请求头，默认 X-Forwarded-User
+	AutoProvision  bool           // 是否自动创建不存在的本地用户
 }
 
-// Identity 是从受信代理头提取出的外部身份。
-type Identity struct {
-	User   string
-	Email  string
-	Name   string
-	Groups []string
-}
-
-// FromViper 从配置读取 auth.proxy 段；未配置时返回关闭状态。
+// FromViper 从 security.auth.proxy 段读取配置；未配置时返回关闭状态。
+// 非法 CIDR 直接忽略（fail-closed：该来源不会被信任，认证必然失败）。
 func FromViper(conf *viper.Viper) Config {
 	cfg := Config{
-		Enabled:       conf.GetBool("auth.proxy.enabled"),
-		HeaderUser:    conf.GetString("auth.proxy.headers.user"),
-		HeaderEmail:   conf.GetString("auth.proxy.headers.email"),
-		HeaderName:    conf.GetString("auth.proxy.headers.name"),
-		HeaderGroups:  conf.GetString("auth.proxy.headers.groups"),
-		AutoProvision: conf.GetBool("auth.proxy.auto_provision"),
+		UsernameHeader: conf.GetString("security.auth.proxy.username_header"),
+		AutoProvision:  conf.GetBool("security.auth.proxy.auto_provision"),
 	}
-	if cfg.HeaderUser == "" {
-		cfg.HeaderUser = "Remote-User"
+	if cfg.UsernameHeader == "" {
+		cfg.UsernameHeader = "X-Forwarded-User"
 	}
-	if cfg.HeaderEmail == "" {
-		cfg.HeaderEmail = "Remote-Email"
-	}
-	if cfg.HeaderName == "" {
-		cfg.HeaderName = "Remote-Name"
-	}
-	if cfg.HeaderGroups == "" {
-		cfg.HeaderGroups = "Remote-Groups"
-	}
-	for _, cidr := range conf.GetStringSlice("auth.proxy.trusted_proxies") {
+	for _, cidr := range conf.GetStringSlice("security.auth.proxy.trusted_proxies") {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {
-			continue // 非法 CIDR 直接忽略，避免一条坏配置导致启动失败
+			continue // 非法 CIDR 忽略：该来源不被信任，认证失败而非放行
 		}
 		cfg.TrustedProxies = append(cfg.TrustedProxies, p)
 	}
@@ -62,6 +38,7 @@ func FromViper(conf *viper.Viper) Config {
 }
 
 // TrustedIP 报告远端地址是否命中受信网段。
+// 未配置任何受信网段时一律返回 false，杜绝「无 CIDR 也信任代理头」的开放风险。
 func (c Config) TrustedIP(remoteAddr string) bool {
 	if len(c.TrustedProxies) == 0 {
 		return false
@@ -80,19 +57,4 @@ func (c Config) TrustedIP(remoteAddr string) bool {
 		}
 	}
 	return false
-}
-
-// FromHeaders 从请求头提取身份；user 头为空即视为无身份。
-// headers 以 "Header-Name: value" 键值对传入（由调用方从 http.Header 展开）。
-func (c Config) FromHeaders(headers map[string]string) (Identity, bool) {
-	id := Identity{User: headers[c.HeaderUser], Email: headers[c.HeaderEmail], Name: headers[c.HeaderName]}
-	if id.User == "" {
-		return id, false
-	}
-	for _, g := range strings.Split(headers[c.HeaderGroups], ",") {
-		if g = strings.TrimSpace(g); g != "" {
-			id.Groups = append(id.Groups, g)
-		}
-	}
-	return id, true
 }
