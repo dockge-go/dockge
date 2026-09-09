@@ -9,6 +9,7 @@ import { EmptyState, SectionHeader, SpinnerBlock } from "../components/widgets";
 import { errText } from "../api/format";
 import { Pagination } from "../components/Pagination";
 import { clampPage, paginate } from "../lib/pagination";
+import { t } from "../i18n";
 
 export function Networks() {
   const [detailName, setDetailName] = createSignal<string | null>(null);
@@ -39,7 +40,7 @@ export function Networks() {
     setBusy(true);
     try {
       await api.createNetwork(name().trim(), driver(), subnet().trim());
-      toast("网络已创建", "success");
+      toast(t("toast.networkCreated"), "success");
       setCreateOpen(false);
       setName("");
       setSubnet("");
@@ -52,10 +53,10 @@ export function Networks() {
   };
 
   const remove = async (n: string) => {
-    if (!(await confirmDialog("删除网络", `确定删除网络 ${n}？仅未使用的网络可删除。`))) return;
+    if (!(await confirmDialog(t("net.confirmRemove"), t("net.confirmRemoveDesc", { name: n })))) return;
     try {
       await api.removeNetwork(n);
-      toast("网络已删除", "success");
+      toast(t("toast.networkDeleted"), "success");
       await refresh(false);
     } catch (e) {
       toast(errText(e), "error");
@@ -63,10 +64,10 @@ export function Networks() {
   };
 
   const prune = async () => {
-    if (!(await confirmDialog("清理未使用网络", "将删除所有未被容器使用的自定义网络。继续？"))) return;
+    if (!(await confirmDialog(t("net.pruneTitle"), t("net.pruneDesc")))) return;
     try {
       await api.pruneNetworks();
-      toast("已清理未使用网络", "success");
+      toast(t("toast.pruneNetworks"), "success");
       await refresh(false);
     } catch (e) {
       toast(errText(e), "error");
@@ -76,28 +77,28 @@ export function Networks() {
   return (
     <div class="view-section">
       <SectionHeader
-        title="Networks"
+        title={t("net.title")}
         subtitle={`${rows().length} networks`}
         actions={
           <>
             <button class="btn-clear" onClick={() => void prune()}>
-              清空未使用网络
+              {t("net.clearUnused", { n: rows().length })}
             </button>
             <button class="btn btn-primary" onClick={() => setCreateOpen(true)}>
-              <Plus size={14} /> New Network
+              <Plus size={14} /> {t("net.new")}
             </button>
           </>
         }
       />
       <Show
         when={rows().length > 0}
-        fallback={<EmptyState title="暂无网络" icon={<Network size={44} />} />}
+        fallback={<EmptyState title={t("net.empty")} icon={<Network size={44} />} />}
       >
         <table class="data-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Driver</th>
+              <th>{t("net.detailName")}</th>
+              <th>{t("net.detailDriver")}</th>
               <th style={{ width: "80px" }}></th>
             </tr>
           </thead>
@@ -114,7 +115,7 @@ export function Networks() {
                       <button
                         class="btn-icon"
                         style={{ color: "var(--danger)" }}
-                        title="Remove"
+                        title={t("common.remove")}
                         onClick={() => void remove(n)}
                       >
                         <Trash2 size={14} />
@@ -134,14 +135,14 @@ export function Networks() {
         open={!!detailName()}
         onOpenChange={(o) => !o && setDetailName(null)}
         title={detailName() ?? ""}
-        footer={<button class="btn btn-secondary" onClick={() => setDetailName(null)}>Close</button>}
+        footer={<button class="btn btn-secondary" onClick={() => setDetailName(null)}>{t("common.close")}</button>}
       >
         <Show when={detail()} fallback={<SpinnerBlock />}>
           <div class="detail-grid">
-            <div class="od-field"><span class="od-label">Name</span><span class="od-value">{detail()?.Name}</span></div>
-            <div class="od-field"><span class="od-label">Driver</span><span class="od-value">{detail()?.Driver ?? "—"}</span></div>
-            <div class="od-field"><span class="od-label">Subnet</span><span class="od-value">{detail()?.IPAM?.Config?.[0]?.Subnet ?? "—"}</span></div>
-            <div class="od-field"><span class="od-label">Gateway</span><span class="od-value">{detail()?.IPAM?.Config?.[0]?.Gateway ?? "—"}</span></div>
+            <div class="od-field"><span class="od-label">{t("net.detailName")}</span><span class="od-value">{detail()?.Name}</span></div>
+            <div class="od-field"><span class="od-label">{t("net.detailDriver")}</span><span class="od-value">{detail()?.Driver ?? "—"}</span></div>
+            <div class="od-field"><span class="od-label">{t("net.detailSubnet")}</span><span class="od-value">{detail()?.IPAM?.Config?.[0]?.Subnet ?? "—"}</span></div>
+            <div class="od-field"><span class="od-label">{t("net.detailGateway")}</span><span class="od-value">{detail()?.IPAM?.Config?.[0]?.Gateway ?? "—"}</span></div>
           </div>
         </Show>
       </Sheet>
@@ -150,20 +151,20 @@ export function Networks() {
       <Sheet
         open={createOpen()}
         onOpenChange={setCreateOpen}
-        title="New Network"
+        title={t("net.new")}
         footer={
           <>
-            <button class="btn btn-secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
-            <button class="btn btn-primary" disabled={busy() || !name().trim()} onClick={() => void create()}>Create</button>
+            <button class="btn btn-secondary" onClick={() => setCreateOpen(false)}>{t("common.cancel")}</button>
+            <button class="btn btn-primary" disabled={busy() || !name().trim()} onClick={() => void create()}>{t("stack.create")}</button>
           </>
         }
       >
         <div class="form-group">
-          <label class="form-label">网络名称</label>
+          <label class="form-label">{t("net.networkName")}</label>
           <input class="form-input" placeholder="my-network" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
         </div>
         <div class="form-group">
-          <label class="form-label">Driver</label>
+          <label class="form-label">{t("common.driver")}</label>
           <select class="form-select" value={driver()} onChange={(e) => setDriver(e.currentTarget.value)}>
             <option value="bridge">bridge</option>
             <option value="host">host</option>
@@ -171,7 +172,7 @@ export function Networks() {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">子网（可选）</label>
+          <label class="form-label">{t("net.subnet")}</label>
           <input class="form-input" placeholder="172.20.0.0/16" value={subnet()} onInput={(e) => setSubnet(e.currentTarget.value)} />
         </div>
       </Sheet>

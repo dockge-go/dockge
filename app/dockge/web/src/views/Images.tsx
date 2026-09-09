@@ -9,6 +9,7 @@ import { EmptyState, SectionHeader } from "../components/widgets";
 import { errText, shortId } from "../api/format";
 import { Pagination } from "../components/Pagination";
 import { clampPage, paginate } from "../lib/pagination";
+import { t } from "../i18n";
 
 export function Images() {
   const [pullOpen, setPullOpen] = createSignal(false);
@@ -26,7 +27,7 @@ export function Images() {
     setBusy(true);
     try {
       await api.pullImage(reference().trim());
-      toast(`镜像 ${reference()} 已拉取`, "success");
+      toast(t("toast.imagePulled", { ref: reference() }), "success");
       setPullOpen(false);
       setReference("");
       await refresh(false);
@@ -38,10 +39,10 @@ export function Images() {
   };
 
   const remove = async (id: string) => {
-    if (!(await confirmDialog("删除镜像", `确定删除镜像 ${shortId(id)}？使用中的镜像会跳过。`))) return;
+    if (!(await confirmDialog(t("common.delete"), t("img.confirmRemoveDesc", { id: shortId(id) })))) return;
     try {
       await api.removeImage(id);
-      toast("镜像已删除", "success");
+      toast(t("toast.imageRemoved"), "success");
       await refresh(false);
     } catch (e) {
       toast(errText(e), "error");
@@ -49,10 +50,10 @@ export function Images() {
   };
 
   const prune = async () => {
-    if (!(await confirmDialog("清理未使用镜像", "将删除所有未被容器使用的镜像，释放磁盘空间。继续？"))) return;
+    if (!(await confirmDialog(t("img.pruneTitle"), t("img.pruneDesc")))) return;
     try {
       await api.pruneImages();
-      toast("已清理未使用镜像", "success");
+      toast(t("toast.pruneImages"), "success");
       await refresh(false);
     } catch (e) {
       toast(errText(e), "error");
@@ -62,30 +63,30 @@ export function Images() {
   return (
     <div class="view-section">
       <SectionHeader
-        title="Images"
+        title={t("img.title")}
         subtitle={`${rows().length} images`}
         actions={
           <>
             <button class="btn-clear" onClick={() => void prune()}>
-              清空未使用镜像
+              {t("img.clearUnused", { n: rows().length })}
             </button>
             <button class="btn btn-primary" onClick={() => setPullOpen(true)}>
-              <Plus size={14} /> Pull Image
+              <Plus size={14} /> {t("img.pull")}
             </button>
           </>
         }
       />
       <Show
         when={rows().length > 0}
-        fallback={<EmptyState title="暂无镜像" desc="拉取一个镜像开始使用。" icon={<Image size={44} />} />}
+        fallback={<EmptyState title={t("img.empty")} desc={t("img.emptyDesc")} icon={<Image size={44} />} />}
       >
         <table class="data-table">
           <thead>
             <tr>
               <th>Repository</th>
-              <th>Tag</th>
-              <th>Size</th>
-              <th>Created</th>
+              <th>{t("common.tag")}</th>
+              <th>{t("common.size")}</th>
+              <th>{t("common.created")}</th>
               <th style={{ width: "80px" }}></th>
             </tr>
           </thead>
@@ -105,7 +106,7 @@ export function Images() {
                       <button
                         class="btn-icon"
                         style={{ color: "var(--danger)" }}
-                        title="Remove"
+                        title={t("common.remove")}
                         onClick={() => void remove(img.id)}
                       >
                         <Trash2 size={14} />
@@ -123,18 +124,18 @@ export function Images() {
       <Sheet
         open={pullOpen()}
         onOpenChange={setPullOpen}
-        title="Pull Image"
+        title={t("img.pull")}
         footer={
           <>
-            <button class="btn btn-secondary" onClick={() => setPullOpen(false)}>Cancel</button>
+            <button class="btn btn-secondary" onClick={() => setPullOpen(false)}>{t("common.cancel")}</button>
             <button class="btn btn-primary" disabled={busy() || !reference().trim()} onClick={() => void pull()}>
-              <Download size={14} /> {busy() ? "拉取中…" : "Pull"}
+              <Download size={14} /> {busy() ? t("img.pulling") : t("img.pull")}
             </button>
           </>
         }
       >
         <div class="form-group">
-          <label class="form-label">镜像引用</label>
+          <label class="form-label">{t("img.reference")}</label>
           <input
             class="form-input"
             placeholder="nginx:latest"
@@ -142,7 +143,7 @@ export function Images() {
             value={reference()}
             onInput={(e) => setReference(e.currentTarget.value)}
           />
-          <p class="form-help">例如 nginx:latest、ubuntu:22.04、ghcr.io/owner/repo:tag</p>
+          <p class="form-help">{t("img.referenceHelp")}</p>
         </div>
       </Sheet>
     </div>

@@ -8,6 +8,7 @@ import { EmptyState, SectionHeader } from "../components/widgets";
 import { errText } from "../api/format";
 import { Pagination } from "../components/Pagination";
 import { clampPage, paginate } from "../lib/pagination";
+import { t } from "../i18n";
 
 export function Volumes() {
   const [page, setPage] = createSignal(1);
@@ -17,10 +18,10 @@ export function Volumes() {
   createEffect(() => setPage((value) => clampPage(value, rows().length)));
 
   const remove = async (name: string) => {
-    if (!(await confirmDialog("删除数据卷", `确定删除卷 ${name}？其中的数据将丢失。`))) return;
+    if (!(await confirmDialog(t("vol.confirmRemove"), t("vol.confirmRemoveDesc", { name })))) return;
     try {
       await api.removeVolume(name);
-      toast("卷已删除", "success");
+      toast(t("toast.volumeDeleted"), "success");
       await refresh(false);
     } catch (e) {
       toast(errText(e), "error");
@@ -28,10 +29,10 @@ export function Volumes() {
   };
 
   const prune = async () => {
-    if (!(await confirmDialog("清理未使用卷", "将删除所有未被容器引用的数据卷，数据不可恢复。继续？"))) return;
+    if (!(await confirmDialog(t("vol.pruneTitle"), t("vol.pruneDesc")))) return;
     try {
       await api.pruneVolumes();
-      toast("已清理未使用卷", "success");
+      toast(t("toast.pruneVolumes"), "success");
       await refresh(false);
     } catch (e) {
       toast(errText(e), "error");
@@ -41,23 +42,23 @@ export function Volumes() {
   return (
     <div class="view-section">
       <SectionHeader
-        title="Volumes"
+        title={t("vol.title")}
         subtitle={`${rows().length} volumes`}
         actions={
           <button class="btn-clear" onClick={() => void prune()}>
-            清空未使用卷
+            {t("vol.clearUnused", { n: rows().length })}
           </button>
         }
       />
       <Show
         when={rows().length > 0}
-        fallback={<EmptyState title="暂无数据卷" icon={<HardDrive size={44} />} />}
+        fallback={<EmptyState title={t("vol.empty")} icon={<HardDrive size={44} />} />}
       >
         <table class="data-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Driver</th>
+              <th>{t("net.detailName")}</th>
+              <th>{t("net.detailDriver")}</th>
               <th style={{ width: "80px" }}></th>
             </tr>
           </thead>
@@ -72,7 +73,7 @@ export function Volumes() {
                       <button
                         class="btn-icon"
                         style={{ color: "var(--danger)" }}
-                        title="Remove"
+                        title={t("common.remove")}
                         onClick={() => void remove(v.name)}
                       >
                         <Trash2 size={14} />

@@ -9,6 +9,7 @@ import { EmptyState, LiveDot, SectionHeader, StatusBadge } from "../components/w
 import { errText, shortId } from "../api/format";
 import { clampPage, paginate } from "../lib/pagination";
 import { pendingContainer, refresh, setPendingContainer, snapshot, toast } from "../store/index";
+import { t } from "../i18n";
 
 export function Containers() {
   const [showAll, setShowAll] = createSignal(false);
@@ -52,7 +53,7 @@ export function Containers() {
     setBusy(true);
     try {
       await api.containerAction(id, value);
-      toast(`${shortId(id)} 已发送${value}指令`, "success");
+      toast(t("toast.actionSent", { id: shortId(id), action: value }), "success");
       await refresh(false);
     } catch (error) {
       toast(errText(error), "error");
@@ -62,11 +63,11 @@ export function Containers() {
   };
 
   const remove = async (id: string) => {
-    if (!(await confirmDialog("删除容器", `确定强制删除容器 ${shortId(id)}？此操作不可恢复。`))) return;
+    if (!(await confirmDialog(t("common.delete"), t("ctn.confirmRemoveDesc", { id: shortId(id) })))) return;
     try {
       await api.removeContainer(id);
       setDetailId(null);
-      toast("容器已删除", "success");
+      toast(t("toast.containerDeleted"), "success");
       await refresh(false);
     } catch (error) {
       toast(errText(error), "error");
@@ -74,11 +75,11 @@ export function Containers() {
   };
 
   const pruneStopped = async () => {
-    if (!stoppedCount()) return toast("没有已停止的容器", "info");
-    if (!(await confirmDialog("清空已停止容器", `将删除 ${stoppedCount()} 个已停止容器，继续？`))) return;
+    if (!stoppedCount()) return toast(t("ctn.noStopped"), "info");
+    if (!(await confirmDialog(t("ctn.clearStopped", { n: stoppedCount() }), t("ctn.pruneStoppedDesc", { n: stoppedCount() })))) return;
     try {
       await api.pruneContainers();
-      toast("已清理停止的容器", "success");
+      toast(t("toast.pruneStopped"), "success");
       await refresh(false);
     } catch (error) {
       toast(errText(error), "error");
@@ -92,18 +93,18 @@ export function Containers() {
         subtitle={`${snapshot()?.docker.containersTotal ?? 0} total · ${snapshot()?.docker.containersRunning ?? 0} running · SSE`}
         actions={
           <>
-            <button class="btn-clear" onClick={() => void pruneStopped()}>清空已停止 ({stoppedCount()})</button>
+            <button class="btn-clear" onClick={() => void pruneStopped()}>{t("ctn.clearStopped", { n: stoppedCount() })}</button>
             <label class="filter-toggle">
               <input type="checkbox" checked={showAll()} onChange={(event) => { setShowAll(event.currentTarget.checked); setPage(1); }} />
-              显示全部
+              {t("ctn.showAll")}
             </label>
           </>
         }
       />
 
       <div class="master-detail" classList={{ "has-detail": Boolean(current()) }}>
-        <section class="master-pane" aria-label="容器列表">
-          <Show when={rows().length > 0} fallback={<EmptyState title={showAll() ? "暂无容器" : "没有运行中的容器"} />}>
+        <section class="master-pane" aria-label={t("aria.containerList")}>
+          <Show when={rows().length > 0} fallback={<EmptyState title={showAll() ? t("ctn.noEmpty") : t("ctn.noRunning")} />}>
             <div class="resource-list">
               <For each={visibleRows()}>
                 {(container) => (
@@ -119,13 +120,13 @@ export function Containers() {
                       <span class="mono">{shortId(container.id)} · {container.image}</span>
                     </div>
                     <StatusBadge state={container.state} />
-                    <p>{container.ports || "无公开端口"}</p>
+                    <p>{container.ports || t("ctn.noPublicPort")}</p>
                     <div class="resource-row-actions" onClick={(event) => event.stopPropagation()}>
-                      <Show when={container.state === "running"} fallback={<button class="btn-icon" aria-label="启动" onClick={() => void action(container.id, "start")}><Play size={14} /></button>}>
-                        <button class="btn-icon" aria-label="停止" onClick={() => void action(container.id, "stop")}><Square size={14} /></button>
+                      <Show when={container.state === "running"} fallback={<button class="btn-icon" aria-label={t("act.start")} onClick={() => void action(container.id, "start")}><Play size={14} /></button>}>
+                        <button class="btn-icon" aria-label={t("act.stop")} onClick={() => void action(container.id, "stop")}><Square size={14} /></button>
                       </Show>
-                      <button class="btn-icon" aria-label="重启" onClick={() => void action(container.id, "restart")}><RotateCw size={14} /></button>
-                      <button class="btn-icon danger" aria-label="删除" onClick={() => void remove(container.id)}><Trash2 size={14} /></button>
+                      <button class="btn-icon" aria-label={t("act.restart")} onClick={() => void action(container.id, "restart")}><RotateCw size={14} /></button>
+                      <button class="btn-icon danger" aria-label={t("common.delete")} onClick={() => void remove(container.id)}><Trash2 size={14} /></button>
                     </div>
                   </article>
                 )}
@@ -135,7 +136,7 @@ export function Containers() {
           </Show>
         </section>
 
-        <Show when={current()} fallback={<div class="detail-placeholder"><p>选择一个容器查看状态、日志和终端</p></div>}>
+        <Show when={current()} fallback={<div class="detail-placeholder"><p>{t("ctn.selectHint")}</p></div>}>
           {(container) => (
             <ContainerDetail
               container={container()}
