@@ -8,6 +8,7 @@ security:
   auth:
     mode: jwt
     proxy:
+      trusted_proxies: []
       username_header: X-Forwarded-User
       auto_provision: true
 dockge:
