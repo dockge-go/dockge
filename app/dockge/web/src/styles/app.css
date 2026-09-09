@@ -41,6 +41,34 @@
   --ease-standard: cubic-bezier(0.28, 0, 0.22, 1);
   --sidebar-width: 240px; --topbar-height: 48px;
 }
+/* 暗色主题：仅覆盖配色变量，布局与字体不变；终端/编辑器/日志等控制台区域保持深色 */
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-warm: #1c1c1e;
+  --surface-dark: #2c2c2e;
+  --fg: #f5f5f7;
+  --fg-2: #d1d1d6;
+  --muted: #98989d;
+  --meta: #7c7c80;
+  --border: #38383a;
+  --border-soft: #2a2a2c;
+  --accent: #0a84ff;
+  --accent-on: #ffffff;
+  --accent-hover: #409cff;
+  --accent-active: #0060df;
+  --success: #30d158;
+  --warn: #ffd60a;
+  --danger: #ff453a;
+  --info: #0a84ff;
+  --elev-raised: 0 12px 32px rgba(0, 0, 0, 0.65);
+}
+:root[data-theme="dark"] .warning-banner {
+  background: color-mix(in oklab, var(--warn), transparent 92%);
+  border-color: color-mix(in oklab, var(--warn), transparent 65%);
+  color: #ffe08a;
+}
+:root[data-theme="dark"] .btn-clear:hover { background: color-mix(in oklab, var(--danger), transparent 88%); }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
@@ -202,6 +230,21 @@ body {
 .btn-icon:hover { background: var(--surface); color: var(--fg); }
 .btn-icon:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 语言切换（分段控件，设计定稿 .lang-switch） */
+.lang-switch {
+  display: flex; align-items: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
+}
+.lang-btn {
+  padding: 6px 10px; font-size: var(--text-xs); font-weight: 600; line-height: 1.2;
+  background: transparent; border: none; color: var(--muted); cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.lang-btn + .lang-btn { border-inline-start: 1px solid var(--border); }
+.lang-btn:hover { background: var(--surface); color: var(--fg); }
+.lang-btn:active { transform: scale(0.94); }
+.lang-btn.active { background: var(--accent); color: var(--accent-on); }
+.lang-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .btn-pill {
   display: inline-flex; align-items: center; gap: var(--space-2);
   padding: 8px 18px; border: none; border-radius: var(--radius-pill);

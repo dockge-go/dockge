@@ -8,6 +8,19 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230071e3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='14' rx='2'/%3E%3Cpath d='M8 21h8M12 17v4'/%3E%3C/svg%3E"
     />
     <title>Dockge — Container Management</title>
+    <script>
+      // 主题预置：必须先于样式表执行，首帧前写入 data-theme，避免明暗闪烁（FOUC）
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem("dockge.theme"); } catch (e) {}
+        if (stored !== "dark" && stored !== "light") {
+          stored = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+        document.documentElement.dataset.theme = stored;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
