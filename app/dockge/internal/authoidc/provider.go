@@ -15,30 +15,28 @@ import (
 var ErrDisabled = errors.New("oidc auth disabled")
 
 // Provider 是 OIDC Relying Party：封装端点发现、授权码 + PKCE 登录会话、
-// ID Token 验签。未启用时以 disabled 状态构造，所有方法返回 ErrDisabled。
+// ID Token 验签。仅由 Manager 在 oidc 模式下构造，构造即完成发现。
 type Provider struct {
-	stateMu sync.Mutex
-	states  map[string]loginState // 进行中的登录：state → PKCE verifier
-	enabled bool
-	cfg     Config
+	stateMu  sync.Mutex
+	states   map[string]loginState // 进行中的登录：state → PKCE verifier
+	cfg      ProviderConfig
 	verifier *oidc.IDTokenVerifier
 	oauth    *oauth2.Config
 }
 
 // NewProvider 发现 IdP 端点并构造 Provider。
-// 未启用时返回 disabled 实例；已启用但发现失败时返回错误（由调用方决定降级策略）。
-func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
-	if !cfg.Enabled {
-		return &Provider{}, nil
-	}
+func NewProvider(ctx context.Context, cfg ProviderConfig) (*Provider, error) {
 	if cfg.Issuer == "" || cfg.ClientID == "" {
-		return nil, fmt.Errorf("auth.oidc: issuer 与 client_id 不能为空")
+		return nil, fmt.Errorf("oidc provider: issuer 与 client_id 不能为空")
 	}
 	if cfg.UsernameClaim == "" {
 		cfg.UsernameClaim = "preferred_username"
 	}
 	if cfg.GroupsClaim == "" {
 		cfg.GroupsClaim = "groups"
+	}
+	if len(cfg.Scopes) == 0 {
+		cfg.Scopes = []string{"openid", "profile", "email"}
 	}
 	discoveryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -47,8 +45,7 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		return nil, fmt.Errorf("discover oidc issuer %q: %w", cfg.Issuer, err)
 	}
 	return &Provider{
-		enabled: true,
-		cfg:     cfg,
+		cfg: cfg,
 		verifier: idp.Verifier(&oidc.Config{
 			ClientID: cfg.ClientID,
 			// IdP 与本地时钟可能有小幅偏移，放宽 1 分钟
@@ -65,8 +62,8 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 	}, nil
 }
 
-// Enabled 报告 OIDC 是否可用。
-func (p *Provider) Enabled() bool { return p != nil && p.enabled }
+// Enabled 报告 OIDC 是否可用（Manager 仅在 oidc 模式下构造 provider，恒为 true）。
+func (p *Provider) Enabled() bool { return p != nil }
 
 // Exchange 用授权码（+PKCE verifier）换取并验签 ID Token，返回其 claims。
 func (p *Provider) Exchange(ctx context.Context, code, verifier string) (map[string]any, error) {
