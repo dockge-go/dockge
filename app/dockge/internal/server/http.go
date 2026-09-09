@@ -4,10 +4,11 @@ import (
 	nethttp "net/http"
 	"strings"
 
-	"dockge/app/dockge/internal/authoidc"
 	v1 "dockge/app/dockge/api/v1"
+	"dockge/app/dockge/internal/authoidc"
 	"dockge/app/dockge/internal/handler"
 	"dockge/app/dockge/internal/middleware"
+	"dockge/app/dockge/internal/security"
 	"dockge/app/dockge/internal/service"
 	"dockge/app/dockge/web"
 	"dockge/pkg/jwt"
@@ -78,8 +79,9 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 	s.Use(middleware.CORSMiddleware(), middleware.RequestLog(logger))
 
 	v1Group := s.Group("/v1")
+	v1Group.Use(middleware.SetupRequired(authService))
 	{
-		noAuthRouter := v1Group.Group("/").Use(middleware.SetupRequired(authService))
+		noAuthRouter := v1Group.Group("/")
 		{
 			noAuthRouter.POST("/login", authHandler.Login)
 			noAuthRouter.POST("/setup", authHandler.Setup)
@@ -91,14 +93,34 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			})
 			noAuthRouter.GET("/auth/config", settingsHandler.AuthConfig)
 			noAuthRouter.POST("/auto-login", authHandler.AutoLogin)
+			// OIDC 路由无需 JWT（回调前用户未登录）
+			noAuthRouter.GET("/oidc/:provider/auth", oidcHandler.Auth)
+			noAuthRouter.GET("/oidc/:provider/callback", oidcHandler.Callback)
+			noAuthRouter.GET("/oidc/providers", func(c *gin.Context) {
+				mgr := do.MustInvoke[*authoidc.Manager](i)
+				ids := mgr.Providers()
+				type providerInfo struct {
+					Label string `json:"label"`
+				}
+				type item struct {
+					ID   string       `json:"id"`
+					Info providerInfo `json:"info"`
+				}
+				items := make([]item, 0, len(ids))
+				for _, id := range ids {
+					items = append(items, item{ID: id, Info: providerInfo{Label: id}})
+				}
+				v1.HandleSuccess(c, gin.H{"providers": items})
+			})
 		}
 
-		strictAuthRouter := v1Group.Group("/").Use(middleware.StrictAuth(j, logger))
-		// proxy 模式下 ProxyAuth 先于 StrictAuth 运行；ProxyAuth 完成时设置 ctxProxyAuthDone，
-		// StrictAuth 据此跳过 JWT 校验。mode != "proxy" 时 ProxyAuth 直接放行，等效 noop。
-		if do.MustInvoke[*viper.Viper](i).GetString("security.auth.mode") == "proxy" {
+		strictAuthRouter := v1Group.Group("/")
+		// proxy 模式下 ProxyAuth 先于 StrictAuth 运行，确保代理凭证先被验证并设置 ctxProxyAuthDone，
+		// 以便 StrictAuth 可以跳过 JWT 校验。ProxyAuth 在非 proxy 模式下为无操作（直接放行）。
+		if security.AuthMode(do.MustInvoke[*viper.Viper](i)) == security.ModeProxy {
 			strictAuthRouter.Use(middleware.ProxyAuth(authService, logger, do.MustInvoke[*viper.Viper](i)))
 		}
+		strictAuthRouter.Use(middleware.StrictAuth(j, logger))
 		{
 			strictAuthRouter.GET("/me", authHandler.Me)
 			strictAuthRouter.PUT("/me/password", authHandler.ChangePassword)
@@ -147,26 +169,6 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			strictAuthRouter.POST("/composerize", composerizeHandler.Convert)
 
 			strictAuthRouter.GET("/terminal/:name/:type", terminalHandler.WebSocket)
-
-			// OIDC 路由无需 JWT（回调前用户未登录）
-			noAuthRouter.GET("/oidc/providers", func(c *gin.Context) {
-				mgr := do.MustInvoke[*authoidc.Manager](i)
-				ids := mgr.Providers()
-				type providerInfo struct {
-					Label string `json:"label"`
-				}
-				type item struct {
-					ID   string        `json:"id"`
-					Info providerInfo `json:"info"`
-				}
-				items := make([]item, 0, len(ids))
-				for _, id := range ids {
-					items = append(items, item{ID: id, Info: providerInfo{Label: id}})
-				}
-				v1.HandleSuccess(c, gin.H{"providers": items})
-			})
-			noAuthRouter.GET("/oidc/:provider/auth", oidcHandler.Auth)
-			noAuthRouter.GET("/oidc/:provider/callback", oidcHandler.Callback)
 		}
 	}
 	return s, nil
