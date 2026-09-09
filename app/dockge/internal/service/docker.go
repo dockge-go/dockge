@@ -15,7 +15,7 @@ type DockerService interface {
 	Version(ctx context.Context) (*v1.DockerVersionData, error)
 	Containers(ctx context.Context) (*v1.DockerContainersData, error)
 	Info(ctx context.Context) (*v1.DockerInfoData, error)
-	Networks(ctx context.Context) ([]string, error)
+	Networks(ctx context.Context) ([]v1.DockerNetworkData, error)
 	NetworkInspect(ctx context.Context, name string) (map[string]any, error)
 	Stats(ctx context.Context) (*v1.DockerStatsData, error)
 	StatsStream(ctx context.Context) (<-chan *v1.DockerStatsData, error)
@@ -75,9 +75,16 @@ func (s *dockerService) Containers(ctx context.Context) (*v1.DockerContainersDat
 	}
 	list := make([]v1.DockerContainerData, 0, len(containers))
 	for _, c := range containers {
+		ports := make([]v1.PortMapping, 0, len(c.Ports))
+		for _, p := range c.Ports {
+			ports = append(ports, v1.PortMapping{
+				HostIP: p.HostIP, HostPort: p.HostPort,
+				ContainerPort: p.ContainerPort, Protocol: p.Protocol,
+			})
+		}
 		list = append(list, v1.DockerContainerData{
 			ID: c.ID, Name: c.Name, Image: c.Image,
-			State: c.State, Status: c.Status, Ports: c.Ports,
+			State: c.State, Status: c.Status, Ports: ports, Stack: c.Stack,
 		})
 	}
 	return &v1.DockerContainersData{List: list}, nil
@@ -113,9 +120,17 @@ func (s *dockerService) Info(ctx context.Context) (*v1.DockerInfoData, error) {
 	return info, nil
 }
 
-// Networks 返回本机全部 docker 网络名称。
-func (s *dockerService) Networks(ctx context.Context) ([]string, error) {
-	return s.repo.DockerNetworks(ctx)
+// Networks 返回本机全部 docker 网络（名称与驱动，按名称升序）。
+func (s *dockerService) Networks(ctx context.Context) ([]v1.DockerNetworkData, error) {
+	nets, err := s.repo.DockerNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]v1.DockerNetworkData, 0, len(nets))
+	for _, n := range nets {
+		out = append(out, v1.DockerNetworkData{Name: n.Name, Driver: n.Driver})
+	}
+	return out, nil
 }
 
 // NetworkInspect 返回指定网络的详细信息。
@@ -177,7 +192,7 @@ func (s *dockerService) NetworkCreate(ctx context.Context, name, driver, subnet 
 	return s.repo.NetworkCreate(ctx, name, driver, subnet)
 }
 
-// DockerDf 返回镜像/容器/卷的磁盘占用汇总。
+// DockerDf 返回镜像/容器/卷的磁盘占用汇总（字节数）。
 func (s *dockerService) DockerDf(ctx context.Context) ([]v1.DockerDfCategory, error) {
 	list, err := s.repo.DockerDf(ctx)
 	if err != nil {
@@ -187,7 +202,7 @@ func (s *dockerService) DockerDf(ctx context.Context) ([]v1.DockerDfCategory, er
 	for _, c := range list {
 		out = append(out, v1.DockerDfCategory{
 			Type: c.Type, Count: c.Count, Active: c.Active,
-			Size: c.Size, Reclaimable: c.Reclaimable,
+			SizeBytes: c.SizeBytes, ReclaimableBytes: c.ReclaimableBytes,
 		})
 	}
 	return out, nil
@@ -239,7 +254,7 @@ func (s *dockerService) RemoveNetwork(ctx context.Context, name string) error {
 	return s.repo.RemoveNetwork(ctx, name)
 }
 
-// ListImages 返回本地镜像列表。
+// ListImages 返回本地镜像列表（字节数与 unix 构建时间）。
 func (s *dockerService) ListImages(ctx context.Context) ([]v1.DockerImageData, error) {
 	list, err := s.repo.DockerImages(ctx)
 	if err != nil {
@@ -248,7 +263,8 @@ func (s *dockerService) ListImages(ctx context.Context) ([]v1.DockerImageData, e
 	out := make([]v1.DockerImageData, 0, len(list))
 	for _, img := range list {
 		out = append(out, v1.DockerImageData{
-			ID: img.ID, Repo: img.Repo, Tag: img.Tag, Size: img.Size, Created: img.Created,
+			ID: img.ID, Repo: img.Repo, Tag: img.Tag,
+			SizeBytes: img.SizeBytes, CreatedUnix: img.CreatedUnix,
 		})
 	}
 	return out, nil

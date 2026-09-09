@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 
+	"dockge/app/dockge/internal/authoidc"
 	"dockge/app/dockge/internal/handler"
 	"dockge/app/dockge/internal/repository"
 	"dockge/app/dockge/internal/server"
@@ -46,6 +47,15 @@ func main() {
 		service.Package,
 		handler.Package,
 		server.Package,
+		func(i do.Injector) {
+			baseURL := fmt.Sprintf("http://%s:%d",
+				conf.GetString("http.host"),
+				conf.GetInt("http.port"),
+			)
+			do.Provide(i, func(i do.Injector) (*authoidc.Manager, error) {
+				return authoidc.NewManager(context.Background(), conf, baseURL)
+			})
+		},
 		func(i do.Injector) {
 			do.Provide(i, func(i do.Injector) (*app.App, error) {
 				return app.New(

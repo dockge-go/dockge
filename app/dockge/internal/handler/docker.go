@@ -11,6 +11,7 @@ import (
 	v1 "dockge/app/dockge/api/v1"
 	"dockge/app/dockge/internal/push"
 	"dockge/app/dockge/internal/service"
+	"dockge/app/dockge/internal/version"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
@@ -241,15 +242,9 @@ func (h *DockerHandler) ContainerInspect(ctx *gin.Context) {
 	v1.HandleSuccess(ctx, data)
 }
 
-type networkCreateRequest struct {
-	Name   string `json:"name"`
-	Driver string `json:"driver"`
-	Subnet string `json:"subnet"`
-}
-
 // NetworkCreate 创建网络。
 func (h *DockerHandler) NetworkCreate(ctx *gin.Context) {
-	var req networkCreateRequest
+	var req v1.NetworkCreateRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Name) == "" {
 		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
 		return
@@ -370,7 +365,7 @@ func (h *DockerHandler) PullImage(ctx *gin.Context) {
 
 // Health 健康检查端点。
 func (h *DockerHandler) Health(ctx *gin.Context) {
-	v1.HandleSuccess(ctx, gin.H{"status": "ok", "version": "v1.0.0"})
+	v1.HandleSuccess(ctx, gin.H{"status": "ok", "version": version.Version})
 }
 
 // VersionCheck 检查最新版本（5分钟缓存，避免频繁请求 GitHub API）。
@@ -384,10 +379,10 @@ func (h *DockerHandler) VersionCheck(ctx *gin.Context) {
 		v1.HandleError(ctx, http.StatusInternalServerError, err, nil)
 		return
 	}
-	v := &v1.VersionCheckResponse{CurrentVersion: "v1.0.0"}
+	v := &v1.VersionCheckResponse{CurrentVersion: version.Version}
 	if latest != "" {
 		v.LatestVersion = latest
-		v.HasUpdate = latest != "v1.0.0"
+		v.HasUpdate = latest != version.Version
 	}
 	h.versionCache.set(v)
 	v1.HandleSuccess(ctx, v)

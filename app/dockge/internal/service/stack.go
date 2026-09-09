@@ -26,6 +26,7 @@ type StackService interface {
 	Save(ctx context.Context, req *v1.StackSaveRequest, isAdd bool) error
 	Delete(ctx context.Context, name string) (*v1.StackOpResponse, error)
 	Op(ctx context.Context, name, op string) (*v1.StackOpResponse, error)
+	LogsStream(ctx context.Context, name string, tail int) (<-chan string, error)
 }
 
 // NewStackService 构造栈服务，由注入容器调用。
@@ -163,6 +164,16 @@ func (s *stackService) Op(ctx context.Context, name, op string) (*v1.StackOpResp
 			fmt.Errorf("%w: %s", v1.ErrDockerError, err.Error())
 	}
 	return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)}, nil
+}
+
+// LogsStream 返回栈组合日志实时流（docker compose logs -f --tail N）。
+// 栈名需满足命名规则，防止注入。
+
+func (s *stackService) LogsStream(ctx context.Context, name string, tail int) (<-chan string, error) {
+	if !stackNamePattern.MatchString(name) {
+		return nil, v1.ErrBadRequest
+	}
+	return s.repo.StackLogsStream(ctx, name, tail)
 }
 
 func stackSummary(stack model.Stack) v1.StackSummaryData {

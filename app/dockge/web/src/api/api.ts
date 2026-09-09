@@ -148,6 +148,12 @@ export interface VersionCheck {
   hasUpdate: boolean;
 }
 
+export interface AuthConfig {
+  mode: "jwt" | "proxy" | "oidc" | "disable";
+  providers: Array<{ id: string; info: { label: string } }>;
+  disableAuth: boolean;
+}
+
 /** REST 聚合后的前端资源快照。 */
 export interface Snapshot {
   stacks: StackSummary[];
@@ -202,6 +208,7 @@ export const api = {
   login: (username: string, password: string) => request<LoginData>("POST", "/login", { username, password }),
   setup: (username: string, password: string) => request<LoginData>("POST", "/setup", { username, password }),
   needSetup: () => request<{ needSetup: boolean }>("GET", "/setup/need"),
+  authConfig: () => request<AuthConfig>("GET", "/auth/config"),
   me: () => request<UserData>("GET", "/me"),
   changePassword: (oldPassword: string, newPassword: string) =>
     request<void>("PUT", "/me/password", { oldPassword, newPassword }),

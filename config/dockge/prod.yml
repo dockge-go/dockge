@@ -5,18 +5,22 @@ http:
 security:
   jwt:
     key: change-me-in-production
+  auth:
+    mode: jwt
+    proxy:
+      username_header: X-Forwarded-User
+      auto_provision: true
 dockge:
-  stacks_dir: ./stacks
+  stacks_dir: storage/stacks
 data:
   db:
     user:
-      driver: sqlite
-      dsn: ./data/dockge.db?_busy_timeout=5000
+      dsn: storage/dockge.db
 log:
   log_level: info
   mode: both
   encoding: json
-  log_file_name: "./logs/dockge.log"
+  log_file_name: "./storage/logs/dockge.log"
   max_backups: 30
   max_age: 28
   max_size: 1024

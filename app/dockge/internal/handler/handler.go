@@ -28,6 +28,7 @@ var Package = do.Package(
 	do.Lazy(NewSettingsHandler),
 	do.Lazy(NewComposerizeHandler),
 	do.Lazy(NewTerminalHandler),
+	do.Lazy(NewOIDCHandler),
 )
 
 // New 构造 handler 公共依赖，由注入容器调用。

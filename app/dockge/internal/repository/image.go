@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,11 +29,11 @@ func (r *Repository) DockerImages(ctx context.Context) ([]model.Image, error) {
 					repo, tag = splitRepoTag(s.Names[0])
 				}
 				result = append(result, model.Image{
-					ID:      truncateID(s.ID),
-					Repo:    repo,
-					Tag:     tag,
-					Size:    formatBytes(float64(s.Size)),
-					Created: humanSince(s.Created),
+					ID:          truncateID(s.ID),
+					Repo:        repo,
+					Tag:         tag,
+					SizeBytes:   s.Size,
+					CreatedUnix: s.Created,
 				})
 			}
 			return result, nil
@@ -54,17 +55,18 @@ func (r *Repository) DockerImages(ctx context.Context) ([]model.Image, error) {
 			Repository   string `json:"Repository"`
 			Tag          string `json:"Tag"`
 			Size         string `json:"Size"`
-			CreatedSince string `json:"CreatedSince"`
+			CreatedAt    string `json:"CreatedAt"`
 		}
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			return nil, fmt.Errorf("parse docker images output: %w", err)
 		}
+		created, _ := time.Parse("2006-01-02 15:04:05 -0700 MST", item.CreatedAt)
 		result = append(result, model.Image{
-			ID:      strings.TrimPrefix(item.ID, "sha256:"),
-			Repo:    item.Repository,
-			Tag:     item.Tag,
-			Size:    item.Size,
-			Created: item.CreatedSince,
+			ID:          strings.TrimPrefix(item.ID, "sha256:"),
+			Repo:        item.Repository,
+			Tag:         item.Tag,
+			SizeBytes:   parseDockerSize(item.Size),
+			CreatedUnix: created.Unix(),
 		})
 	}
 	return result, nil
@@ -116,7 +118,7 @@ func splitRepoTag(repoTag string) (string, string) {
 	return repoTag[:idx], repoTag[idx+1:]
 }
 
-// formatBytes 把字节数格式化为人类可读大小。
+// formatBytes 把字节数格式化为人类可读大小（1024 进制，供 stats 内存用量展示）。
 func formatBytes(b float64) string {
 	units := []string{"B", "KB", "MB", "GB", "TB"}
 	for _, u := range units {
@@ -128,17 +130,39 @@ func formatBytes(b float64) string {
 	return fmt.Sprintf("%.1fPB", b)
 }
 
-// humanSince 把 unix 秒转换为 "N days ago" 式的人类可读时间。
-func humanSince(unixSec int64) string {
-	d := time.Since(time.Unix(unixSec, 0))
-	switch {
-	case d.Hours() < 1:
-		return fmt.Sprintf("%d minutes ago", int(d.Minutes()))
-	case d.Hours() < 24:
-		return fmt.Sprintf("%d hours ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+// dockerSizeUnits 是 docker CLI 人类可读大小到字节数的乘数表：
+// 十进制（kB/MB/GB）与二进制（KiB/MiB/GiB）并存。
+var dockerSizeUnits = map[string]int64{
+	"B": 1, "kB": 1_000, "KB": 1_000, "MB": 1_000_000, "GB": 1_000_000_000,
+	"TB": 1_000_000_000_000, "PB": 1_000_000_000_000_000,
+	"KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40, "PiB": 1 << 50,
+}
+
+// parseDockerSize 把 docker 输出的人类可读大小（如 "52.2MB"、"1.234kB"、"0B"）
+// 解析为字节数；无法解析时返回 0。
+func parseDockerSize(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
 	}
+	// 分离数值与单位：数值部分以数字或小数点结尾
+	i := len(s)
+	for i > 0 && (s[i-1] == '.' || (s[i-1] >= '0' && s[i-1] <= '9')) {
+		i--
+	}
+	valueStr, unit := s[:i], strings.TrimSpace(s[i:])
+	if valueStr == "" {
+		return 0
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return 0
+	}
+	mul, ok := dockerSizeUnits[unit]
+	if !ok {
+		return 0
+	}
+	return int64(value * float64(mul))
 }
 
 // PruneImages 清理未被任何容器引用的镜像（docker image prune -af 语义）。

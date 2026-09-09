@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -14,8 +13,6 @@ import (
 
 	"go.podman.io/podman/v6/pkg/bindings/containers"
 	podmanTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
-
-	"dockge/pkg/pty"
 
 	"dockge/app/dockge/internal/model"
 )
@@ -39,6 +36,73 @@ func stackFromLabels(labels string) string {
 		}
 	}
 	return ""
+}
+
+// parseDockerPorts 解析 docker ps 的 Ports 列：
+// "0.0.0.0:8080->80/tcp, :::8080->80/tcp, 53/udp"。无法解析的段跳过。
+func parseDockerPorts(s string) []model.PortMapping {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	mappings := make([]model.PortMapping, 0)
+	for _, seg := range strings.Split(s, ",") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		m, ok := parsePortSegment(seg)
+		if ok {
+			mappings = append(mappings, m)
+		}
+	}
+	return mappings
+}
+
+// parsePortSegment 解析单段端口映射，返回 (mapping, 是否可解析)。
+func parsePortSegment(seg string) (model.PortMapping, bool) {
+	var m model.PortMapping
+	host, container, published := strings.Cut(seg, "->")
+	if published {
+		// host: "0.0.0.0:8080" / "[::]:8080" / "8080" / "8080-8089"
+		hostIP, port := splitHostPort(host)
+		hostPort, err := strconv.Atoi(firstToken(port, "-"))
+		if err != nil {
+			return m, false
+		}
+		m.HostIP, m.HostPort = hostIP, hostPort
+	}
+	containerPort, proto, _ := strings.Cut(container, "/")
+	if proto == "" {
+		proto = "tcp"
+	}
+	cp, err := strconv.Atoi(containerPort)
+	if err != nil {
+		return m, false
+	}
+	m.ContainerPort, m.Protocol = cp, proto
+	return m, true
+}
+
+// splitHostPort 拆分 "0.0.0.0:8080"、"[::]:8080"、"8080" 为 (IP, port)。
+func splitHostPort(s string) (string, string) {
+	if strings.HasPrefix(s, "[") {
+		if ip, port, found := strings.Cut(strings.TrimPrefix(s, "["), "]:"); found {
+			return ip, port
+		}
+		return s, ""
+	}
+	if ip, port, found := strings.Cut(s, ":"); found {
+		return ip, port
+	}
+	return "", s
+}
+
+// firstToken 取 "-" 分隔的第一段（端口范围取起点）。
+func firstToken(s, sep string) string {
+	if v, _, found := strings.Cut(s, sep); found {
+		return v
+	}
+	return s
 }
 
 // DockerContainers 返回本机全部容器（docker/podman ps -a，供容器总览页）。
@@ -77,7 +141,7 @@ func (r *Repository) DockerContainers(ctx context.Context) ([]model.Container, e
 			Image:  item.Image,
 			State:  item.State,
 			Status: item.Status,
-			Ports:  item.Ports,
+			Ports:  parseDockerPorts(item.Ports),
 			Stack:  stackFromLabels(item.Labels),
 		})
 	}
@@ -204,23 +268,6 @@ func (r *Repository) ContainerLogsStream(ctx context.Context, id string, tail in
 	return streamCmd(ctx, cmd)
 }
 
-// ContainerExecStart 在容器中执行命令，返回 PTY 设备路径。
-func (r *Repository) ContainerExecStart(ctx context.Context, containerID, command string) (*exec.Cmd, *os.File, error) {
-	args := []string{"exec", "-it", containerID}
-	if strings.Contains(command, " ") {
-		args = append(args, "/bin/sh", "-c", command)
-	} else {
-		args = append(args, "/bin/sh", "-c", command)
-	}
-	cmd := exec.CommandContext(ctx, "docker", args...)
-
-	ptmx, err := pty.Open(cmd)
-	if err != nil {
-		return nil, nil, fmt.Errorf("pty open: %w", err)
-	}
-	return cmd, ptmx, nil
-}
-
 func podmanToContainers(items []podmanTypes.ListContainer) []model.Container {
 	result := make([]model.Container, 0, len(items))
 	for _, ic := range items {
@@ -233,12 +280,18 @@ func podmanToContainers(items []podmanTypes.ListContainer) []model.Container {
 		if status == "" {
 			status = state
 		}
-		var ports string
+		ports := make([]model.PortMapping, 0, len(ic.Ports))
 		for _, p := range ic.Ports {
-			if ports != "" {
-				ports += ","
+			proto := p.Protocol
+			if proto == "" {
+				proto = "tcp"
 			}
-			ports += fmt.Sprintf("%d:%d/%s", p.HostPort, p.ContainerPort, p.Protocol)
+			ports = append(ports, model.PortMapping{
+				HostIP:        p.HostIP,
+				HostPort:      int(p.HostPort),
+				ContainerPort: int(p.ContainerPort),
+				Protocol:      proto,
+			})
 		}
 		result = append(result, model.Container{
 			ID:     truncateID(ic.ID),

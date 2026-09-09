@@ -1,14 +1,12 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"strconv"
 
-	v1 "dockge/app/dockge/api/v1"
 	"dockge/app/dockge/internal/repository"
 	"dockge/pkg/pty"
 
@@ -49,10 +47,10 @@ type wsControlMessage struct {
 }
 
 // WebSocket 终端端点：
-//   - /v1/terminal/host/host        宿主机交互式 shell
 //   - /v1/terminal/<stack>/compose-logs 栈组合日志（docker compose logs -f）
 //   - /v1/terminal/<container>/exec 容器内交互 shell（docker exec -it）
 //
+// 出于安全考虑不提供宿主 shell：终端只允许进入容器。
 // 浏览器 WebSocket API 无法自定义请求头，认证依赖 StrictAuth 对 ?token= 的支持。
 func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 	name := ctx.Param("name")

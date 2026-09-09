@@ -16,11 +16,6 @@ dist/
 
 *.db
 *.sqlite
-server
-!app/dockge/cmd/server/
-!app/dockge/cmd/server/**
-!app/dockge/internal/server/
-!app/dockge/internal/server/**
 *.db
 
 # Windows / Go toolchain artifacts

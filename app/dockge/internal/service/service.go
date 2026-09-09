@@ -3,7 +3,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"dockge/app/dockge/internal/repository"
 	"dockge/pkg/jwt"
@@ -73,18 +72,4 @@ func (s *settingsService) GetGlobalEnv(ctx context.Context) (string, error) {
 
 func (s *settingsService) SetGlobalEnv(ctx context.Context, content string) error {
 	return s.repo.SetSetting(ctx, "globalENV", content, "general")
-}
-
-// -------- SettingsCacheCleaner --------
-// 后台定时清理 setting 缓存（对齐原版 60s TTL 策略）。
-func StartSettingsCleaner(i do.Injector) {
-	repo := do.MustInvoke[*repository.Repository](i)
-	go func() {
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			// SQLite 自动 VACUUM 维护，此处仅记录心跳
-			repo.GetSetting(context.Background(), "_health")
-		}
-	}()
 }

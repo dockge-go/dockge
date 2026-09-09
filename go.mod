@@ -25,6 +25,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/containerd/typeurl/v2 v2.3.0 // indirect
+	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
 	github.com/fsouza/go-dockerclient v1.13.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mistifyio/go-zfs/v4 v4.0.0 // indirect
@@ -43,6 +44,7 @@ require (
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.podman.io/buildah v1.45.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
 )
 
 require (
@@ -159,7 +161,7 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	go.podman.io/common v0.69.1 // indirect
+	go.podman.io/common v0.69.1
 	go.podman.io/image/v5 v5.41.1 // indirect
 	go.podman.io/podman/v6 v6.1.1
 	go.podman.io/storage v1.64.0 // indirect

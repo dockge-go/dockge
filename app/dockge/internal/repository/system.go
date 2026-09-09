@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -79,9 +78,9 @@ func (r *Repository) DockerDf(ctx context.Context) ([]model.DfCategory, error) {
 				volReclaim += float64(v.ReclaimableSize)
 			}
 			return []model.DfCategory{
-				{Type: "镜像", Count: len(df.Images), Active: imgActive, Size: formatBytes(imgSize), Reclaimable: formatBytes(imgUnused)},
-				{Type: "容器", Count: len(df.Containers), Active: ctrActive, Size: formatBytes(ctrSize)},
-				{Type: "卷", Count: len(df.Volumes), Active: volActive, Size: formatBytes(volSize), Reclaimable: formatBytes(volReclaim)},
+				{Type: "镜像", Count: len(df.Images), Active: imgActive, SizeBytes: int64(imgSize), ReclaimableBytes: int64(imgUnused)},
+				{Type: "容器", Count: len(df.Containers), Active: ctrActive, SizeBytes: int64(ctrSize)},
+				{Type: "卷", Count: len(df.Volumes), Active: volActive, SizeBytes: int64(volSize), ReclaimableBytes: int64(volReclaim)},
 			}, nil
 		}
 		r.logger.Warn().Err(err).Msg("podman df failed, falling back to docker CLI")
@@ -96,19 +95,25 @@ func (r *Repository) DockerDf(ctx context.Context) ([]model.DfCategory, error) {
 		if line == "" {
 			continue
 		}
+		// TotalCount/Active 在不同 docker 版本中可能是数字或字符串，用 json.Number 兼容
 		var item struct {
-			Type        string `json:"Type"`
-			TotalCount  string `json:"TotalCount"`
-			Active      string `json:"Active"`
-			Size        string `json:"Size"`
-			Reclaimable string `json:"Reclaimable"`
+			Type        string      `json:"Type"`
+			TotalCount  json.Number `json:"TotalCount"`
+			Active      json.Number `json:"Active"`
+			Size        string      `json:"Size"`
+			Reclaimable string      `json:"Reclaimable"`
 		}
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			return nil, fmt.Errorf("parse docker system df output: %w", err)
 		}
-		count, _ := strconv.Atoi(item.TotalCount)
-		active, _ := strconv.Atoi(item.Active)
-		result = append(result, model.DfCategory{Type: item.Type, Count: count, Active: active, Size: item.Size, Reclaimable: item.Reclaimable})
+		count, _ := item.TotalCount.Int64()
+		active, _ := item.Active.Int64()
+		// Reclaimable 形如 "500MB (40%)"，取括号前的数值部分
+		reclaimable, _, _ := strings.Cut(item.Reclaimable, " (")
+		result = append(result, model.DfCategory{
+			Type: item.Type, Count: int(count), Active: int(active),
+			SizeBytes: parseDockerSize(item.Size), ReclaimableBytes: parseDockerSize(reclaimable),
+		})
 	}
 	return result, nil
 }

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	v1 "dockge/app/dockge/api/v1"
+	"dockge/app/dockge/internal/authproxy"
 	"dockge/app/dockge/internal/model"
 	"dockge/app/dockge/internal/repository"
 	"dockge/pkg/hash"
@@ -17,57 +20,82 @@ import (
 	"dockge/pkg/totp"
 
 	"github.com/samber/do/v2"
+	"github.com/spf13/viper"
 )
 
 const tokenTTL = time.Hour * 24 * 7
 
-// AuthService 提供登录、当前用户、改密用例。
+// 登录限流：单个「IP+账号」键在窗口期内的最大尝试次数与键容量上限。
+const (
+	loginRateLimit  = 10
+	loginRateWindow = time.Minute
+	loginMaxKeys    = 4096
+)
+
+// AuthService 提供登录、当前用户、改密、外部身份映射与会话校验用例。
 type AuthService interface {
-	Login(ctx context.Context, req *v1.LoginRequest) (*v1.LoginResponseData, error)
+	Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error)
 	Me(ctx context.Context, uid uint) (*v1.MeUserData, error)
 	ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error
 	Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error)
 	CheckNeedSetup(ctx context.Context) (bool, error)
-	Check2FA(ctx context.Context, req *v1.TwoFARequest) (*v1.LoginResponseData, error)
+	Check2FA(ctx context.Context, req *v1.TwoFARequest, clientIP string) (*v1.LoginResponseData, error)
 	Enable2FA(ctx context.Context, uid uint) (string, error)
 	Disable2FA(ctx context.Context, uid uint) error
 	GetSetting(ctx context.Context, key string) (string, error)
 	SetSetting(ctx context.Context, key, value, typ string) error
 	GetAllSettings(ctx context.Context, typ string) (map[string]string, error)
+	// CheckSession 供认证中间件逐请求校验：用户存在、启用且密码哈希未变。
+	CheckSession(ctx context.Context, uid uint, h string) error
+	// IsAdmin 报告指定用户是否为管理员。
+	IsAdmin(ctx context.Context, uid uint) (bool, error)
+	// ProxyLogin 把受信反代注入的身份换成本地会话。
+	ProxyLogin(ctx context.Context, headers map[string]string, remoteAddr string) (*v1.LoginResponseData, error)
+	// OIDCLogin 把验签后的 OIDC 身份换成本地会话。
+	OIDCLogin(ctx context.Context, username string, admin bool) (*v1.LoginResponseData, error)
+	// SessionFor 为已认证用户签发会话（OIDC 票据兑换用）。
+	SessionFor(ctx context.Context, uid uint) (*v1.LoginResponseData, error)
+	// ExternalAuthStatus 返回外部认证模式开关，供登录页探测。
+	ExternalAuthStatus() v1.ExternalAuthStatusData
+	// GetDisableAuth 读取免登录模式开关。
 	GetDisableAuth(ctx context.Context) bool
+	// ToggleDisableAuth 切换免登录模式。
 	ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error
+	// AutoLogin 免登录模式下以首个活跃用户自动登录。
 	AutoLogin(ctx context.Context) (*v1.LoginResponseData, error)
 	GetLatestVersion(ctx context.Context) (string, error)
 }
 
 type authService struct {
 	*Service
-	loginLimiter *rate.Limiter
+	loginLimiter *rate.KeyedLimiter
+	proxyCfg     authproxy.Config
+	oidc         *OIDCService
 }
 
-// NewAuthService 构造认证服务（含登录限流器），由注入容器调用。
-
+// NewAuthService 构造认证服务（含按 IP+账号的登录限流器），由注入容器调用。
 func NewAuthService(i do.Injector) (AuthService, error) {
+	conf := do.MustInvoke[*viper.Viper](i)
+	oidc, err := NewOIDCService(i)
+	if err != nil {
+		return nil, err
+	}
 	return &authService{
 		Service:      do.MustInvoke[*Service](i),
-		loginLimiter: rate.New(20, time.Minute),
+		loginLimiter: rate.NewKeyed(loginRateLimit, loginRateWindow, loginMaxKeys),
+		proxyCfg:     authproxy.FromViper(conf),
+		oidc:         oidc,
 	}, nil
 }
 
-// GetDisableAuth 读取免登录模式开关。
-
-func (s *authService) GetDisableAuth(ctx context.Context) bool {
-	v, err := s.repo.GetSetting(ctx, "disableAuth")
-	if err != nil {
-		return false
-	}
-	return v == "true"
+// loginRateKey 组合限流键：IP 与账号双维度。
+func loginRateKey(clientIP, username string) string {
+	return clientIP + "|" + username
 }
 
 // Login 校验用户名密码；开启 2FA 的账号返回中间令牌并要求提交验证码。
-
-func (s *authService) Login(ctx context.Context, req *v1.LoginRequest) (*v1.LoginResponseData, error) {
-	if !s.loginLimiter.Allow() {
+func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error) {
+	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {
 		return nil, v1.ErrUnauthorized
 	}
 	user, err := s.repo.GetUserByUsername(ctx, req.Username)
@@ -84,26 +112,21 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest) (*v1.Logi
 		return nil, v1.ErrUnauthorized
 	}
 	if user.TwofaStatus {
-		token, _ := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(tokenTTL))
-		return &v1.LoginResponseData{
-			AccessToken:   token,
-			TokenRequired: true,
-			User:          v1.MeUserData{ID: user.ID, Username: user.Username, Nickname: user.Nickname},
-		}, nil
+		data, err := s.session(&user)
+		if err != nil {
+			return nil, err
+		}
+		data.TokenRequired = true
+		return data, nil
 	}
-	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(tokenTTL))
-	if err != nil {
-		return nil, v1.ErrInternalServerError
-	}
-	return &v1.LoginResponseData{
-		AccessToken: token,
-		User:        v1.MeUserData{ID: user.ID, Username: user.Username, Nickname: user.Nickname},
-	}, nil
+	return s.session(&user)
 }
 
 // Check2FA 校验 TOTP 验证码（防重放），通过后签发正式会话令牌。
-
-func (s *authService) Check2FA(ctx context.Context, req *v1.TwoFARequest) (*v1.LoginResponseData, error) {
+func (s *authService) Check2FA(ctx context.Context, req *v1.TwoFARequest, clientIP string) (*v1.LoginResponseData, error) {
+	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {
+		return nil, v1.ErrUnauthorized
+	}
 	user, err := s.repo.GetUserByUsername(ctx, req.Username)
 	if err != nil {
 		return nil, v1.ErrUnauthorized
@@ -111,25 +134,14 @@ func (s *authService) Check2FA(ctx context.Context, req *v1.TwoFARequest) (*v1.L
 	if !user.Active || !user.TwofaStatus {
 		return nil, v1.ErrUnauthorized
 	}
-	if !totp.Verify(req.Token, user.TwofaSecret) {
+	if !totp.Verify(req.Token, user.TwofaSecret) || user.TwofaLastToken == req.Token {
 		return nil, &v1.Error{Code: 401, Message: "authInvalidToken"}
 	}
-	if user.TwofaLastToken == req.Token {
-		return nil, &v1.Error{Code: 401, Message: "authInvalidToken"}
-	}
-	s.repo.UpdateUserTwofa(ctx, user.ID, user.TwofaSecret, req.Token, user.TwofaStatus)
-	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(tokenTTL))
-	if err != nil {
-		return nil, v1.ErrInternalServerError
-	}
-	return &v1.LoginResponseData{
-		AccessToken: token,
-		User:        v1.MeUserData{ID: user.ID, Username: user.Username, Nickname: user.Nickname},
-	}, nil
+	_ = s.repo.UpdateUserTwofa(ctx, user.ID, user.TwofaSecret, req.Token, user.TwofaStatus)
+	return s.session(&user)
 }
 
 // Enable2FA 生成 TOTP 密钥并立即启用，返回 otpauth 二维码 URL。
-
 func (s *authService) Enable2FA(ctx context.Context, uid uint) (string, error) {
 	secret, err := totp.GenerateSecret()
 	if err != nil {
@@ -142,17 +154,14 @@ func (s *authService) Enable2FA(ctx context.Context, uid uint) (string, error) {
 }
 
 // Disable2FA 清除 2FA 密钥并停用两步验证。
-
 func (s *authService) Disable2FA(ctx context.Context, uid uint) error {
-	_, err := s.repo.GetUser(ctx, uid)
-	if err != nil {
+	if _, err := s.repo.GetUser(ctx, uid); err != nil {
 		return err
 	}
 	return s.repo.UpdateUserTwofa(ctx, uid, "", "", false)
 }
 
 // Setup 创建首个管理员账号（仅当无任何用户时），成功即返回登录态。
-
 func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error) {
 	count, err := s.repo.CountUsers(ctx)
 	if err != nil {
@@ -168,22 +177,21 @@ func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.Logi
 	if err != nil {
 		return nil, v1.ErrInternalServerError
 	}
-	user := &model.DockgeUser{Username: req.Username, Nickname: req.Username, Password: hashed}
+	user := &model.DockgeUser{
+		Username: req.Username, Nickname: req.Username,
+		Password: hashed, Role: model.RoleAdmin, Active: true, Source: model.SourceLocal,
+	}
 	if err := s.repo.CreateUser(ctx, user); err != nil {
 		return nil, v1.ErrInternalServerError
 	}
-	token, err := s.jwt.GenToken(user.ID, hashed, time.Now().Add(tokenTTL))
+	data, err := s.session(user)
 	if err != nil {
-		return nil, v1.ErrInternalServerError
+		return nil, err
 	}
-	return &v1.LoginResponseData{
-		AccessToken: token,
-		User:        v1.MeUserData{ID: user.ID, Username: user.Username, Nickname: user.Nickname},
-	}, nil
+	return data, nil
 }
 
 // CheckNeedSetup 判断是否需要首次安装引导（用户数为 0）。
-
 func (s *authService) CheckNeedSetup(ctx context.Context) (bool, error) {
 	count, err := s.repo.CountUsers(ctx)
 	if err != nil {
@@ -192,8 +200,7 @@ func (s *authService) CheckNeedSetup(ctx context.Context) (bool, error) {
 	return count == 0, nil
 }
 
-// Me 返回当前登录用户信息（含 2FA 状态）。
-
+// Me 返回当前登录用户信息（含角色与 2FA 状态）。
 func (s *authService) Me(ctx context.Context, uid uint) (*v1.MeUserData, error) {
 	user, err := s.repo.GetUser(ctx, uid)
 	if err != nil {
@@ -202,14 +209,12 @@ func (s *authService) Me(ctx context.Context, uid uint) (*v1.MeUserData, error) 
 		}
 		return nil, v1.ErrInternalServerError
 	}
-	return &v1.MeUserData{
-		ID: user.ID, Username: user.Username, Nickname: user.Nickname,
-		TwoFA: user.TwofaStatus,
-	}, nil
+	mp := meData(&user)
+	return &mp, nil
 }
 
-// ChangePassword 校验旧密码与强度后更新密码，并踢出其他会话。
-
+// ChangePassword 校验旧密码与强度后更新密码；
+// 旧 token 因 claims 中的密码摘要绑定（CheckSession）自动失效。
 func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error {
 	user, err := s.repo.GetUser(ctx, uid)
 	if err != nil {
@@ -228,28 +233,143 @@ func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.Chan
 	if err != nil {
 		return v1.ErrInternalServerError
 	}
-	if err := s.repo.UpdatePassword(ctx, uid, hashed); err != nil {
+	return s.repo.UpdatePassword(ctx, uid, hashed)
+}
+
+// CheckSession 逐请求校验会话有效性：用户存在、启用，且密码哈希摘要与 token 一致。
+func (s *authService) CheckSession(ctx context.Context, uid uint, h string) error {
+	user, err := s.repo.GetUser(ctx, uid)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return v1.ErrUnauthorized
+		}
 		return err
+	}
+	if !user.Active {
+		return v1.ErrUnauthorized
+	}
+	if hash.Shake256(user.Password) != h {
+		return v1.ErrUnauthorized // 密码已修改，旧 token 失效
 	}
 	return nil
 }
 
-// GetSetting 读取原始设置项（供认证相关逻辑使用）。
-
-func (s *authService) GetSetting(ctx context.Context, key string) (string, error) {
-	return s.repo.GetSetting(ctx, key)
+// IsAdmin 报告指定用户是否为管理员。
+func (s *authService) IsAdmin(ctx context.Context, uid uint) (bool, error) {
+	user, err := s.repo.GetUser(ctx, uid)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return false, v1.ErrUnauthorized
+		}
+		return false, err
+	}
+	return user.IsAdmin(), nil
 }
 
-// SetSetting 写入原始设置项。
-
-func (s *authService) SetSetting(ctx context.Context, key, value, typ string) error {
-	return s.repo.SetSetting(ctx, key, value, typ)
+// ProxyLogin 受信反代模式：来源命中受信网段时读取身份头，映射为本地会话。
+// 伪造来源（非受信 IP 携带身份头）一律拒绝。
+func (s *authService) ProxyLogin(ctx context.Context, headers map[string]string, remoteAddr string) (*v1.LoginResponseData, error) {
+	if !s.proxyCfg.Enabled {
+		return nil, &v1.Error{Code: 404, Message: "反向代理认证未启用"}
+	}
+	if !s.proxyCfg.TrustedIP(remoteAddr) {
+		return nil, v1.ErrUnauthorized
+	}
+	identity, ok := s.proxyCfg.FromHeaders(headers)
+	if !ok {
+		return nil, v1.ErrUnauthorized
+	}
+	return s.externalLogin(ctx, identity.User, model.SourceProxy, false, s.proxyCfg.AutoProvision)
 }
 
-// GetAllSettings 返回指定分组的全部设置项。
+// OIDCLogin 把验签后的 OIDC 身份映射为本地用户并签发会话。
+func (s *authService) OIDCLogin(ctx context.Context, username string, admin bool) (*v1.LoginResponseData, error) {
+	auto := s.oidc != nil && s.oidc.Enabled()
+	return s.externalLogin(ctx, username, model.SourceOIDC, admin, auto)
+}
 
-func (s *authService) GetAllSettings(ctx context.Context, typ string) (map[string]string, error) {
-	return s.repo.GetAllSettingsByType(ctx, typ)
+// externalLogin 是 ProxyLogin/OIDCLogin 的公共主体：
+// 查找或自动开通本地用户（外部账号密码为随机值，不可用于密码登录），签发本地 JWT。
+func (s *authService) externalLogin(ctx context.Context, username, source string, admin, autoProvision bool) (*v1.LoginResponseData, error) {
+	if username == "" {
+		return nil, v1.ErrUnauthorized
+	}
+	user, err := s.repo.GetUserByUsername(ctx, username)
+	switch {
+	case err == nil:
+		if !user.Active {
+			return nil, v1.ErrUnauthorized
+		}
+	case errors.Is(err, repository.ErrNotFound):
+		if !autoProvision {
+			return nil, v1.ErrUnauthorized
+		}
+		hashed, hashErr := hash.BcryptHash(unusablePassword())
+		if hashErr != nil {
+			return nil, v1.ErrInternalServerError
+		}
+		role := model.RoleMember
+		if admin {
+			role = model.RoleAdmin
+		}
+		newUser := model.DockgeUser{
+			Username: username, Nickname: username, Password: hashed,
+			Role: role, Active: true, Source: source,
+		}
+		if createErr := s.repo.CreateUser(ctx, &newUser); createErr != nil {
+			return nil, v1.ErrInternalServerError
+		}
+		user = newUser
+		s.logger.WithContext(ctx).Info().
+			Str("username", username).Str("source", source).Str("role", role).
+			Msg("auto-provision user from external auth")
+	default:
+		return nil, v1.ErrInternalServerError
+	}
+	return s.session(&user)
+}
+
+// SessionFor 为已认证用户签发会话（OIDC 一次性票据兑换用）。
+func (s *authService) SessionFor(ctx context.Context, uid uint) (*v1.LoginResponseData, error) {
+	user, err := s.repo.GetUser(ctx, uid)
+	if err != nil {
+		return nil, v1.ErrUnauthorized
+	}
+	if !user.Active {
+		return nil, v1.ErrUnauthorized
+	}
+	return s.session(&user)
+}
+
+// ExternalAuthStatus 返回外部认证模式开关，供登录页决定展示哪些入口。
+func (s *authService) ExternalAuthStatus() v1.ExternalAuthStatusData {
+	return v1.ExternalAuthStatusData{
+		Proxy: s.proxyCfg.Enabled,
+		OIDC:  s.oidc != nil && s.oidc.Enabled(),
+	}
+}
+
+// GetDisableAuth 读取免登录模式开关。
+func (s *authService) GetDisableAuth(ctx context.Context) bool {
+	v, err := s.repo.GetSetting(ctx, "disableAuth")
+	if err != nil {
+		return false
+	}
+	return v == "true"
+}
+
+// ToggleDisableAuth 切换免登录模式：切换到关闭认证时须校验当前密码。
+func (s *authService) ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error {
+	if enable {
+		user, err := s.repo.GetUser(ctx, uid)
+		if err != nil {
+			return err
+		}
+		if err := hash.BcryptCheck(currentPassword, user.Password); err != nil {
+			return v1.ErrBadRequest
+		}
+	}
+	return s.repo.SetSetting(ctx, "disableAuth", strconv.FormatBool(enable), "security")
 }
 
 // AutoLogin 免登录模式：仅当 disableAuth=true 时以首个活跃用户自动登录；
@@ -277,19 +397,28 @@ func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, err
 	return nil, v1.ErrUnauthorized
 }
 
-// ToggleDisableAuth 切换免登录模式：切换到关闭认证时须校验当前密码。
-func (s *authService) ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error {
-	if enable {
-		// 从已启用切换到免登录：须验证当前密码
-		user, err := s.repo.GetUser(ctx, uid)
-		if err != nil {
-			return err
-		}
-		if err := hash.BcryptCheck(currentPassword, user.Password); err != nil {
-			return v1.ErrBadRequest
-		}
+// session 签发绑定密码哈希的本地 JWT。
+func (s *authService) session(user *model.DockgeUser) (*v1.LoginResponseData, error) {
+	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(tokenTTL))
+	if err != nil {
+		return nil, v1.ErrInternalServerError
 	}
-	return s.repo.SetSetting(ctx, "disableAuth", strconv.FormatBool(enable), "security")
+	return &v1.LoginResponseData{AccessToken: token, User: meData(user)}, nil
+}
+
+// GetSetting 读取原始设置项（供认证相关逻辑使用）。
+func (s *authService) GetSetting(ctx context.Context, key string) (string, error) {
+	return s.repo.GetSetting(ctx, key)
+}
+
+// SetSetting 写入原始设置项。
+func (s *authService) SetSetting(ctx context.Context, key, value, typ string) error {
+	return s.repo.SetSetting(ctx, key, value, typ)
+}
+
+// GetAllSettings 返回指定分组的全部设置项。
+func (s *authService) GetAllSettings(ctx context.Context, typ string) (map[string]string, error) {
+	return s.repo.GetAllSettingsByType(ctx, typ)
 }
 
 // GetLatestVersion 返回 GitHub 最新 release tag。
@@ -311,4 +440,24 @@ func (s *authService) GetLatestVersion(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return result.TagName, nil
+}
+
+// unusablePassword 生成外部身份账号的密码哈希原值：随机 256 位。
+// 用户不可知，因此这类账号无法通过密码登录，只能走外部认证。
+func unusablePassword() string {
+	buf := make([]byte, 32)
+	_, _ = rand.Read(buf)
+	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+// meData 把用户实体转为对外视图（角色为空的历史用户按 admin 展示）。
+func meData(u *model.DockgeUser) v1.MeUserData {
+	role := u.Role
+	if role == "" {
+		role = model.RoleAdmin
+	}
+	return v1.MeUserData{
+		ID: u.ID, Username: u.Username, Nickname: u.Nickname,
+		Role: role, TwoFA: u.TwofaStatus,
+	}
 }

@@ -8,12 +8,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
+	"github.com/spf13/viper"
 )
 
 // SettingsHandler 承载设置读写接口。
 type SettingsHandler struct {
 	*Handler
 	settingsService service.SettingsService
+	authService     service.AuthService
+	conf            *viper.Viper
 }
 
 // NewSettingsHandler 构造设置处理器，由注入容器调用。
@@ -22,6 +25,8 @@ func NewSettingsHandler(i do.Injector) (*SettingsHandler, error) {
 	return &SettingsHandler{
 		Handler:         do.MustInvoke[*Handler](i),
 		settingsService: do.MustInvoke[service.SettingsService](i),
+		authService:     do.MustInvoke[service.AuthService](i),
+		conf:            do.MustInvoke[*viper.Viper](i),
 	}, nil
 }
 
@@ -47,4 +52,36 @@ func (h *SettingsHandler) SetGlobalEnv(ctx *gin.Context) {
 		return
 	}
 	v1.HandleSuccess(ctx, nil)
+}
+
+// AuthConfig 返回当前认证模式与可用 OIDC provider 列表，供登录页渲染 SSO 入口。
+func (h *SettingsHandler) AuthConfig(ctx *gin.Context) {
+	mode := h.conf.GetString("security.auth.mode")
+	if mode == "" {
+		mode = "jwt"
+	}
+	providers := h.conf.GetStringMap("security.auth.oidc.providers")
+	type providerInfo struct {
+		Label string `json:"label"`
+	}
+	pList := make([]struct {
+		ID    string        `json:"id"`
+		Info  providerInfo `json:"info"`
+	}, 0, len(providers))
+	for id, v := range providers {
+		m := v.(map[string]interface{})
+		info := providerInfo{Label: "SSO"}
+		if l, ok := m["label"].(string); ok && l != "" {
+			info.Label = l
+		}
+		pList = append(pList, struct {
+			ID    string        `json:"id"`
+			Info  providerInfo `json:"info"`
+		}{ID: id, Info: info})
+	}
+	v1.HandleSuccess(ctx, gin.H{
+		"mode":        mode,
+		"providers":   pList,
+		"disableAuth": h.authService.GetDisableAuth(ctx),
+	})
 }

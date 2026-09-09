@@ -68,6 +68,7 @@ type MeUserData struct {
 	ID       uint   `json:"id"`
 	Username string `json:"username"`
 	Nickname string `json:"nickname"`
+	Role     string `json:"role,omitempty"` // admin / member
 	TwoFA    bool   `json:"twoFA,omitempty"`
 }
 
@@ -170,13 +171,21 @@ type ContainerStatusData struct {
 }
 
 type DockerContainerData struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	State  string `json:"state"`
-	Status string `json:"status"`
-	Ports  string `json:"ports"`
-	Stack  string `json:"stack,omitempty"`
+	ID     string        `json:"id"`
+	Name   string        `json:"name"`
+	Image  string        `json:"image"`
+	State  string        `json:"state"`
+	Status string        `json:"status"`
+	Ports  []PortMapping `json:"ports"`
+	Stack  string        `json:"stack,omitempty"`
+}
+
+// PortMapping 是一条端口映射（hostIP:hostPort -> containerPort/proto）。
+type PortMapping struct {
+	HostIP        string `json:"hostIP,omitempty"`
+	HostPort      int    `json:"hostPort,omitempty"`
+	ContainerPort int    `json:"containerPort"`
+	Protocol      string `json:"protocol,omitempty"`
 }
 
 type DockerInfoData struct {
@@ -206,11 +215,11 @@ type DockerStatsData struct {
 }
 
 type DockerDfCategory struct {
-	Type        string `json:"type"`
-	Count       int    `json:"count"`
-	Active      int    `json:"active"`
-	Size        string `json:"size"`
-	Reclaimable string `json:"reclaimable"`
+	Type             string `json:"type"`
+	Count            int    `json:"count"`
+	Active           int    `json:"active"`
+	SizeBytes        int64  `json:"sizeBytes"`
+	ReclaimableBytes int64  `json:"reclaimableBytes"`
 }
 
 type DockerDfData struct {
@@ -237,11 +246,11 @@ type VersionCheckResponse struct {
 // -------- 镜像 --------
 
 type DockerImageData struct {
-	ID      string `json:"id"`
-	Repo    string `json:"repo"`
-	Tag     string `json:"tag"`
-	Size    string `json:"size"`
-	Created string `json:"created"`
+	ID          string `json:"id"`
+	Repo        string `json:"repo"`
+	Tag         string `json:"tag"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	CreatedUnix int64  `json:"createdAt"` // 构建时间 unix 秒
 }
 
 type DockerImagesData struct {
@@ -257,6 +266,69 @@ type DockerVolumesData struct {
 	List []DockerVolumeData `json:"list"`
 }
 
+// DockerNetworkData 是网络列表的一行。
+type DockerNetworkData struct {
+	Name   string `json:"name"`
+	Driver string `json:"driver"`
+}
+
 type PullImageRequest struct {
 	Reference string `json:"reference" binding:"required"`
+}
+
+// NetworkCreateRequest 创建网络的请求体。
+type NetworkCreateRequest struct {
+	Name   string `json:"name" binding:"required"`
+	Driver string `json:"driver"`
+	Subnet string `json:"subnet"`
+}
+
+// -------- 用户管理 --------
+
+// UserData 是用户管理列表与响应中的用户视图（不含凭证）。
+type UserData struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	Nickname string `json:"nickname"`
+	Role     string `json:"role"`
+	Source   string `json:"source,omitempty"` // local / proxy / oidc
+	Active   bool   `json:"active"`
+	TwoFA    bool   `json:"twoFA"`
+}
+
+type UserListData struct {
+	List []UserData `json:"list"`
+}
+
+// CreateUserRequest 是管理员创建用户的请求体。
+type CreateUserRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required,min=6"`
+	Nickname string `json:"nickname"`
+	Role     string `json:"role"`
+}
+
+// UpdateUserRequest 是管理员更新用户资料的请求体。
+type UpdateUserRequest struct {
+	Nickname string `json:"nickname"`
+	Role     string `json:"role"`
+	Active   *bool  `json:"active"`
+}
+
+// ResetUserPasswordRequest 是管理员重置用户密码的请求体。
+type ResetUserPasswordRequest struct {
+	NewPassword string `json:"newPassword" binding:"required,min=6"`
+}
+
+// -------- 外部认证 --------
+
+// ExternalAuthStatusData 是登录页探测外部认证模式的响应。
+type ExternalAuthStatusData struct {
+	Proxy bool `json:"proxy"`
+	OIDC  bool `json:"oidc"`
+}
+
+// OIDCExchangeRequest 是一次性票据兑换本地 JWT 的请求体。
+type OIDCExchangeRequest struct {
+	Code string `json:"code" binding:"required"`
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 
 	"dockge/app/dockge/internal/model"
 	"dockge/app/dockge/internal/repository"
@@ -46,9 +45,6 @@ func (m *MigrateServer) Start(ctx context.Context) error {
 	if err := m.seedAdmin(); err != nil {
 		return err
 	}
-	if err := m.seedJWTSecret(); err != nil {
-		return err
-	}
 	if err := m.re.EnsureStacksDir(); err != nil {
 		return err
 	}
@@ -81,6 +77,7 @@ func (m *MigrateServer) seedAdmin() error {
 		Username: "admin",
 		Nickname: "管理员",
 		Password: string(hashed),
+		Role:     model.RoleAdmin,
 		Active:   true,
 	}
 	data, _ := json.Marshal(user)
@@ -95,35 +92,4 @@ func (m *MigrateServer) seedAdmin() error {
 		data, _ = json.Marshal(user)
 		return b.Put([]byte("admin"), data)
 	})
-}
-
-func (m *MigrateServer) seedJWTSecret() error {
-	key := generateRandomString(64)
-	hashed, err := bcrypt.GenerateFromPassword([]byte(key), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hash jwt secret: %w", err)
-	}
-	payload := settingPayload{Value: string(hashed), Type: "security"}
-	data, _ := json.Marshal(payload)
-	return m.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("settings"))
-		if b.Get([]byte("jwtSecret")) != nil {
-			return nil // 已存在
-		}
-		return b.Put([]byte("jwtSecret"), data)
-	})
-}
-
-type settingPayload struct {
-	Value string `json:"v"`
-	Type  string `json:"t"`
-}
-
-func generateRandomString(n int) string {
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = chars[rand.IntN(len(chars))]
-	}
-	return string(b)
 }

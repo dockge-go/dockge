@@ -216,30 +216,6 @@ func TrimStackOutput(out string) string {
 	return strings.TrimSpace(out)
 }
 
-// SaveGlobalEnv 写入 stacks 根目录的 global.env 文件。
-// content 为空或占位符时删除文件。
-func (r *Repository) SaveGlobalEnv(ctx context.Context, content string) error {
-	path := filepath.Join(r.stacksDir, "global.env")
-	placeholder := "# VARIABLE=value #comment"
-	if content == placeholder || content == "" {
-		return os.Remove(path)
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-// GetGlobalEnv 读取 stacks 根目录的 global.env 内容；文件不存在时返回占位符。
-func (r *Repository) GetGlobalEnv(ctx context.Context) (string, error) {
-	path := filepath.Join(r.stacksDir, "global.env")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "# VARIABLE=value #comment", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
 // ParseXDockgeURLs 从 compose YAML 中解析 x-dockge.urls 扩展字段，
 // 支持 ${VAR} 替换（从 .env 内容中提取变量）。
 func ParseXDockgeURLs(yamlContent, envContent string) []string {

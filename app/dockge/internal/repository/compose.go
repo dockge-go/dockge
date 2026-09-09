@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -221,4 +222,20 @@ func (r *Repository) StackOp(ctx context.Context, name, op string) (string, erro
 func (r *Repository) StackExecDir(ctx context.Context, name string) (string, error) {
 	dir, _, err := r.resolveStackExec(ctx, name)
 	return dir, err
+}
+
+// StackLogsStream 返回栈组合日志的实时流（docker compose logs -f --tail N）。
+// 返回读取端，调用方负责在 ctx 取消前持续读取；找不到栈的 compose 文件时报错。
+func (r *Repository) StackLogsStream(ctx context.Context, name string, tail int) (<-chan string, error) {
+	if tail <= 0 || tail > 5000 {
+		tail = 200
+	}
+	dir, files, err := r.resolveStackExec(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	args := composeArgs(name, dir, files, "logs", "-f", "--tail", strconv.Itoa(tail), "--no-color")
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Dir = dir
+	return streamCmd(ctx, cmd)
 }

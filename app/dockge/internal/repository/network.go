@@ -10,37 +10,47 @@ import (
 	"strings"
 	"time"
 
+	"dockge/app/dockge/internal/model"
 	libnetworkTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/bindings/network"
 )
 
-// DockerNetworks 返回本机全部 docker/podman 网络名称。
+// DockerNetworks 返回本机全部 docker/podman 网络（名称升序）。
 // podman client 优先，不可用时降级 docker CLI。
-func (r *Repository) DockerNetworks(ctx context.Context) ([]string, error) {
+func (r *Repository) DockerNetworks(ctx context.Context) ([]model.Network, error) {
 	if r.podman != nil && r.podman.IsAvailable() {
 		nets, err := network.List(ctx, &network.ListOptions{})
 		if err == nil {
-			names := make([]string, 0, len(nets))
+			result := make([]model.Network, 0, len(nets))
 			for _, n := range nets {
-				names = append(names, n.Name)
+				result = append(result, model.Network{Name: n.Name, Driver: n.Driver})
 			}
-			sort.Strings(names)
-			return names, nil
+			sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+			return result, nil
 		}
 		r.logger.Warn().Err(err).Msg("podman network list failed, falling back to docker CLI")
 	}
-	out, err := runDocker(ctx, 30*time.Second, "network", "ls", "--format", "{{.Name}}")
+	out, err := runDocker(ctx, 30*time.Second, "network", "ls", "--format", "{{json .}}")
 	if err != nil {
 		return nil, fmt.Errorf("docker network ls: %w", err)
 	}
-	names := make([]string, 0)
+	result := make([]model.Network, 0)
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" && line != "NETWORK" {
-			names = append(names, line)
+		if line == "" {
+			continue
 		}
+		var item struct {
+			Name   string `json:"Name"`
+			Driver string `json:"Driver"`
+		}
+		if err := json.Unmarshal([]byte(line), &item); err != nil {
+			return nil, fmt.Errorf("parse docker network ls output: %w", err)
+		}
+		result = append(result, model.Network{Name: item.Name, Driver: item.Driver})
 	}
-	return names, nil
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
 }
 
 // RemoveNetwork 删除指定网络。podman client 优先，不可用时降级 docker CLI。

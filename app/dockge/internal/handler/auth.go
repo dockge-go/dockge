@@ -31,7 +31,8 @@ func (h *AuthHandler) Login(ctx *gin.Context) {
 		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
 		return
 	}
-	data, err := h.authService.Login(ctx, &req)
+	clientIP := ctx.ClientIP()
+	data, err := h.authService.Login(ctx, &req, clientIP)
 	if err != nil {
 		v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
 		return
@@ -75,7 +76,8 @@ func (h *AuthHandler) Check2FA(ctx *gin.Context) {
 		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
 		return
 	}
-	data, err := h.authService.Check2FA(ctx, &req)
+	clientIP := ctx.ClientIP()
+	data, err := h.authService.Check2FA(ctx, &req, clientIP)
 	if err != nil {
 		v1.HandleError(ctx, http.StatusUnauthorized, err, nil)
 		return

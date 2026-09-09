@@ -19,10 +19,11 @@ web-build:
 	HUSKY=0 pnpm --dir ./app/dockge/web install --frozen-lockfile
 	pnpm --dir ./app/dockge/web build
 
-# 构建单二进制（内嵌前端）到 bin/dockge-server
+# 构建单二进制（内嵌前端）到 bin/dockge-server；版本号由 git describe 注入
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 build: web-build
 	mkdir -p ./bin
-	go build -ldflags="-s -w" -o ./bin/dockge-server ./app/dockge/cmd/server
+	go build -ldflags="-s -w -X dockge/app/dockge/internal/version.Version=$(VERSION)" -o ./bin/dockge-server ./app/dockge/cmd/server
 
 # 运维脚本：交互式重置指定用户的密码（破坏性，需输入两次确认）
 reset-password:

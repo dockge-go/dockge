@@ -76,3 +76,72 @@ func (l *Limiter) Reset() {
 	defer l.mu.Unlock()
 	l.tokens = l.tokens[:0]
 }
+
+// keyedEntry 是 KeyedLimiter 中的一个独立限流桶及其最近访问时间。
+type keyedEntry struct {
+	limiter    *Limiter
+	lastAccess time.Time
+}
+
+// KeyedLimiter 按键（如 "ip|username"）维度的滑动窗口限流器。
+// 各键独立计数，惰性清理过期与超容量的键，防止内存无限增长。
+type KeyedLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]*keyedEntry
+	limit   int
+	window  time.Duration
+	maxKeys int // 键数上限，超过时优先清理过期键，仍超则剔除最久未访问
+	now     func() time.Time
+}
+
+// NewKeyed 创建按键限流器：每个键在 window 内最多 limit 次；
+// 键总数超过 maxKeys 时触发清理。
+func NewKeyed(limit int, window time.Duration, maxKeys int) *KeyedLimiter {
+	return &KeyedLimiter{
+		buckets: make(map[string]*keyedEntry),
+		limit:   limit,
+		window:  window,
+		maxKeys: maxKeys,
+		now:     time.Now,
+	}
+}
+
+// Allow 检查指定键是否允许请求。
+func (k *KeyedLimiter) Allow(key string) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	now := k.now()
+	k.sweepLocked(now)
+	entry, ok := k.buckets[key]
+	if !ok {
+		entry = &keyedEntry{limiter: New(k.limit, k.window)}
+		k.buckets[key] = entry
+	}
+	entry.lastAccess = now
+	return entry.limiter.Allow()
+}
+
+// sweepLocked 清理过期键；键数仍超容量时按最近访问时间剔除最老的。
+// 调用方必须持有 k.mu。
+func (k *KeyedLimiter) sweepLocked(now time.Time) {
+	if len(k.buckets) < k.maxKeys {
+		return
+	}
+	for key, entry := range k.buckets {
+		if now.Sub(entry.lastAccess) > k.window {
+			delete(k.buckets, key)
+		}
+	}
+	for len(k.buckets) >= k.maxKeys {
+		oldestKey, oldestAt := "", now
+		for key, entry := range k.buckets {
+			if oldestKey == "" || entry.lastAccess.Before(oldestAt) {
+				oldestKey, oldestAt = key, entry.lastAccess
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(k.buckets, oldestKey)
+	}
+}

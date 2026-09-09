@@ -8,6 +8,11 @@ ssl:
 security:
   jwt:
     key: change-me-for-local-development
+  auth:
+    mode: jwt
+    proxy:
+      username_header: X-Forwarded-User
+      auto_provision: true
 dockge:
   stacks_dir: storage/stacks
 data:

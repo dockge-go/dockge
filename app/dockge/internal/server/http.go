@@ -4,8 +4,11 @@ import (
 	nethttp "net/http"
 	"strings"
 
+	"dockge/app/dockge/internal/authoidc"
+	v1 "dockge/app/dockge/api/v1"
 	"dockge/app/dockge/internal/handler"
 	"dockge/app/dockge/internal/middleware"
+	"dockge/app/dockge/internal/service"
 	"dockge/app/dockge/web"
 	"dockge/pkg/jwt"
 	"dockge/pkg/log"
@@ -23,6 +26,8 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 	logger := do.MustInvoke[*log.Logger](i)
 	j := do.MustInvoke[*jwt.JWT](i)
 	authHandler := do.MustInvoke[*handler.AuthHandler](i)
+	oidcHandler := do.MustInvoke[*handler.OIDCHandler](i)
+	authService := do.MustInvoke[service.AuthService](i)
 	stackHandler := do.MustInvoke[*handler.StackHandler](i)
 	dockerHandler := do.MustInvoke[*handler.DockerHandler](i)
 	settingsHandler := do.MustInvoke[*handler.SettingsHandler](i)
@@ -74,7 +79,7 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 
 	v1Group := s.Group("/v1")
 	{
-		noAuthRouter := v1Group.Group("/")
+		noAuthRouter := v1Group.Group("/").Use(middleware.SetupRequired(authService))
 		{
 			noAuthRouter.POST("/login", authHandler.Login)
 			noAuthRouter.POST("/setup", authHandler.Setup)
@@ -84,9 +89,16 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			noAuthRouter.GET("/robots.txt", func(c *gin.Context) {
 				c.String(200, "User-agent: *\nDisallow: /")
 			})
+			noAuthRouter.GET("/auth/config", settingsHandler.AuthConfig)
+			noAuthRouter.POST("/auto-login", authHandler.AutoLogin)
 		}
 
 		strictAuthRouter := v1Group.Group("/").Use(middleware.StrictAuth(j, logger))
+		// proxy 模式下 ProxyAuth 先于 StrictAuth 运行；ProxyAuth 完成时设置 ctxProxyAuthDone，
+		// StrictAuth 据此跳过 JWT 校验。mode != "proxy" 时 ProxyAuth 直接放行，等效 noop。
+		if do.MustInvoke[*viper.Viper](i).GetString("security.auth.mode") == "proxy" {
+			strictAuthRouter.Use(middleware.ProxyAuth(authService, logger, do.MustInvoke[*viper.Viper](i)))
+		}
 		{
 			strictAuthRouter.GET("/me", authHandler.Me)
 			strictAuthRouter.PUT("/me/password", authHandler.ChangePassword)
@@ -94,8 +106,6 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			strictAuthRouter.DELETE("/me/2fa", authHandler.Disable2FA)
 			strictAuthRouter.GET("/me/disableauth", authHandler.GetDisableAuth)
 			strictAuthRouter.POST("/me/disableauth", authHandler.ToggleDisableAuth)
-
-			noAuthRouter.POST("/auto-login", authHandler.AutoLogin)
 
 			strictAuthRouter.GET("/stacks", stackHandler.List)
 			strictAuthRouter.POST("/stacks", stackHandler.Create)
@@ -137,6 +147,26 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			strictAuthRouter.POST("/composerize", composerizeHandler.Convert)
 
 			strictAuthRouter.GET("/terminal/:name/:type", terminalHandler.WebSocket)
+
+			// OIDC 路由无需 JWT（回调前用户未登录）
+			noAuthRouter.GET("/oidc/providers", func(c *gin.Context) {
+				mgr := do.MustInvoke[*authoidc.Manager](i)
+				ids := mgr.Providers()
+				type providerInfo struct {
+					Label string `json:"label"`
+				}
+				type item struct {
+					ID   string        `json:"id"`
+					Info providerInfo `json:"info"`
+				}
+				items := make([]item, 0, len(ids))
+				for _, id := range ids {
+					items = append(items, item{ID: id, Info: providerInfo{Label: id}})
+				}
+				v1.HandleSuccess(c, gin.H{"providers": items})
+			})
+			noAuthRouter.GET("/oidc/:provider/auth", oidcHandler.Auth)
+			noAuthRouter.GET("/oidc/:provider/callback", oidcHandler.Callback)
 		}
 	}
 	return s, nil

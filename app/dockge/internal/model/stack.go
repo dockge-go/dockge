@@ -44,6 +44,14 @@ type Stack struct {
 	Containers      []Container
 }
 
+// PortMapping 是容器的一条端口映射（hostIP: hostPort -> containerPort/proto）。
+type PortMapping struct {
+	HostIP        string
+	HostPort      int
+	ContainerPort int
+	Protocol      string
+}
+
 // Container 是栈内或全局的一个容器视图。
 type Container struct {
 	ID      string
@@ -52,7 +60,7 @@ type Container struct {
 	Image   string
 	State   string
 	Status  string
-	Ports   string
+	Ports   []PortMapping
 	Stack   string // 所属 compose 项目（来自容器 label，可空）
 }
 
@@ -67,11 +75,11 @@ type ContainerStat struct {
 
 // DfCategory 是一类 Docker 资源的磁盘占用汇总。
 type DfCategory struct {
-	Type        string
-	Count       int
-	Active      int
-	Size        string
-	Reclaimable string
+	Type            string
+	Count           int
+	Active          int
+	SizeBytes       int64
+	ReclaimableBytes int64
 }
 
 // Volume 是本地存储的一个数据卷视图。
@@ -80,16 +88,35 @@ type Volume struct {
 	Driver string
 }
 
+// Network 是本机一个 docker/podman 网络视图。
+type Network struct {
+	Name   string
+	Driver string
+}
+
 // Image 是本地存储的一个容器镜像视图。
 type Image struct {
-	ID      string
-	Repo    string
-	Tag     string
-	Size    string // 人类可读大小，如 "52.2MB"
-	Created string // 人类可读时间，如 "2 weeks ago"
+	ID          string
+	Repo        string
+	Tag         string
+	SizeBytes   int64
+	CreatedUnix int64 // 镜像构建时间的 unix 秒
 }
 
 // ---- 账号 ----
+
+// 用户角色取值。
+const (
+	RoleAdmin  = "admin"
+	RoleMember = "member"
+)
+
+// 账号来源取值。
+const (
+	SourceLocal = "local" // 首启引导/管理员创建
+	SourceProxy = "proxy" // 受信反代头自动开户
+	SourceOIDC  = "oidc"  // OIDC SSO 自动开户
+)
 
 // DockgeUser 是 dockge 控制台的登录账号。
 type DockgeUser struct {
@@ -97,13 +124,21 @@ type DockgeUser struct {
 	Username       string
 	Nickname       string
 	Password       string // bcrypt 哈希
+	Role           string // admin / member；空值兼容旧数据，按 admin 处理
 	Active         bool
 	Timezone       string
 	TwofaSecret    string // TOTP 密钥（base32）
 	TwofaStatus    bool
 	TwofaLastToken string // 上次 TOTP 令牌（防重放）
+	Source         string // "local" | "oidc" | "proxy"，记录账号来源
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// IsAdmin 报告该用户是否具备管理员权限。
+// 历史数据（多用户改造前）无角色字段，一律视为 admin。
+func (u *DockgeUser) IsAdmin() bool {
+	return u.Role == "" || u.Role == RoleAdmin
 }
 
 // ---- 设置 ----
