@@ -12,8 +12,8 @@ func TestConvert(t *testing.T) {
 	tests := []struct {
 		name    string
 		cmd     string
-		want    []string // 期望包含的行
-		notWant []string // 期望不包含的行
+		want    []string // 期望包含的语义行
+		notWant []string // 期望不包含的语义行
 		wantErr bool
 	}{
 		{
@@ -118,11 +118,8 @@ func TestConvert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Convert(%q) 意外报错: %v", tt.cmd, err)
 			}
-			for _, line := range tt.want {
-				if !strings.Contains(got, line+"\n") && !strings.HasSuffix(got, line) {
-					t.Errorf("输出缺少行 %q，实际:\n%s", line, got)
-				}
-			}
+			checkYAMLSemantic(t, got, tt.want)
+			// notWant 检查：确保不期望的语义不存在
 			for _, line := range tt.notWant {
 				if strings.Contains(got, line) {
 					t.Errorf("输出不应包含 %q，实际:\n%s", line, got)

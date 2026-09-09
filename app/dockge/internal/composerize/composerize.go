@@ -14,7 +14,7 @@ var valueFlags = map[string]bool{
 	"-v": true, "--volume": true,
 	"-e": true, "--env": true,
 	"--env-file": true,
-	"-l": true, "--label": true,
+	"-l":         true, "--label": true,
 	"--name": true, "--network": true,
 	"--entrypoint": true, "--hostname": true, "-h": true,
 	"--user": true, "-u": true, "--workdir": true, "-w": true,
