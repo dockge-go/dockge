@@ -31,5 +31,6 @@ reset-password:
 
 test:
 	go test ./...
+	pnpm --dir ./app/dockge/web test
 
 verify: build test
