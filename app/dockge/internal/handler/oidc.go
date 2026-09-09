@@ -6,11 +6,9 @@ import (
 	v1 "dockge/app/dockge/api/v1"
 	"dockge/app/dockge/internal/authoidc"
 	"dockge/app/dockge/internal/service"
-	"dockge/pkg/jwt"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
-	"github.com/spf13/viper"
 )
 
 // OIDCHandler 处理 OIDC 授权码流：发起认证、接收回调。
@@ -18,7 +16,6 @@ type OIDCHandler struct {
 	*Handler
 	authService service.AuthService
 	oidcMgr     *authoidc.Manager
-	conf        *viper.Viper
 }
 
 // NewOIDCHandler 构造 OIDC 处理器。
@@ -27,11 +24,11 @@ func NewOIDCHandler(i do.Injector) (*OIDCHandler, error) {
 		Handler:     do.MustInvoke[*Handler](i),
 		authService: do.MustInvoke[service.AuthService](i),
 		oidcMgr:     do.MustInvoke[*authoidc.Manager](i),
-		conf:        do.MustInvoke[*viper.Viper](i),
 	}, nil
 }
 
-// Auth 发起 OIDC 授权请求：生成 state+PKCE verifier，重定向到 IdP。
+// Auth 发起 OIDC 授权请求：生成 state+PKCE verifier（verifier 仅存服务端），
+// 以 oidc_state cookie 绑定浏览器会话，重定向到 IdP 授权页。
 func (h *OIDCHandler) Auth(ctx *gin.Context) {
 	providerID := ctx.Param("provider")
 	provider := h.oidcMgr.Get(providerID)
@@ -40,7 +37,7 @@ func (h *OIDCHandler) Auth(ctx *gin.Context) {
 		return
 	}
 
-	state, verifier, err := provider.BeginLogin()
+	state, authURL, err := provider.BeginLogin()
 	if err != nil {
 		v1.HandleError(ctx, http.StatusInternalServerError, v1.ErrInternalServerError, nil)
 		return
@@ -48,12 +45,12 @@ func (h *OIDCHandler) Auth(ctx *gin.Context) {
 
 	ctx.SetSameSite(http.SameSiteLaxMode)
 	ctx.SetCookie("oidc_state", state, 300, "/", "", false, true)
-	ctx.SetCookie("oidc_verifier", verifier, 300, "/", "", false, true)
 
-	ctx.Redirect(http.StatusFound, verifier)
+	ctx.Redirect(http.StatusFound, authURL)
 }
 
-// Callback 接收 OIDC 授权码，换取 ID Token，验签后签发本地 JWT cookie 并重定向至首页。
+// Callback 接收 OIDC 授权码，换取并验签 ID Token，映射本地用户后
+// 签发 httpOnly JWT cookie 并重定向至首页。
 func (h *OIDCHandler) Callback(ctx *gin.Context) {
 	providerID := ctx.Param("provider")
 	provider := h.oidcMgr.Get(providerID)
@@ -75,12 +72,6 @@ func (h *OIDCHandler) Callback(ctx *gin.Context) {
 		return
 	}
 
-	codeVerifier, _ := ctx.Cookie("oidc_verifier")
-	if codeVerifier == "" {
-		v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
-		return
-	}
-
 	claims, err := provider.CompleteLogin(ctx.Request.Context(), state, code)
 	if err != nil {
 		h.logger.Warn().Err(err).Str("provider", providerID).Msg("oidc complete failed")
@@ -94,23 +85,16 @@ func (h *OIDCHandler) Callback(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.authService.OIDCLogin(ctx, username, false)
+	data, err := h.authService.OIDCLogin(ctx, username, provider.IsAdmin(claims))
 	if err != nil {
 		h.logger.Warn().Str("username", username).Err(err).Msg("oidc login failed")
 		v1.HandleError(ctx, http.StatusInternalServerError, v1.ErrInternalServerError, nil)
 		return
 	}
 
-	// 清除临时 cookie
+	// 清除一次性 state cookie，写 JWT cookie，重定向回首页
 	ctx.SetSameSite(http.SameSiteLaxMode)
 	ctx.SetCookie("oidc_state", "", -1, "/", "", false, true)
-	ctx.SetCookie("oidc_verifier", "", -1, "/", "", false, true)
-	// 写 JWT cookie
-	tokenTTL := h.conf.GetInt("security.jwt.token_ttl_hours")
-	if tokenTTL <= 0 {
-		tokenTTL = 168
-	}
-	ctx.SetCookie("dockge_token", data.AccessToken, tokenTTL*3600, "/", "", false, true)
-	ctx.Set("claims", &jwt.Claims{UserId: data.User.ID})
-	ctx.Next()
+	ctx.SetCookie("dockge_token", data.AccessToken, int(service.SessionTTL.Seconds()), "/", "", false, true)
+	ctx.Redirect(http.StatusFound, "/")
 }

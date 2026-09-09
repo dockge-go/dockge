@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	v1 "dockge/app/dockge/api/v1"
+	"dockge/app/dockge/internal/authoidc"
+	"dockge/app/dockge/internal/security"
 	"dockge/app/dockge/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -56,27 +58,23 @@ func (h *SettingsHandler) SetGlobalEnv(ctx *gin.Context) {
 
 // AuthConfig 返回当前认证模式与可用 OIDC provider 列表，供登录页渲染 SSO 入口。
 func (h *SettingsHandler) AuthConfig(ctx *gin.Context) {
-	mode := h.conf.GetString("security.auth.mode")
-	if mode == "" {
-		mode = "jwt"
-	}
-	providers := h.conf.GetStringMap("security.auth.oidc.providers")
+	mode := security.AuthMode(h.conf)
+	providers := authoidc.ParseProviders(h.conf)
 	type providerInfo struct {
 		Label string `json:"label"`
 	}
 	pList := make([]struct {
-		ID    string        `json:"id"`
-		Info  providerInfo `json:"info"`
+		ID   string       `json:"id"`
+		Info providerInfo `json:"info"`
 	}, 0, len(providers))
-	for id, v := range providers {
-		m := v.(map[string]interface{})
+	for _, id := range authoidc.ProviderIDs(providers) {
 		info := providerInfo{Label: "SSO"}
-		if l, ok := m["label"].(string); ok && l != "" {
+		if l := providers[id].Label; l != "" {
 			info.Label = l
 		}
 		pList = append(pList, struct {
-			ID    string        `json:"id"`
-			Info  providerInfo `json:"info"`
+			ID   string       `json:"id"`
+			Info providerInfo `json:"info"`
 		}{ID: id, Info: info})
 	}
 	v1.HandleSuccess(ctx, gin.H{
