@@ -9,6 +9,7 @@ import { EmptyState, SectionHeader, StackStatusBadge } from "../components/widge
 import { errText } from "../api/format";
 import { clampPage, paginate } from "../lib/pagination";
 import { pendingNewStack, pendingStack, refresh, setPendingNewStack, setPendingStack, snapshot, toast } from "../store/index";
+import { t } from "../i18n";
 
 const STARTER_YAML = `services:
   web:
@@ -79,8 +80,8 @@ export function Stacks() {
     setOutput(`$ docker compose ${operation}\n`);
     try {
       const result = await api.stackOp(name(), operation);
-      setOutput(result.output || "操作完成，无额外输出");
-      toast(`Stack ${name()} ${operation} 完成`, "success");
+      setOutput(result.output || t("stack.opNoOutput"));
+      toast(t("toast.stackOpDone", { name: name(), op: operation }), "success");
       await refresh(false);
       await openDetail(name(), true);
       return true;
@@ -106,7 +107,7 @@ export function Stacks() {
     if (!data?.managed) return false;
     try {
       await api.saveStack(data.name, yaml(), env());
-      toast("Stack 文件已保存", "success");
+      toast(t("toast.stackSaved"), "success");
       return true;
     } catch (error) {
       setOutput(errText(error));
@@ -117,14 +118,14 @@ export function Stacks() {
 
   const createStack = async (deploy: boolean) => {
     const stackName = name().trim();
-    if (!/^[a-z0-9_-]+$/.test(stackName)) return toast("Stack 名称格式不正确", "error");
+    if (!/^[a-z0-9_-]+$/.test(stackName)) return toast(t("toast.stackNameInvalid"), "error");
     setBusy(true);
     try {
       await api.createStack(stackName, yaml(), env());
       await refresh(false);
       await openDetail(stackName);
       if (deploy) await executeOperation("start");
-      else toast("Stack 已保存，尚未部署", "success");
+      else toast(t("toast.stackCreated"), "success");
     } catch (error) {
       setOutput(errText(error));
       toast(errText(error), "error");
@@ -139,7 +140,7 @@ export function Stacks() {
     try {
       const result = await api.composerize(runCommand().trim());
       setYaml(result.composeTemplate);
-      toast("已转换到 Compose 编辑器", "success");
+      toast(t("toast.stackConverted"), "success");
     } catch (error) {
       setOutput(errText(error));
       toast(errText(error), "error");
@@ -149,13 +150,13 @@ export function Stacks() {
   };
 
   const remove = async () => {
-    if (!name() || !(await confirmDialog("删除 Stack", `将执行 down 并删除 ${name()} 的配置目录，此操作不可恢复。`))) return;
+    if (!name() || !(await confirmDialog(t("stack.confirmRemove"), t("stack.confirmRemoveDesc", { name: name() })))) return;
     try {
       await api.deleteStack(name());
       setMode("list");
       setDetail(null);
       await refresh(false);
-      toast("Stack 已删除", "success");
+      toast(t("toast.stackDeleted"), "success");
     } catch (error) {
       setOutput(errText(error));
       toast(errText(error), "error");
@@ -174,23 +175,23 @@ export function Stacks() {
 
   return (
     <div class="view-section workspace-view">
-      <SectionHeader title="Stacks" subtitle="本机 Docker Compose 工作区" actions={<button class="btn btn-primary" onClick={openCreate}><Plus size={14} /> New Stack</button>} />
+      <SectionHeader title="Stacks" subtitle={t("stack.workspaceSubtitle")} actions={<button class="btn btn-primary" onClick={openCreate}><Plus size={14} /> {t("stack.new")}</button>} />
       <div class="master-detail stack-master-detail" classList={{ "has-detail": mode() !== "list" }}>
-        <section class="master-pane" aria-label="Stack 列表">
-          <Show when={rows().length > 0} fallback={<EmptyState title="还没有 Stack" desc="创建 Compose Stack，或把已有目录放入 stacks 目录。" icon={<Layers size={44} />} />}>
+        <section class="master-pane" aria-label={t("aria.stackList")}>
+          <Show when={rows().length > 0} fallback={<EmptyState title={t("stack.noStacks")} desc={t("stack.noStacksDesc")} icon={<Layers size={44} />} />}>
             <div class="resource-list">
               <For each={visibleRows()}>
                 {(stack) => (
                   <article class="resource-row" classList={{ selected: mode() === "detail" && name() === stack.name }} tabindex="0" onClick={() => void openDetail(stack.name)} onKeyDown={(event) => event.key === "Enter" && void openDetail(stack.name)}>
-                    <div class="resource-row-main"><strong>{stack.name}</strong><span>{stack.composeFileName || "外部 Stack"}</span></div>
+                    <div class="resource-row-main"><strong>{stack.name}</strong><span>{stack.composeFileName || t("stack.external")}</span></div>
                     <StackStatusBadge status={stack.status} label={stack.statusLabel} />
-                    <p>{containerCount(stack.name)} 个容器 · {stack.managed ? "托管" : "只读外部"}</p>
+                    <p>{t("stack.containersCount", { n: containerCount(stack.name) })} · {stack.managed ? t("stack.managed") : t("stack.readonlyExternal")}</p>
                     <div class="resource-row-actions" onClick={(event) => event.stopPropagation()}>
-                      <Show when={stack.status === 3} fallback={<button class="btn-icon" aria-label="启动" onClick={() => { setName(stack.name); void runOperation("start"); }}><Play size={14} /></button>}>
-                        <button class="btn-icon" aria-label="停止" onClick={() => { setName(stack.name); void runOperation("stop"); }}><Square size={14} /></button>
+                      <Show when={stack.status === 3} fallback={<button class="btn-icon" aria-label={t("act.start")} onClick={() => { setName(stack.name); void runOperation("start"); }}><Play size={14} /></button>}>
+                        <button class="btn-icon" aria-label={t("act.stop")} onClick={() => { setName(stack.name); void runOperation("stop"); }}><Square size={14} /></button>
                       </Show>
-                      <button class="btn-icon" aria-label="重启" onClick={() => { setName(stack.name); void runOperation("restart"); }}><RotateCw size={14} /></button>
-                      <button class="btn-icon danger" aria-label="删除" onClick={() => { setName(stack.name); void remove(); }}><Trash2 size={14} /></button>
+                      <button class="btn-icon" aria-label={t("act.restart")} onClick={() => { setName(stack.name); void runOperation("restart"); }}><RotateCw size={14} /></button>
+                      <button class="btn-icon danger" aria-label={t("common.delete")} onClick={() => { setName(stack.name); void remove(); }}><Trash2 size={14} /></button>
                     </div>
                   </article>
                 )}
@@ -200,7 +201,7 @@ export function Stacks() {
           </Show>
         </section>
 
-        <Show when={mode() !== "list"} fallback={<div class="detail-placeholder"><p>选择一个 Stack，或创建新的 Compose Stack</p></div>}>
+        <Show when={mode() !== "list"} fallback={<div class="detail-placeholder"><p>{t("stack.selectHint")}</p></div>}>
           <StackWorkspace mode={mode() === "create" ? "create" : "detail"} detail={detail()} name={name()} yaml={yaml()} env={env()} output={output()} busy={busy()} runCommand={runCommand()} onBack={() => setMode("list")} onNameChange={setName} onYamlChange={setYaml} onEnvChange={setEnv} onRunCommandChange={setRunCommand} onConvert={() => void convert()} onSave={() => mode() === "create" ? void createStack(false) : void saveExisting()} onPrimary={() => void primary()} onOperation={(operation) => void runOperation(operation)} onRemove={() => void remove()} />
         </Show>
       </div>
