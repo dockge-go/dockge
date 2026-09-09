@@ -35,7 +35,7 @@ export { toasts };
 // ---- 认证 ----
 
 const [user, setUser] = createSignal<UserData | null>(null);
-const [authed, setAuthed] = createSignal(!!getToken());
+const [authed, setAuthed] = createSignal(false);
 
 export { user, authed };
 
@@ -71,9 +71,8 @@ export function logout() {
   stopContainerStatusStream();
 }
 
-/** 启动时校验本地 token，成功则预热用户与实时流。 */
+/** 启动时校验会话（localStorage token 或 httpOnly cookie），成功则预热用户与实时流。 */
 export async function boot(): Promise<boolean> {
-  if (!getToken()) return false;
   try {
     setUser(await api.me());
     setAuthed(true);

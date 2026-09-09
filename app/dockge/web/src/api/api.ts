@@ -185,10 +185,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   if (res.status === 401) {
     const payload = (await res.json().catch(() => null)) as { message?: string } | null;
-    if (getToken()) {
-      clearToken();
-      unauthorizedHandler();
-    }
+    if (getToken()) clearToken();
+    unauthorizedHandler();
     throw new ApiError(401, payload?.message || "登录失效，请重新登录");
   }
   const payload = (await res.json().catch(() => null)) as

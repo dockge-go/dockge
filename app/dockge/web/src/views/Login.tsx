@@ -20,11 +20,12 @@ export function Login() {
       return;
     }
     try {
-      const [setupResult, cfg] = await Promise.all([api.needSetup(), api.authConfig()]);
+      const setupResult = await api.needSetup();
       if (setupResult.needSetup) {
         navigate("/setup", { replace: true });
         return;
       }
+      const cfg = await api.authConfig();
       setAuthConfig(cfg);
     } catch {
       // 探测失败不阻塞登录表单
@@ -164,9 +165,8 @@ export function Login() {
             />
             <button
               class="btn btn-primary"
-              type="button"
+              type="submit"
               disabled={busy() || !username() || !password()}
-              onClick={() => void submit({ preventDefault: () => {} } as unknown as SubmitEvent)}
             >
               <LogIn size={14} />
             </button>
