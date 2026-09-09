@@ -2,6 +2,7 @@
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
 import { authed, boot, refresh, startContainerStatusStream } from "../store/index";
+import { t } from "../i18n/index";
 import { Sidebar } from "../components/Sidebar";
 import { Topbar } from "../components/Topbar";
 import { Toaster } from "../components/Toaster";
@@ -45,7 +46,7 @@ export function AppShell(props: { children?: JSX.Element }) {
   });
 
   return (
-    <Show when={ready()} fallback={<SpinnerBlock label="正在连接…" />}>
+    <Show when={ready()} fallback={<SpinnerBlock label={t("common.connecting")} />}>
       <div class="app-shell">
         <Sidebar open={sidebarOpen()} onNavigate={() => setSidebarOpen(false)} />
         <div class="main-content">

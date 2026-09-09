@@ -12,6 +12,7 @@ import {
 } from "../api/api";
 import { errText } from "../api/format";
 import { mergeContainerStatus } from "../lib/container-status";
+import { t } from "../i18n";
 
 // ---- toast ----
 
@@ -46,7 +47,7 @@ setUnauthorizedHandler(() => {
 
 export async function login(username: string, password: string) {
   const data = await api.login(username, password);
-  if (data.tokenRequired) throw new Error("该账号已启用两步验证，暂不支持在此登录");
+  if (data.tokenRequired) throw new Error(t("toast.2faNotSupported"));
   setToken(data.accessToken);
   setUser(data.user);
   setAuthed(true);
@@ -93,10 +94,10 @@ const [sseOn, setSseOn] = createSignal(false);
 
 export { snapshot, sseOn };
 
-const STATE_TOAST: Record<string, { label: string; type: ToastItem["type"] }> = {
-  running: { label: "已进入运行状态", type: "success" },
-  exited: { label: "已停止", type: "info" },
-  paused: { label: "已暂停", type: "info" },
+const STATE_TOAST: Record<string, { labelKey: "toast.sseRunning" | "toast.sseExited" | "toast.ssePaused"; type: ToastItem["type"] }> = {
+  running: { labelKey: "toast.sseRunning", type: "success" },
+  exited: { labelKey: "toast.sseExited", type: "info" },
+  paused: { labelKey: "toast.ssePaused", type: "info" },
 };
 
 function applyContainerStatus(frame: ContainerStatusFrame) {
@@ -107,7 +108,7 @@ function applyContainerStatus(frame: ContainerStatusFrame) {
     const state = changed.get(container.id);
     if (state && state !== container.state) {
       const message = STATE_TOAST[state];
-      if (message) toast(`${container.name} ${message.label}`, message.type);
+      if (message) toast(`${container.name} ${t(message.labelKey)}`, message.type);
     }
   }
   const containers = mergeContainerStatus(prev.containers, frame);
@@ -169,7 +170,7 @@ export async function refresh(withToast = true) {
       networks: networks.list,
       volumes: volumes.list,
     });
-    if (withToast) toast("数据已刷新", "info");
+    if (withToast) toast(t("toast.refreshed"), "info");
   } catch (e) {
     if (withToast) toast(errText(e), "error");
   }

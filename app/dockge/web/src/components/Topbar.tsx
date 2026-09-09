@@ -1,20 +1,27 @@
-// 顶栏：汉堡（移动端）+ 页面标题 + 全局搜索（下拉 + 键盘导航 + Cmd/Ctrl+K）+ 刷新。
+// 顶栏：汉堡（移动端）+ 页面标题 + 全局搜索（下拉 + 键盘导航 + Cmd/Ctrl+K）+ 语言/明暗切换 + 刷新。
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
-import { Menu, RefreshCw, Search } from "lucide-solid";
+import { Menu, Moon, RefreshCw, Search, Sun } from "lucide-solid";
 import { refresh, snapshot, setPendingContainer, setPendingStack } from "../store/index";
+import { setLocale, t, useLocale, type LocaleKey } from "../i18n/index";
+import { toggleTheme, useTheme } from "../lib/theme";
 
-const TITLES: Record<string, string> = {
-  "/": "Dashboard",
-  "/containers": "Containers",
-  "/stacks": "Stacks",
-  "/images": "Images",
-  "/volumes": "Volumes",
-  "/networks": "Networks",
-  "/sysinfo": "System Info",
-  "/sysdf": "Disk Usage",
-  "/settings": "Settings",
+const TITLES: Record<string, () => string> = {
+  "/": () => t("nav.dashboard"),
+  "/containers": () => t("nav.containers"),
+  "/stacks": () => t("nav.stacks"),
+  "/images": () => t("nav.images"),
+  "/volumes": () => t("nav.volumes"),
+  "/networks": () => t("nav.networks"),
+  "/sysinfo": () => t("nav.sysinfo"),
+  "/sysdf": () => t("nav.sysdf"),
+  "/settings": () => t("nav.settings"),
 };
+
+const LANG_OPTIONS: Array<{ key: LocaleKey; label: string }> = [
+  { key: "zh-CN", label: "中" },
+  { key: "en-US", label: "EN" },
+];
 
 interface SearchHit {
   group: string;
@@ -33,7 +40,7 @@ export function Topbar(props: { onHamburger: () => void }) {
 
   const title = () => {
     const seg = "/" + (location.pathname.split("/")[1] ?? "");
-    return TITLES[seg] ?? "Dockge";
+    return TITLES[seg]?.() ?? "Dockge";
   };
 
   const results = createMemo<SearchHit[]>(() => {
@@ -133,7 +140,7 @@ export function Topbar(props: { onHamburger: () => void }) {
 
   return (
     <header class="topbar">
-      <button class="hamburger" aria-label="切换导航" aria-expanded="true" onClick={props.onHamburger}>
+      <button class="hamburger" aria-label={t("aria.toggleNav")} aria-expanded="true" onClick={props.onHamburger}>
         <Menu size={20} />
       </button>
       <h1 class="topbar-title">{title()}</h1>
@@ -144,8 +151,8 @@ export function Topbar(props: { onHamburger: () => void }) {
           <input
             ref={inputRef}
             type="search"
-            placeholder="搜索…"
-            aria-label="全局搜索"
+            placeholder={t("common.search")}
+            aria-label={t("aria.search")}
             autocomplete="off"
             value={query()}
             onInput={(e) => {
@@ -181,7 +188,26 @@ export function Topbar(props: { onHamburger: () => void }) {
             </div>
           </Show>
         </div>
-        <button class="btn-icon" aria-label="刷新" title="Refresh" onClick={() => void refresh()}>
+        <div class="lang-switch" role="group" aria-label={t("aria.lang")}>
+          <For each={LANG_OPTIONS}>
+            {(opt) => (
+              <button
+                type="button"
+                class="lang-btn"
+                classList={{ active: useLocale() === opt.key }}
+                onClick={() => setLocale(opt.key)}
+              >
+                {opt.label}
+              </button>
+            )}
+          </For>
+        </div>
+        <button class="btn-icon" aria-label={t("aria.theme")} title={t("aria.theme")} onClick={toggleTheme}>
+          <Show when={useTheme() === "dark"} fallback={<Sun size={18} />}>
+            <Moon size={18} />
+          </Show>
+        </button>
+        <button class="btn-icon" aria-label={t("aria.refresh")} title={t("common.refresh")} onClick={() => void refresh()}>
           <RefreshCw size={18} />
         </button>
       </div>

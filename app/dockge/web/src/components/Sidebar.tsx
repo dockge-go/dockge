@@ -13,28 +13,29 @@ import {
   Settings,
 } from "lucide-solid";
 import { snapshot, sseOn } from "../store/index";
+import { t } from "../i18n/index";
 import type { JSX } from "solid-js";
 
 interface NavEntry {
   to: string;
-  label: string;
+  label: () => string;
   icon: JSX.Element;
   end?: boolean;
   badge?: () => string | undefined;
 }
 
 export function Sidebar(props: { open: boolean; onNavigate: () => void }) {
-  const groups: Array<{ label: string; items: NavEntry[] }> = [
+  const groups: Array<{ label: () => string; items: NavEntry[] }> = [
     {
-      label: "概览",
-      items: [{ to: "/", label: "Dashboard", icon: <LayoutGrid size={18} />, end: true }],
+      label: () => t("nav.group.overview"),
+      items: [{ to: "/", label: () => t("nav.dashboard"), icon: <LayoutGrid size={18} />, end: true }],
     },
     {
-      label: "资源",
+      label: () => t("nav.group.resources"),
       items: [
         {
           to: "/containers",
-          label: "Containers",
+          label: () => t("nav.containers"),
           icon: <Container size={18} />,
           badge: () => {
             const snap = snapshot();
@@ -44,32 +45,32 @@ export function Sidebar(props: { open: boolean; onNavigate: () => void }) {
         },
         {
           to: "/stacks",
-          label: "Stacks",
+          label: () => t("nav.stacks"),
           icon: <Layers size={18} />,
           badge: () => snapshot()?.docker.stacksTotal?.toString(),
         },
         {
           to: "/images",
-          label: "Images",
+          label: () => t("nav.images"),
           icon: <Image size={18} />,
           badge: () => snapshot()?.images.length?.toString(),
         },
-        { to: "/volumes", label: "Volumes", icon: <HardDrive size={18} /> },
-        { to: "/networks", label: "Networks", icon: <Network size={18} /> },
+        { to: "/volumes", label: () => t("nav.volumes"), icon: <HardDrive size={18} /> },
+        { to: "/networks", label: () => t("nav.networks"), icon: <Network size={18} /> },
       ],
     },
     {
-      label: "系统",
+      label: () => t("nav.group.system"),
       items: [
-        { to: "/sysinfo", label: "System Info", icon: <Info size={18} /> },
-        { to: "/sysdf", label: "Disk Usage", icon: <Database size={18} /> },
-        { to: "/settings", label: "Settings", icon: <Settings size={18} /> },
+        { to: "/sysinfo", label: () => t("nav.sysinfo"), icon: <Info size={18} /> },
+        { to: "/sysdf", label: () => t("nav.sysdf"), icon: <Database size={18} /> },
+        { to: "/settings", label: () => t("nav.settings"), icon: <Settings size={18} /> },
       ],
     },
   ];
 
   return (
-    <aside class={`sidebar ${props.open ? "open" : ""}`} aria-label="主导航">
+    <aside class={`sidebar ${props.open ? "open" : ""}`} aria-label={t("aria.mainNav")}>
       <div class="sidebar-brand">
         <svg
           width="24"
@@ -92,7 +93,7 @@ export function Sidebar(props: { open: boolean; onNavigate: () => void }) {
         <For each={groups}>
           {(group) => (
             <div class="nav-group">
-              <div class="nav-group-label">{group.label}</div>
+              <div class="nav-group-label">{group.label()}</div>
               <For each={group.items}>
                 {(item) => (
                   <A
@@ -104,7 +105,7 @@ export function Sidebar(props: { open: boolean; onNavigate: () => void }) {
                     onClick={props.onNavigate}
                   >
                     <span class="nav-item-icon">{item.icon}</span>
-                    {item.label}
+                    {item.label()}
                     <ShowBadge when={item.badge}>{item.badge?.()}</ShowBadge>
                   </A>
                 )}
