@@ -4,6 +4,7 @@ import { useNavigate } from "@solidjs/router";
 import { Rocket } from "lucide-solid";
 import { setup } from "../store/index";
 import { errText } from "../api/format";
+import { t } from "../i18n";
 
 export function Setup() {
   const navigate = useNavigate();
@@ -15,9 +16,9 @@ export function Setup() {
 
   const strength = () => {
     const p = password();
-    if (p.length >= 12 && /[^a-zA-Z0-9]/.test(p)) return { label: "强", ok: true };
-    if (p.length >= 8) return { label: "中", ok: true };
-    if (p.length >= 6) return { label: "弱", ok: false };
+    if (p.length >= 12 && /[^a-zA-Z0-9]/.test(p)) return { label: t("setup.strengthStrong"), ok: true };
+    if (p.length >= 8) return { label: t("setup.strengthMedium"), ok: true };
+    if (p.length >= 6) return { label: t("setup.strengthWeak"), ok: false };
     return null;
   };
 
@@ -25,7 +26,7 @@ export function Setup() {
     e.preventDefault();
     if (busy()) return;
     if (password() !== confirmPwd()) {
-      setError("两次输入的密码不一致");
+      setError(t("setup.passwordMismatch"));
       return;
     }
     setBusy(true);
@@ -45,15 +46,15 @@ export function Setup() {
       <form class="auth-card" onSubmit={submit}>
         <div class="auth-brand">
           <Rocket size={40} />
-          <div class="auth-title">初始化 Dockge</div>
-          <div class="auth-sub">创建首个管理员账号</div>
+          <div class="auth-title">{t("setup.initTitle")}</div>
+          <div class="auth-sub">{t("setup.createAdmin")}</div>
         </div>
         <Show when={error()}>
           <div class="form-error">{error()}</div>
         </Show>
         <div class="form-group">
           <label class="form-label" for="setup-username">
-            用户名
+            {t("form.username")}
           </label>
           <input
             id="setup-username"
@@ -65,7 +66,7 @@ export function Setup() {
         </div>
         <div class="form-group">
           <label class="form-label" for="setup-password">
-            密码（至少 6 位）
+            {t("setup.passwordHelp")}
           </label>
           <input
             id="setup-password"
@@ -76,12 +77,12 @@ export function Setup() {
             onInput={(e) => setPassword(e.currentTarget.value)}
           />
           <Show when={strength()}>
-            <p class="form-help">密码强度：{strength()!.label}</p>
+            <p class="form-help">{t("setup.strength", { label: strength()!.label })}</p>
           </Show>
         </div>
         <div class="form-group">
           <label class="form-label" for="setup-confirm">
-            确认密码
+            {t("setup.confirmPassword")}
           </label>
           <input
             id="setup-confirm"
@@ -98,7 +99,7 @@ export function Setup() {
           disabled={busy() || !username() || password().length < 6 || password() !== confirmPwd()}
           style={{ width: "100%", "justify-content": "center" }}
         >
-          {busy() ? "创建中…" : "创建账号并进入"}
+          {busy() ? t("setup.creating") : t("setup.createAndEnter")}
         </button>
       </form>
     </div>

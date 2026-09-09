@@ -5,6 +5,7 @@ import { api, type VersionSummary } from "../api/api";
 import { snapshot, sseOn } from "../store/index";
 import { SectionHeader } from "../components/widgets";
 import { errText } from "../api/format";
+import { t } from "../i18n";
 
 export function SysInfo() {
   const [version, { refetch }] = createResource<VersionSummary>(() => api.version());
@@ -24,7 +25,7 @@ export function SysInfo() {
       ["Images", String(snap?.images.length ?? 0)],
       ["Volumes", String(snap?.volumes.length ?? 0)],
       ["Networks", String(snap?.networks.length ?? 0)],
-      ["容器状态流", sseOn() ? "已连接 (SSE)" : "未连接"],
+      [t("container.status"), sseOn() ? t("sysinfo.connected") : t("sysinfo.disconnected")],
     ];
     return list;
   };
@@ -33,18 +34,18 @@ export function SysInfo() {
     <div class="view-section">
       <SectionHeader
         title="System Info"
-        subtitle="引擎与运行环境信息"
+        subtitle={t("sysinfo.subtitle")}
         actions={
           <button class="btn btn-secondary" onClick={() => void refetch()}>
-            <RefreshCw size={14} /> Refresh
+            <RefreshCw size={14} /> {t("common.refresh")}
           </button>
         }
       />
       <table class="data-table">
         <thead>
           <tr>
-            <th>Key</th>
-            <th>Value</th>
+            <th>{t("th.key")}</th>
+            <th>{t("th.value")}</th>
           </tr>
         </thead>
         <tbody>
@@ -59,7 +60,7 @@ export function SysInfo() {
         </tbody>
       </table>
       <Show when={version.error}>
-        <p class="text-dim" style={{ "margin-top": "12px" }}>版本信息获取失败：{errText(version.error)}</p>
+        <p class="text-dim" style={{ "margin-top": "12px" }}>{t("sysinfo.versionFailed", { msg: errText(version.error) })}</p>
       </Show>
     </div>
   );

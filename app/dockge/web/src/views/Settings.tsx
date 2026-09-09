@@ -6,6 +6,7 @@ import { api } from "../api/api";
 import { logout, toast, user } from "../store/index";
 import { confirmDialog } from "../components/Confirm";
 import { errText } from "../api/format";
+import { t } from "../i18n";
 
 export function Settings() {
   const navigate = useNavigate();
@@ -19,13 +20,13 @@ export function Settings() {
   const changePassword = async (e: SubmitEvent) => {
     e.preventDefault();
     if (newPwd() !== confirmPwd()) {
-      toast("两次输入的新密码不一致", "error");
+      toast(t("toast.passwordMismatch"), "error");
       return;
     }
     setPwdBusy(true);
     try {
       await api.changePassword(oldPwd(), newPwd());
-      toast("密码已修改", "success");
+      toast(t("toast.passwordChanged"), "success");
       setOldPwd("");
       setNewPwd("");
       setConfirmPwd("");
@@ -54,7 +55,7 @@ export function Settings() {
     try {
       await api.setGlobalEnv(envText());
       setEnvDirty(false);
-      toast("全局环境变量已保存", "success");
+      toast(t("toast.envSaved"), "success");
     } catch (e) {
       toast(errText(e), "error");
     }
@@ -68,8 +69,8 @@ export function Settings() {
       const r = await api.versionCheck();
       setVersionInfo(
         r.hasUpdate
-          ? `当前 ${r.currentVersion} · 最新 ${r.latestVersion}（有更新可用）`
-          : `当前 ${r.currentVersion} · 已是最新`,
+          ? t("set.versionUpdate", { current: r.currentVersion, latest: r.latestVersion })
+          : t("set.versionCurrent", { current: r.currentVersion }),
       );
     } catch (e) {
       toast(errText(e), "error");
@@ -84,50 +85,48 @@ export function Settings() {
         <div class="setting-card">
           <h3>
             <KeyRound size={15} style={{ "vertical-align": "-2px", "margin-right": "6px" }} />
-            账号
+            {t("set.account")}
           </h3>
           <p class="text-dim" style={{ "margin-top": 0 }}>
-            当前用户：<strong>{user()?.username ?? "—"}</strong>
+            {t("set.currentUser", { username: user()?.username ?? "—" })}
           </p>
           <form onSubmit={changePassword}>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">当前密码</label>
+                <label class="form-label">{t("set.currentPassword")}</label>
                 <input class="form-input" type="password" autocomplete="current-password" value={oldPwd()} onInput={(e) => setOldPwd(e.currentTarget.value)} />
               </div>
               <div class="form-group">
-                <label class="form-label">新密码（至少 6 位）</label>
+                <label class="form-label">{t("set.newPassword")}</label>
                 <input class="form-input" type="password" autocomplete="new-password" value={newPwd()} onInput={(e) => setNewPwd(e.currentTarget.value)} />
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label">确认新密码</label>
+              <label class="form-label">{t("set.confirmNewPassword")}</label>
               <input class="form-input" type="password" autocomplete="new-password" value={confirmPwd()} onInput={(e) => setConfirmPwd(e.currentTarget.value)} />
             </div>
             <button class="btn btn-primary" type="submit" disabled={pwdBusy() || !oldPwd() || newPwd().length < 6 || newPwd() !== confirmPwd()}>
-              修改密码
+              {t("set.changePassword")}
             </button>
           </form>
           <div style={{ "margin-top": "20px", "border-top": "1px solid var(--border-soft)", "padding-top": "16px" }}>
             <button
               class="btn btn-secondary"
               onClick={async () => {
-                if (!(await confirmDialog("退出登录", "确定退出当前会话？", false))) return;
+                if (!(await confirmDialog(t("set.confirmLogout"), t("set.confirmLogoutDesc"), false))) return;
                 logout();
                 navigate("/login", { replace: true });
               }}
             >
-              <LogOut size={14} /> 退出登录
+              <LogOut size={14} /> {t("set.logout")}
             </button>
           </div>
         </div>
 
         {/* 全局环境变量 */}
         <div class="setting-card">
-          <h3>全局环境变量（global.env）</h3>
-          <p class="text-dim" style={{ "margin-top": 0 }}>
-            部署栈时自动注入到 compose 环境，可用 <span class="inline-code">${"{}"}</span> 语法在 YAML 中引用。
-          </p>
+          <h3>{t("set.globalEnv")}</h3>
+          <p class="text-dim" style={{ "margin-top": 0 }} innerHTML={t("set.globalEnvDesc")} />
           <textarea
             class="form-textarea"
             spellcheck={false}
@@ -138,21 +137,21 @@ export function Settings() {
             }}
           />
           <button class="btn btn-primary" style={{ "margin-top": "12px" }} disabled={!envDirty()} onClick={() => void saveEnv()}>
-            <Save size={14} /> 保存
+            <Save size={14} /> {t("set.saveEnv")}
           </button>
         </div>
 
         {/* 关于 */}
         <div class="setting-card" style={{ background: "var(--surface)", border: "1px solid var(--border-soft)" }}>
-          <h3>关于</h3>
+          <h3>{t("set.about")}</h3>
           <div class="text-dim" style={{ "line-height": 1.8 }}>
             <div><strong>Dockge</strong> — Container Management</div>
-            <div>Go 后端 · SolidJS 前端 · Apple 设计语言</div>
-            <div style={{ color: "var(--muted)", "margin-top": "8px" }}>灵感来自 Podman Desktop 与 Dockge</div>
+            <div>{t("set.aboutDesc")}</div>
+            <div style={{ color: "var(--muted)", "margin-top": "8px" }}>{t("set.aboutInspiration")}</div>
           </div>
           <div style={{ display: "flex", "align-items": "center", gap: "12px", "margin-top": "16px", "flex-wrap": "wrap" }}>
             <button class="btn btn-secondary" onClick={() => void checkVersion()}>
-              <RefreshCw size={14} /> 检查更新
+              <RefreshCw size={14} /> {t("set.checkUpdate")}
             </button>
             <Show when={versionInfo()}>
               <span class="text-dim">{versionInfo()}</span>

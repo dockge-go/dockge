@@ -6,6 +6,7 @@ import { getToken, type DockerStats } from "../api/api";
 import { refresh, setPendingNewStack, snapshot } from "../store/index";
 import { LiveDot, SectionHeader, SpinnerBlock, StatCard, StatusBadge } from "../components/widgets";
 import { shortId } from "../api/format";
+import { t } from "../i18n";
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -38,11 +39,11 @@ export function Dashboard() {
     <div class="view-section">
       <Show when={snapshot()} fallback={<SpinnerBlock />}>
         <div class="stats-grid">
-          <StatCard label="Running" live tone="running" value={counts().running} onClick={() => navigate("/containers")} />
-          <StatCard label="Stopped" tone="stopped" value={counts().stopped} onClick={() => navigate("/containers")} />
-          <StatCard label="Paused" tone="warning" value={counts().paused} onClick={() => navigate("/containers")} />
+          <StatCard label={t("dash.labelRunning")} live tone="running" value={counts().running} onClick={() => navigate("/containers")} />
+          <StatCard label={t("dash.labelStopped")} tone="stopped" value={counts().stopped} onClick={() => navigate("/containers")} />
+          <StatCard label={t("dash.labelPaused")} tone="warning" value={counts().paused} onClick={() => navigate("/containers")} />
           <StatCard label="Stacks" value={snapshot()!.docker.stacksTotal} onClick={() => navigate("/stacks")} />
-          <StatCard label="Images" value={snapshot()!.images.length} onClick={() => navigate("/images")} />
+          <StatCard label={t("dash.labelImages")} value={snapshot()!.images.length} onClick={() => navigate("/images")} />
         </div>
 
         <div style={{ display: "flex", gap: "12px", "flex-wrap": "wrap", "margin-bottom": "24px" }}>
@@ -54,73 +55,73 @@ export function Dashboard() {
             }}
           >
             <Plus size={14} />
-            New Stack
+            {t("stack.new")}
           </button>
           <button class="btn btn-secondary" onClick={() => void refresh()}>
             <RefreshCw size={14} />
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
 
         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "16px", "margin-bottom": "24px" }}>
           <div class="chart-card">
-            <div class="chart-card-title">Container Status</div>
+            <div class="chart-card-title">{t("dash.containerStatus")}</div>
             <Show
               when={counts().total > 0}
-              fallback={<p class="text-dim" style={{ margin: "12px 0 0" }}>暂无容器</p>}
+              fallback={<p class="text-dim" style={{ margin: "12px 0 0" }}>{t("dash.noContainers")}</p>}
             >
               <div class="bar-stacked" style={{ "margin-top": "12px" }}>
                 <div
                   class="bar-seg running"
-                  title={`${counts().running} running`}
+                  title={t("legend.running", { n: counts().running })}
                   style={{ width: `${(counts().running / counts().total) * 100}%` }}
                 />
                 <div
                   class="bar-seg paused"
-                  title={`${counts().paused} paused`}
+                  title={t("legend.paused", { n: counts().paused })}
                   style={{ width: `${(counts().paused / counts().total) * 100}%` }}
                 />
                 <div
                   class="bar-seg exited"
-                  title={`${counts().stopped} stopped`}
+                  title={t("legend.stopped", { n: counts().stopped })}
                   style={{ width: `${(counts().stopped / counts().total) * 100}%` }}
                 />
               </div>
               <div class="chart-legend">
                 <span class="chart-legend-item">
                   <span class="chart-legend-dot" style={{ background: "var(--success)" }} />
-                  {counts().running} Running
+                  {t("legend.running", { n: counts().running })}
                 </span>
                 <span class="chart-legend-item">
                   <span class="chart-legend-dot" style={{ background: "var(--warn)" }} />
-                  {counts().paused} Paused
+                  {t("legend.paused", { n: counts().paused })}
                 </span>
                 <span class="chart-legend-item">
                   <span class="chart-legend-dot" style={{ background: "var(--meta)" }} />
-                  {counts().stopped} Stopped
+                  {t("legend.stopped", { n: counts().stopped })}
                 </span>
               </div>
             </Show>
           </div>
           <div class="chart-card">
-            <div class="chart-card-title">Resource Usage</div>
+            <div class="chart-card-title">{t("dash.resourceUsage")}</div>
             <div style={{ "margin-top": "12px" }}>
               <div class="resource-row">
-                <span class="resource-label">CPU</span>
+                <span class="resource-label">{t("res.cpu")}</span>
                 <div class="resource-track">
                   <div class="resource-fill cpu" style={{ width: `${stats()?.cpuUsage ?? 0}%` }} />
                 </div>
                 <span class="resource-val">{(stats()?.cpuUsage ?? 0).toFixed(0)}%</span>
               </div>
               <div class="resource-row">
-                <span class="resource-label">Memory</span>
+                <span class="resource-label">{t("res.memory")}</span>
                 <div class="resource-track">
                   <div class="resource-fill mem" style={{ width: `${stats()?.memPercent ?? 0}%` }} />
                 </div>
                 <span class="resource-val">{(stats()?.memPercent ?? 0).toFixed(0)}%</span>
               </div>
               <p class="stat-detail">
-                内存 {(stats()?.memUsage ?? 0).toFixed(0)} MB / {((stats()?.memTotalMB ?? 0) / 1024).toFixed(1)} GB
+                {t("res.memDetail", { used: (stats()?.memUsage ?? 0).toFixed(0), total: ((stats()?.memTotalMB ?? 0) / 1024).toFixed(1) })}
               </p>
             </div>
           </div>
@@ -129,24 +130,24 @@ export function Dashboard() {
         <SectionHeader
           title={
             <>
-              Recent Containers <LiveDot />
+              {t("dash.recentContainers")} <LiveDot />
             </>
           }
           subtitle={`${counts().total} total · ${counts().running} running`}
           actions={
             <button class="btn btn-secondary" onClick={() => navigate("/containers")}>
-              View All
+              {t("common.viewAll")}
             </button>
           }
         />
         <table class="data-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Image</th>
-              <th>Ports</th>
-              <th>Uptime</th>
+              <th>{t("common.name")}</th>
+              <th>{t("common.status")}</th>
+              <th>{t("common.image")}</th>
+              <th>{t("common.ports")}</th>
+              <th>{t("common.uptime")}</th>
             </tr>
           </thead>
           <tbody>

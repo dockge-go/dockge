@@ -5,6 +5,7 @@ import { LogIn } from "lucide-solid";
 import { api, getToken, type AuthConfig } from "../api/api";
 import { login } from "../store/index";
 import { errText } from "../api/format";
+import { t } from "../i18n";
 
 export function Login() {
   const navigate = useNavigate();
@@ -70,7 +71,7 @@ export function Login() {
             <path d="M7 8h2m2 0h2m2 0h2M7 11h10" />
           </svg>
           <div class="auth-title">Dockge</div>
-          <div class="auth-sub">登录到容器管理控制台</div>
+          <div class="auth-sub">{t("login.title")}</div>
         </div>
         <Show when={error()}>
           <div class="form-error">{error()}</div>
@@ -83,18 +84,18 @@ export function Login() {
             onClick={() => navigate("/", { replace: true })}
           >
             <LogIn size={14} />
-            SSO 登录
+            {t("login.ssoLogin")}
           </button>
           <div style={{ "text-align": "center" }}>
             <span class="text-dim" style={{ "font-size": "var(--text-xs)" }}>
-              反向代理已认证，点击进入控制台
+              {t("login.proxyHint")}
             </span>
           </div>
         </Show>
 
         <Show when={!isProxy && !isOIDC}>
           <div class="form-group">
-            <label class="form-label" for="login-username">用户名</label>
+            <label class="form-label" for="login-username">{t("form.username")}</label>
             <input
               id="login-username"
               class="form-input"
@@ -104,7 +105,7 @@ export function Login() {
             />
           </div>
           <div class="form-group">
-            <label class="form-label" for="login-password">密码</label>
+            <label class="form-label" for="login-password">{t("form.password")}</label>
             <input
               id="login-password"
               class="form-input"
@@ -121,7 +122,7 @@ export function Login() {
             style={{ width: "100%", "justify-content": "center" }}
           >
             <LogIn size={14} />
-            {busy() ? "登录中…" : "登录"}
+            {busy() ? t("login.loggingIn") : t("login.login")}
           </button>
         </Show>
 
@@ -143,12 +144,12 @@ export function Login() {
             </For>
           </div>
           <div style={{ "text-align": "center", "margin-bottom": "8px" }}>
-            <span class="text-dim" style={{ "font-size": "var(--text-xs)" }}>或通过用户名密码登录</span>
+            <span class="text-dim" style={{ "font-size": "var(--text-xs)" }}>{t("login.orPassword")}</span>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
             <input
               class="form-input"
-              placeholder="用户名"
+              placeholder={t("form.usernamePlaceholder")}
               autocomplete="username"
               value={username()}
               onInput={(e) => setUsername(e.currentTarget.value)}
@@ -156,7 +157,7 @@ export function Login() {
             />
             <input
               class="form-input"
-              placeholder="密码"
+              placeholder={t("form.passwordPlaceholder")}
               type="password"
               autocomplete="current-password"
               value={password()}

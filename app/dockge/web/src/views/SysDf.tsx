@@ -6,27 +6,39 @@ import { refresh, toast } from "../store/index";
 import { confirmDialog } from "../components/Confirm";
 import { SectionHeader, SpinnerBlock } from "../components/widgets";
 import { errText } from "../api/format";
+import { t, type MsgKey } from "../i18n";
+
+// docker system df 的 type 是稳定英文标识；展示层走词典，分发按原值匹配
+const TYPE_LABEL: Record<string, MsgKey> = {
+  Images: "sysdf.typeImages",
+  Containers: "sysdf.typeContainers",
+  "Local Volumes": "sysdf.typeVolumes",
+  "Build Cache": "sysdf.typeBuildCache",
+};
+
+const typeLabel = (type: string) => (TYPE_LABEL[type] ? t(TYPE_LABEL[type]) : type);
 
 export function SysDf() {
   const [df, { refetch }] = createResource(() => api.df());
 
   const pruneFn = (type: string) => {
-    if (type === "Images" || type === "镜像") return () => api.pruneImages();
-    if (type === "Containers" || type === "容器") return () => api.pruneContainers();
-    if (type === "Local Volumes" || type === "卷") return () => api.pruneVolumes();
+    if (type === "Images") return () => api.pruneImages();
+    if (type === "Containers") return () => api.pruneContainers();
+    if (type === "Local Volumes") return () => api.pruneVolumes();
     return null; // Build Cache 等暂无对应接口
   };
 
   const prune = async (type: string) => {
     const fn = pruneFn(type);
     if (!fn) {
-      toast("该类别暂不支持在线清理", "info");
+      toast(t("toast.unsupportedPrune"), "info");
       return;
     }
-    if (!(await confirmDialog("清理", `确定清理 ${type} 中未使用的数据？`))) return;
+    const label = typeLabel(type);
+    if (!(await confirmDialog(t("sysdf.pruneConfirm"), t("sysdf.pruneDesc", { type: label })))) return;
     try {
       await fn();
-      toast(`已清理 ${type}`, "success");
+      toast(t("toast.pruneCategory", { type: label }), "success");
       await Promise.all([refetch(), refresh(false)]);
     } catch (e) {
       toast(errText(e), "error");
@@ -34,10 +46,10 @@ export function SysDf() {
   };
 
   const pruneAll = async () => {
-    if (!(await confirmDialog("一键清理", "将清理未使用的镜像、已停止容器与未使用卷。继续？"))) return;
+    if (!(await confirmDialog(t("sysdf.pruneAllConfirm"), t("sysdf.pruneAllDesc")))) return;
     try {
       await Promise.all([api.pruneImages(), api.pruneContainers(), api.pruneVolumes()]);
-      toast("已清理全部未使用数据", "success");
+      toast(t("toast.pruneAll"), "success");
       await Promise.all([refetch(), refresh(false)]);
     } catch (e) {
       toast(errText(e), "error");
@@ -47,15 +59,15 @@ export function SysDf() {
   return (
     <div class="view-section">
       <SectionHeader
-        title="Disk Usage"
-        subtitle="各类资源的磁盘占用"
+        title={t("nav.sysdf")}
+        subtitle={t("sysdf.subtitle")}
         actions={
           <>
             <button class="btn btn-secondary" onClick={() => void refetch()}>
-              <RefreshCw size={14} /> Refresh
+              <RefreshCw size={14} /> {t("common.refresh")}
             </button>
             <button class="btn btn-danger" onClick={() => void pruneAll()}>
-              <Trash2 size={14} /> Prune All
+              <Trash2 size={14} /> {t("sysdf.pruneAll")}
             </button>
           </>
         }
@@ -64,9 +76,9 @@ export function SysDf() {
         <table class="data-table">
           <thead>
             <tr>
-              <th>Type</th>
-              <th>Used</th>
-              <th>Reclaimable</th>
+              <th>{t("th.type")}</th>
+              <th>{t("th.used")}</th>
+              <th>{t("th.reclaimable")}</th>
               <th style={{ width: "100px" }}></th>
             </tr>
           </thead>
@@ -76,17 +88,17 @@ export function SysDf() {
                 const reclaimable = it.reclaimable !== "0B";
                 return (
                   <tr style={{ cursor: "default" }}>
-                    <td class="cell-main">{it.type}</td>
+                    <td class="cell-main">{typeLabel(it.type)}</td>
                     <td>
-                      {it.size} <span class="cell-dim">· {it.count} items · {it.active} active</span>
+                      {it.size} <span class="cell-dim">· {it.count} {t("sysdf.items")} · {it.active} {t("sysdf.active")}</span>
                     </td>
                     <td style={{ color: reclaimable ? "var(--danger)" : "var(--muted)", "font-size": "14px" }}>
-                      {it.reclaimable} reclaimable
+                      {it.reclaimable} {t("sysdf.reclaimable")}
                     </td>
                     <td>
                       <Show when={reclaimable && pruneFn(it.type)}>
                         <button class="btn btn-secondary" style={{ padding: "4px 12px", "font-size": "12px" }} onClick={() => void prune(it.type)}>
-                          Prune
+                          {t("sysdf.prune")}
                         </button>
                       </Show>
                     </td>
