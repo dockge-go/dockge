@@ -1,6 +1,7 @@
 // Promise 风格确认框：Kobalte AlertDialog 封装（原型 confirm() 的等价物）。
 import { AlertDialog } from "@kobalte/core/alert-dialog";
 import { createSignal } from "solid-js";
+import { t } from "../i18n/index";
 
 interface ConfirmReq {
   title: string;
@@ -28,12 +29,12 @@ export function ConfirmHost() {
           <AlertDialog.Title class="confirm-title">{req()?.title}</AlertDialog.Title>
           <AlertDialog.Description class="confirm-desc">{req()?.desc}</AlertDialog.Description>
           <div class="confirm-actions">
-            <AlertDialog.CloseButton class="btn btn-secondary">取消</AlertDialog.CloseButton>
+            <AlertDialog.CloseButton class="btn btn-secondary">{t("common.cancel")}</AlertDialog.CloseButton>
             <button
               class={`btn ${req()?.danger ? "btn-danger" : "btn-primary"}`}
               onClick={() => close(true)}
             >
-              确认
+              {t("common.ok")}
             </button>
           </div>
         </AlertDialog.Content>

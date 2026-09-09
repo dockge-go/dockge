@@ -1,6 +1,7 @@
 import { Show, createMemo } from "solid-js";
 
 import { PAGE_SIZE, clampPage, pageCount } from "../lib/pagination";
+import { t } from "../i18n";
 
 export function Pagination(props: {
   page: number;
@@ -13,9 +14,9 @@ export function Pagination(props: {
   const end = createMemo(() => Math.min(current() * PAGE_SIZE, props.total));
 
   return (
-    <nav class="pagination" aria-label="列表分页">
+    <nav class="pagination" aria-label={t("aria.pagination")}>
       <span class="pagination-meta">
-        {start()}–{end()} / {props.total}
+        {t("pagination.range", { start: start(), end: end(), total: props.total })}
       </span>
       <Show when={pages() > 1}>
         <div class="pagination-controls">
@@ -24,15 +25,15 @@ export function Pagination(props: {
             disabled={current() === 1}
             onClick={() => props.onPageChange(current() - 1)}
           >
-            上一页
+            {t("pagination.prev")}
           </button>
-          <span class="pagination-current" aria-current="page">第 {current()} / {pages()} 页</span>
+          <span class="pagination-current" aria-current="page">{t("pagination.pageOf", { p: current(), n: pages() })}</span>
           <button
             class="pagination-button"
             disabled={current() === pages()}
             onClick={() => props.onPageChange(current() + 1)}
           >
-            下一页
+            {t("pagination.next")}
           </button>
         </div>
       </Show>

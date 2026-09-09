@@ -2,6 +2,7 @@
 import { Dialog } from "@kobalte/core/dialog";
 import { X } from "lucide-solid";
 import { Show, type JSX } from "solid-js";
+import { t } from "../i18n";
 
 export function Sheet(props: {
   open: boolean;
@@ -17,7 +18,7 @@ export function Sheet(props: {
         <Dialog.Content class="sheet">
           <div class="sheet-header">
             <Dialog.Title class="sheet-title">{props.title}</Dialog.Title>
-            <Dialog.CloseButton class="btn-icon" aria-label="关闭">
+            <Dialog.CloseButton class="btn-icon" aria-label={t("common.close")}>
               <X size={18} />
             </Dialog.CloseButton>
           </div>
