@@ -1,7 +1,7 @@
 # Dockge Monorepo
 
 
-Dockge Monorepo 是 [louislam/dockge](https://github.com/louislam/dockge) 的 Go 语言复刻版：一个"面向 docker compose 栈"的可视化管理器。它以 [nunu-monorepo](https://github.com/go-nunu/nunu) 的应用骨架为底座实现——Gin + bbolt + samber/do 的后端分层，VanJS + Vite 的零 CSS 前端，`go:embed` 打包为单个二进制。
+Dockge Monorepo 是 [louislam/dockge](https://github.com/louislam/dockge) 的 Go 语言复刻版：一个"面向 docker compose 栈"的可视化管理器。它以 [nunu-monorepo](https://github.com/go-nunu/nunu) 的应用骨架为底座实现——Gin + bbolt + samber/do 的后端分层，SolidJS + Vite 的前端，`go:embed` 打包为单个二进制。
 
 > 项目结构说明：`app/dockge` 是本项目唯一的应用（栈管理器）；模板中的 `app/admin`、`app/home`、`deploy/`、`pkg/sid`、`pkg/server/grpc` 等与 Dockge 无关的示例模块已删除，依赖树随之精简（go.mod 直接依赖 30+ → 11）。
 
@@ -38,7 +38,7 @@ Dockge Monorepo 是 [louislam/dockge](https://github.com/louislam/dockge) 的 Go
 | 编排引擎 | Podman v6 bindings（`go.podman.io/podman/v6`，优先）+ docker CLI（降级），栈编排走 `docker compose` CLI |
 | 认证 | JWT（HS256）+ bcrypt + shake256 密码绑定 |
 | 存储 | bbolt（账号/设置，bucket: users/settings）+ 文件系统（栈目录） |
-| 前端 | VanJS + VanUI + Vite + TypeScript（无 CSS 文件，全内联样式），go:embed 内嵌 |
+| 前端 | SolidJS + @solidjs/router + Kobalte + Vite + TypeScript（`src/styles/app.css`），go:embed 内嵌 |
 
 ## 与原版 Dockge 的架构对照
 
@@ -47,8 +47,8 @@ Dockge Monorepo 是 [louislam/dockge](https://github.com/louislam/dockge) 的 Go
 | Express + Socket.IO（`backend/dockge-server.ts`） | Gin REST 路由 + 专用 SSE（`app/dockge/internal/server/http.go` + `container_status.go`） |
 | `Stack` 类（`backend/stack.ts`，583 行） | `repository/stack.go`（文件系统）+ `repository/docker.go`（compose CLI）+ `service/stack.go`（用例） |
 | knex/redbean-node + SQLite（用户/设置表） | bbolt + JSON 序列化（`users` / `settings` bucket） |
-| node-pty 终端 + xterm.js | `pkg/pty/pty.go`（PTY 机制）+ `handler/terminal.go`（WebSocket）+ `components/Terminal.ts`（npm 版 xterm.js） |
-| Vue 3 + Vite + Bootstrap（`frontend/`） | VanJS + Vite + 内联样式（`app/dockge/web/`） |
+| node-pty 终端 + xterm.js | `pkg/pty/pty.go`（PTY 机制）+ `handler/terminal.go`（WebSocket）+ `components/Terminal.tsx`（npm 版 xterm.js） |
+| Vue 3 + Vite + Bootstrap（`frontend/`） | SolidJS + Vite + 内联样式（`app/dockge/web/`） |
 | 栈状态：`docker compose ls` Status 字符串解析 | 完全一致的解析逻辑（`StackStatusFromString`） |
 
 ## 快速开始
@@ -87,10 +87,8 @@ POST /v1/stacks                      创建栈 {name, yaml, env}
 GET  /v1/stacks/:name                栈详情（文件内容 + 容器 + 状态）
 PUT  /v1/stacks/:name                保存文件
 DELETE /v1/stacks/:name              删除栈（down + 删目录）
-POST /v1/stacks/:name/start|stop|restart|down|update   生命周期操作，返回 compose 输出
-GET  /v1/stacks/:name/logs?tail=200  栈日志
-GET  /v1/stacks/:name/logs/stream    栈日志 SSE 实时流
-GET  /v1/docker/containers/stream    容器状态 SSE（仅 id/state/status）
+POST /v1/stacks/:name/:op          生命周期操作（start/stop/restart/down/update），返回 compose 输出
+GET  /v1/docker/containers/stream   容器状态 SSE（仅 id/state/status）
 GET  /v1/docker/version              引擎版本摘要
 GET  /v1/docker/containers           容器总览（含 compose 项目 label）
 GET  /v1/docker/info                 仪表盘汇总
@@ -108,9 +106,11 @@ GET  /v1/docker/volumes              数据卷列表
 DELETE /v1/docker/volumes/:name      删除数据卷
 POST /v1/docker/volumes/prune        清理未使用数据卷
 POST /v1/docker/containers/:id/stop|start|restart   容器生命周期
+GET  /v1/docker/containers/:id/inspect              容器详情
+GET  /v1/docker/containers/:id/logs                 容器日志
 DELETE /v1/docker/containers/:id     删除容器（-f）
 POST /v1/docker/containers/prune     清理已停止容器
-GET  /v1/terminal/:name/:type        终端 WebSocket（host / compose-logs / exec）
+GET  /v1/terminal/:stack|:container/:type   终端 WebSocket（compose-logs / exec）
 GET/PUT /v1/settings/globalenv       全局环境变量
 POST /v1/composerize                 docker run → compose
 GET  /v1/version/check               版本更新检查
@@ -130,10 +130,10 @@ GET/POST /v1/me/disableauth          免登录模式（前端入口暂缓）
 | **Auth** | `app/dockge/internal/handler/auth.go` + `service/auth.go` + `repository/user_bbolt.go` | JWT 登录、用户信息管理、密码修改 |
 | **Stack** | `app/dockge/internal/handler/stack.go` + `service/stack.go` + `repository/stack.go` | 栈 CRUD、生命周期操作（start/stop/restart/down/update）、日志查询 |
 | **Docker 资源** | `handler/docker.go` + `service/docker.go` + `repository/{container,image,network,volume,stats,system,podman}.go` | Podman v6（`go.podman.io/podman/v6`）优先 + docker CLI 兜底：容器/镜像/网络/卷的列表、操作、清理与统计 |
-| **Terminal** | `handler/terminal.go` + `pkg/pty` + `web/src/components/Terminal.ts` | WebSocket 终端（宿主 shell / 栈日志 / 容器 exec），PTY + xterm.js 全链路 |
+| **Terminal** | `handler/terminal.go` + `pkg/pty` + `web/src/components/Terminal.tsx` | WebSocket 终端（栈日志 compose-logs / 容器 exec；出于安全不提供宿主 shell），PTY + xterm.js 全链路 |
 | **Middleware** | `app/dockge/internal/middleware/` | JWT 鉴权、CORS、请求日志 |
 | **API 契约** | `app/dockge/api/v1/` | DTO、响应包裹、业务哨兵错误 |
-| **Frontend** | `app/dockge/web/` | VanJS SPA，go:embed 内嵌 |
+| **Frontend** | `app/dockge/web/` | SolidJS SPA，go:embed 内嵌 |
 
 ### 共享基础设施（pkg/）
 
@@ -160,7 +160,7 @@ GET/POST /v1/me/disableauth          免登录模式（前端入口暂缓）
 │       ├── api/v1/          # 请求/响应 DTO 与业务错误
 │       ├── cmd/             # server / migration 入口
 │       ├── internal/        # handler → service → repository（docker/podman CLI + bbolt + 文件系统）
-│       └── web/             # VanJS 前端，go:embed 内嵌
+│       └── web/             # SolidJS 前端，go:embed 内嵌
 ├── config/dockge/           # local / prod 配置
 ├── pkg/                     # 共享基础设施（app/config/jwt/log/server/http）
 ├── storage/                 # dockge.db（bbolt）与 stacks 栈目录
