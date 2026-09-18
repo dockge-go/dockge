@@ -102,6 +102,7 @@ pkg/              # jwt / hash / pty / rate / log / config / app / server
 | 历史偏差 | 处置 |
 |---|---|
 | README 声称 CodeMirror 6 编辑器 | 实为 textarea；README 已改为如实描述（CodeMirror 为登记债务） |
+| UI 方向变更（2026-09-19） | 用户决策：清空自研原型 UI，功能与页面布局一比一复刻上游 louislam/dockge（master/1.6-dev 基线）；`DESIGN.md` 的 Crate 契约随原型一并废弃，重写为上游复刻视觉契约（变更 `replicate-upstream-dockge-ui` 进行中）。有意偏差：无多 Agent、无 /console、保留 zh/en 双语、不引 Bootstrap |
 | README 引用 `TODO.md` / `ARCHITECTURE.md` / `DOCKGE_COMPARISON.md` / `openspec/project.md` / `openspec/README.md` | 均不存在；死链已移除，改为指向 `docs/` |
 | README 声称提供宿主 shell 终端 | 与 Q5 决策相反；已纠正 |
 | README API 表含不存在的 `GET /v1/docker/stats`，缺 `/v1/auth/config`、`/v1/oidc/*`、`/v1/2fa`、`/v1/health` 等 | 已按 `http.go` 实际路由重写 |

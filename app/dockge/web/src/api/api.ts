@@ -3,9 +3,15 @@
 
 const TOKEN_KEY = "crate_token";
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY) ?? "";
-export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+// remember=false 时 token 走 sessionStorage（关闭标签页即失效），对齐上游 Remember me
+export const getToken = () => localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY) ?? "";
+export const setToken = (t: string, remember = false) => {
+  (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, t);
+};
+export const clearToken = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+};
 
 class ApiError extends Error {
   constructor(
@@ -35,7 +41,7 @@ interface LoginData {
   user: UserData;
 }
 
-interface StackSummary {
+export interface StackSummary {
   name: string;
   status: number; // 0 未知 / 1 未部署 / 2 已创建 / 3 运行中 / 4 已停止
   statusLabel: string;
@@ -236,6 +242,9 @@ export const api = {
   me: () => request<UserData>("GET", "/me"),
   changePassword: (oldPassword: string, newPassword: string) =>
     request<void>("PUT", "/me/password", { oldPassword, newPassword }),
+  getDisableAuth: () => request<{ enabled: boolean }>("GET", "/me/disableauth"),
+  toggleDisableAuth: (enable: boolean, currentPassword: string) =>
+    request<{ enabled: boolean }>("POST", "/me/disableauth", { enable, currentPassword }),
 
   // 用户管理（admin）
   users: () => request<{ list: UserRow[] }>("GET", "/users"),

@@ -1,32 +1,30 @@
-// 首次安装页：创建管理员账号后自动登录。
-import { createSignal, Show } from "solid-js";
+// Setup 页（上游复刻）：首次初始化，创建唯一 admin；含语言下拉。
+import { Show, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { Rocket } from "lucide-solid";
-import { setup } from "../store/index";
+
 import { errText } from "../api/format";
-import { t } from "../i18n";
+import { t, setLocale, useLocale, type LocaleKey } from "../i18n";
+import { setup } from "../store/index";
+import { Toaster } from "../components/Toaster";
+
+const LANG_OPTIONS: Array<{ value: LocaleKey; label: string }> = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "en-US", label: "English" },
+];
 
 export function Setup() {
   const navigate = useNavigate();
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
-  const [confirmPwd, setConfirmPwd] = createSignal("");
+  const [repeat, setRepeat] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
 
-  const strength = () => {
-    const p = password();
-    if (p.length >= 12 && /[^a-zA-Z0-9]/.test(p)) return { label: t("setup.strengthStrong"), ok: true };
-    if (p.length >= 8) return { label: t("setup.strengthMedium"), ok: true };
-    if (p.length >= 6) return { label: t("setup.strengthWeak"), ok: false };
-    return null;
-  };
-
-  const submit = async (e: SubmitEvent) => {
-    e.preventDefault();
+  const submit = async (event: SubmitEvent) => {
+    event.preventDefault();
     if (busy()) return;
-    if (password() !== confirmPwd()) {
-      setError(t("setup.passwordMismatch"));
+    if (password() !== repeat()) {
+      setError(t("common.error"));
       return;
     }
     setBusy(true);
@@ -34,74 +32,46 @@ export function Setup() {
     try {
       await setup(username().trim(), password());
       navigate("/", { replace: true });
-    } catch (err) {
-      setError(errText(err));
+    } catch (e) {
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div class="auth-wrap">
-      <form class="auth-card" onSubmit={submit}>
-        <div class="auth-brand">
-          <Rocket size={40} />
-          <div class="auth-title">{t("setup.initTitle")}</div>
-          <div class="auth-sub">{t("setup.createAdmin")}</div>
+    <div class="auth-center">
+      <form class="card auth-card" onSubmit={submit}>
+        <img class="auth-logo" src="/icon.svg" alt="Dockge" />
+        <div class="auth-title">{t("setup.welcome")}</div>
+        <p class="auth-sub">{t("setup.title")}</p>
+        <div class="auth-lang">
+          <select value={useLocale()} onChange={(e) => setLocale(e.currentTarget.value as LocaleKey)} aria-label={t("common.language")}>
+            {LANG_OPTIONS.map((opt) => (
+              <option value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
         <Show when={error()}>
-          <div class="form-error">{error()}</div>
+          <div class="auth-error" role="alert">{error()}</div>
         </Show>
-        <div class="form-group">
-          <label class="form-label" for="setup-username">
-            {t("form.username")}
-          </label>
-          <input
-            id="setup-username"
-            class="form-input"
-            autocomplete="username"
-            value={username()}
-            onInput={(e) => setUsername(e.currentTarget.value)}
-          />
+        <div class="form-floating">
+          <input id="setup-username" value={username()} placeholder=" " autocomplete="username" onInput={(e) => setUsername(e.currentTarget.value)} />
+          <label for="setup-username">{t("setup.username")}</label>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="setup-password">
-            {t("setup.passwordHelp")}
-          </label>
-          <input
-            id="setup-password"
-            class="form-input"
-            type="password"
-            autocomplete="new-password"
-            value={password()}
-            onInput={(e) => setPassword(e.currentTarget.value)}
-          />
-          <Show when={strength()}>
-            <p class="form-help">{t("setup.strength", { label: strength()!.label })}</p>
-          </Show>
+        <div class="form-floating">
+          <input id="setup-password" type="password" value={password()} placeholder=" " autocomplete="new-password" onInput={(e) => setPassword(e.currentTarget.value)} />
+          <label for="setup-password">{t("setup.password")}</label>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="setup-confirm">
-            {t("setup.confirmPassword")}
-          </label>
-          <input
-            id="setup-confirm"
-            class="form-input"
-            type="password"
-            autocomplete="new-password"
-            value={confirmPwd()}
-            onInput={(e) => setConfirmPwd(e.currentTarget.value)}
-          />
+        <div class="form-floating">
+          <input id="setup-repeat" type="password" value={repeat()} placeholder=" " autocomplete="new-password" onInput={(e) => setRepeat(e.currentTarget.value)} />
+          <label for="setup-repeat">{t("setup.repeat")}</label>
         </div>
-        <button
-          class="btn btn-primary"
-          type="submit"
-          disabled={busy() || !username() || password().length < 6 || password() !== confirmPwd()}
-          style={{ width: "100%", "justify-content": "center" }}
-        >
-          {busy() ? t("setup.creating") : t("setup.createAndEnter")}
+        <button class="btn btn-primary" type="submit" disabled={busy() || !username().trim() || password().length < 6 || repeat() !== password()} style={{ width: "100%", "justify-content": "center" }}>
+          {t("setup.submit")}
         </button>
       </form>
+      <Toaster />
     </div>
   );
 }

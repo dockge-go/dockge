@@ -47,8 +47,8 @@ setUnauthorizedHandler(() => {
 
 /** 建立/复位会话的公共收尾：token 入库、先拉全量快照（保证 SSE 初帧到达时
  * snapshot 已就绪、不被丢弃），再预热用户与实时流。 */
-async function completeLogin(data: { accessToken: string; user: UserData }) {
-  setToken(data.accessToken);
+async function completeLogin(data: { accessToken: string; user: UserData }, remember = false) {
+  setToken(data.accessToken, remember);
   setUser(data.user);
   setAuthed(true);
   await refresh(false);
@@ -56,9 +56,9 @@ async function completeLogin(data: { accessToken: string; user: UserData }) {
 }
 
 /** 密码登录：建立会话并预热用户与实时流。 */
-export async function login(username: string, password: string) {
+export async function login(username: string, password: string, remember = false) {
   const data = await api.login(username, password);
-  completeLogin(data);
+  completeLogin(data, remember);
   return data.user;
 }
 
@@ -88,6 +88,12 @@ export async function boot(): Promise<boolean> {
     return false;
   }
 }
+
+// ---- 跨页交接：首页 docker-run 转换结果落入 /compose 新建编辑器 ----
+
+const [draftYaml, setDraftYaml] = createSignal<string | null>(null);
+
+export { draftYaml, setDraftYaml };
 
 // ---- REST 资源清单 + 容器状态流 ----
 
@@ -211,11 +217,3 @@ export async function refresh(withToast = true) {
     if (withToast) toast(errText(e), "error");
   }
 }
-
-// ---- 搜索/跨页联动（全局搜索点击资源后由目标页消费并打开详情） ----
-
-const [pendingContainer, setPendingContainer] = createSignal<string | null>(null);
-const [pendingStack, setPendingStack] = createSignal<string | null>(null);
-const [pendingNewStack, setPendingNewStack] = createSignal(false);
-
-export { pendingContainer, setPendingContainer, pendingStack, setPendingStack, pendingNewStack, setPendingNewStack };

@@ -1,37 +1,27 @@
-// 入口：路由装配（登录/Setup 独立于 AppShell 守卫之外）。
+// 入口：路由装配（上游复刻路由表）。Setup 独立于 Gate；其余经认证门。
 import { render } from "solid-js/web";
 import { Route, Router } from "@solidjs/router";
 import "./styles/app.css";
-import { AppShell } from "./layout/AppShell";
-import { Login } from "./views/Login";
+import { Gate } from "./layout/Layout";
 import { Setup } from "./views/Setup";
-import { Dashboard } from "./views/Dashboard";
-import { Containers } from "./views/Containers";
-import { Stacks } from "./views/Stacks";
-import { Images } from "./views/Images";
-import { Volumes } from "./views/Volumes";
-import { Networks } from "./views/Networks";
-import { SysInfo } from "./views/SysInfo";
-import { SysDf } from "./views/SysDf";
-import { Settings } from "./views/Settings";
+import { DashboardHome } from "./views/DashboardHome";
+import { Compose } from "./views/Compose";
+import { TerminalPage } from "./views/TerminalPage";
+import { SettingsPage } from "./views/SettingsPage";
 
 const root = document.getElementById("root");
 
 render(
   () => (
     <Router>
-      <Route path="/login" component={Login} />
       <Route path="/setup" component={Setup} />
-      <Route path="/" component={AppShell}>
-        <Route path="/" component={Dashboard} />
-        <Route path="/containers" component={Containers} />
-        <Route path="/stacks" component={Stacks} />
-        <Route path="/images" component={Images} />
-        <Route path="/volumes" component={Volumes} />
-        <Route path="/networks" component={Networks} />
-        <Route path="/sysinfo" component={SysInfo} />
-        <Route path="/sysdf" component={SysDf} />
-        <Route path="/settings" component={Settings} />
+      <Route path="/" component={Gate}>
+        <Route path="/" component={DashboardHome} />
+        <Route path="/compose" component={Compose} />
+        <Route path="/compose/:name" component={Compose} />
+        <Route path="/terminal/:stack/:service/:type" component={TerminalPage} />
+        <Route path="/settings/:tab" component={SettingsPage} />
+        <Route path="*" component={DashboardHome} />
       </Route>
     </Router>
   ),

@@ -127,16 +127,18 @@ export function StackEditor(props: {
   return (
     <section class={`stack-editor ${props.fullscreen ? "editor-fullscreen" : ""}`}>
       <header class="stack-editor-toolbar">
-        <span class={`editor-validation ${validationClass()}`}>
-          {result()?.valid ? (
-            <Check size={13} />
-          ) : props.validation.status === "checking" ? (
-            <Loader2 size={13} class="spin" />
-          ) : (
-            <AlertTriangle size={13} />
-          )}
-          {validationText()}
-        </span>
+        <Show when={props.file === "compose"}>
+          <span class={`editor-validation ${validationClass()}`}>
+            {result()?.valid ? (
+              <Check size={13} />
+            ) : props.validation.status === "checking" ? (
+              <Loader2 size={13} class="spin" />
+            ) : (
+              <AlertTriangle size={13} />
+            )}
+            {validationText()}
+          </span>
+        </Show>
         <span class="toolbar-spacer" />
         <button class="btn btn-ghost" onClick={() => props.onFullscreenChange(!props.fullscreen)}>
           <Show when={props.fullscreen} fallback={<Maximize2 size={13} />}><Minimize2 size={13} /></Show>

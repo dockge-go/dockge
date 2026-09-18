@@ -1,189 +1,70 @@
-// 登录页：用户名密码 → 会话建立 → 仪表盘；
-// OIDC/proxy 模式按 /v1/auth/config 渲染对应入口；未安装时引导至 /setup。
-import { createSignal, For, onMount, Show } from "solid-js";
-import { useNavigate } from "@solidjs/router";
-import { LogIn } from "lucide-solid";
-import { api, getToken, type AuthConfig } from "../api/api";
-import { login } from "../store/index";
+// 登录页（上游复刻）：居中卡片、floating labels、Remember me、错误 alert、语言下拉。
+// OIDC/proxy 认证模式后端仍生效，但按一比一复刻决策不提供 UI 入口。
+import { Show, createSignal } from "solid-js";
+
 import { errText } from "../api/format";
-import { t } from "../i18n";
+import { t, setLocale, useLocale, type LocaleKey } from "../i18n";
+import { login } from "../store/index";
+
+const LANG_OPTIONS: Array<{ value: LocaleKey; label: string }> = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "en-US", label: "English" },
+];
 
 export function Login() {
-  const navigate = useNavigate();
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
+  const [remember, setRemember] = createSignal(true);
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
-  const [authConfig, setAuthConfig] = createSignal<AuthConfig | null>(null);
 
-  onMount(async () => {
-    if (getToken()) {
-      navigate("/", { replace: true });
-      return;
-    }
-    try {
-      const setupResult = await api.needSetup();
-      if (setupResult.needSetup) {
-        navigate("/setup", { replace: true });
-        return;
-      }
-      const cfg = await api.authConfig();
-      setAuthConfig(cfg);
-    } catch {
-      // 探测失败不阻塞登录表单
-    }
-    // OIDC 回调失败会 302 回本页并携带 oidc_error，展示后清理地址栏
-    const oidcError = new URLSearchParams(location.search).get("oidc_error");
-    if (oidcError) {
-      setError(t("login.oidcFailed", { msg: oidcError }));
-      history.replaceState(null, "", "/login");
-    }
-  });
-
-  const submit = async (e: SubmitEvent) => {
-    e.preventDefault();
+  const submit = async (event: SubmitEvent) => {
+    event.preventDefault();
     if (busy()) return;
     setBusy(true);
     setError("");
     try {
-      await login(username().trim(), password());
-      navigate("/", { replace: true });
-    } catch (err) {
-      setError(errText(err));
+      await login(username().trim(), password(), remember());
+    } catch (e) {
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
   };
 
-  const cfg = authConfig();
-  const isProxy = cfg?.mode === "proxy";
-  const isOIDC = cfg?.mode === "oidc" && cfg.providers.length > 0;
-
   return (
-    <div class="auth-wrap">
-      <form class="auth-card" onSubmit={submit}>
-        <div class="auth-brand">
-          <svg
-            width="44"
-            height="44"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <rect x="2" y="3" width="20" height="14" rx="2" />
-            <path d="M8 21h8M12 17v4" />
-            <path d="M7 8h2m2 0h2m2 0h2M7 11h10" />
-          </svg>
-          <div class="auth-title">Dockge</div>
-          <div class="auth-sub">{t("login.title")}</div>
+    <div class="auth-center">
+      <form class="card auth-card" onSubmit={submit}>
+        <img class="auth-logo" src="/icon.svg" alt="Dockge" />
+        <div class="auth-title">Dockge</div>
+        <p class="auth-sub">{t("login.title")}</p>
+        <div class="auth-lang">
+          <select value={useLocale()} onChange={(e) => setLocale(e.currentTarget.value as LocaleKey)} aria-label={t("common.language")}>
+            {LANG_OPTIONS.map((opt) => (
+              <option value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
         <Show when={error()}>
-          <div class="form-error">{error()}</div>
+          <div class="auth-error" role="alert">{error()}</div>
         </Show>
-
-        <Show when={isProxy}>
-          <button
-            class="btn btn-primary"
-            style={{ width: "100%", "justify-content": "center", "margin-bottom": "12px" }}
-            onClick={() => {
-              // 整页加载而非 SPA 跳转：让请求重新经过 Traefik → ProxyAuth 中间件链，
-              // SPA 内跳转只会重复已失败的 boot()，形成登录页死循环。
-              window.location.href = "/";
-            }}
-          >
-            <LogIn size={14} />
-            {t("login.ssoLogin")}
-          </button>
-          <div style={{ "text-align": "center" }}>
-            <span class="text-dim" style={{ "font-size": "var(--text-xs)" }}>
-              {t("login.proxyHint")}
-            </span>
-          </div>
-        </Show>
-
-        <Show when={!isProxy && !isOIDC}>
-          <div class="form-group">
-            <label class="form-label" for="login-username">{t("form.username")}</label>
-            <input
-              id="login-username"
-              class="form-input"
-              autocomplete="username"
-              value={username()}
-              onInput={(e) => setUsername(e.currentTarget.value)}
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="login-password">{t("form.password")}</label>
-            <input
-              id="login-password"
-              class="form-input"
-              type="password"
-              autocomplete="current-password"
-              value={password()}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-            />
-          </div>
-          <button
-            class="btn btn-primary"
-            type="submit"
-            disabled={busy() || !username() || !password()}
-            style={{ width: "100%", "justify-content": "center" }}
-          >
-            <LogIn size={14} />
-            {busy() ? t("login.loggingIn") : t("login.login")}
-          </button>
-        </Show>
-
-        <Show when={isOIDC}>
-          <div style={{ display: "flex", "flex-direction": "column", gap: "8px", "margin-bottom": "12px" }}>
-            <For each={cfg!.providers}>
-              {(p) => (
-                <button
-                  class="btn btn-secondary"
-                  type="button"
-                  onClick={() => {
-                    window.location.href = `/v1/oidc/${encodeURIComponent(p.id)}/auth`;
-                  }}
-                >
-                  <LogIn size={14} />
-                  {p.info.label}
-                </button>
-              )}
-            </For>
-          </div>
-          <div style={{ "text-align": "center", "margin-bottom": "8px" }}>
-            <span class="text-dim" style={{ "font-size": "var(--text-xs)" }}>{t("login.orPassword")}</span>
-          </div>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <input
-              class="form-input"
-              placeholder={t("form.usernamePlaceholder")}
-              autocomplete="username"
-              value={username()}
-              onInput={(e) => setUsername(e.currentTarget.value)}
-              style={{ flex: 1 }}
-            />
-            <input
-              class="form-input"
-              placeholder={t("form.passwordPlaceholder")}
-              type="password"
-              autocomplete="current-password"
-              value={password()}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-              style={{ flex: 1 }}
-            />
-            <button
-              class="btn btn-primary"
-              type="submit"
-              disabled={busy() || !username() || !password()}
-            >
-              <LogIn size={14} />
-            </button>
-          </div>
-        </Show>
+        <div class="form-floating">
+          <input id="login-username" value={username()} placeholder=" " autocomplete="username" onInput={(e) => setUsername(e.currentTarget.value)} />
+          <label for="login-username">{t("login.username")}</label>
+        </div>
+        <div class="form-floating">
+          <input id="login-password" type="password" value={password()} placeholder=" " autocomplete="current-password" onInput={(e) => setPassword(e.currentTarget.value)} />
+          <label for="login-password">{t("login.password")}</label>
+        </div>
+        <div class="auth-row">
+          <label>
+            <input type="checkbox" checked={remember()} onChange={(e) => setRemember(e.currentTarget.checked)} />
+            {t("login.remember")}
+          </label>
+        </div>
+        <button class="btn btn-primary" type="submit" disabled={busy() || !username().trim() || !password()} style={{ width: "100%", "justify-content": "center" }}>
+          {t("login.submit")}
+        </button>
       </form>
     </div>
   );
