@@ -1,14 +1,15 @@
 // 镜像管理：列表（SSE 快照）、拉取（Sheet）、删除（确认）、清理未使用。
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { Download, Image, Plus, Trash2 } from "lucide-solid";
 import { api } from "../api/api";
 import { refresh, snapshot, toast } from "../store/index";
 import { confirmDialog } from "../components/Confirm";
 import { Sheet } from "../components/Sheet";
 import { EmptyState, SectionHeader } from "../components/widgets";
-import { errText, shortId } from "../api/format";
+import { errText, fmtBytes, fmtDate, shortId } from "../api/format";
 import { Pagination } from "../components/Pagination";
 import { clampPage, paginate } from "../lib/pagination";
+import { listNav } from "../lib/listnav";
 import { t } from "../i18n";
 
 export function Images() {
@@ -16,6 +17,11 @@ export function Images() {
   const [reference, setReference] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [page, setPage] = createSignal(1);
+  let tableHost: HTMLTableElement | undefined;
+
+  onMount(() => {
+    if (tableHost) onCleanup(listNav(tableHost));
+  });
 
   const rows = () => snapshot()?.images ?? [];
   const visibleRows = createMemo(() => paginate(rows(), page()));
@@ -64,7 +70,7 @@ export function Images() {
     <div class="view-section">
       <SectionHeader
         title={t("img.title")}
-        subtitle={`${rows().length} images`}
+        subtitle={t("res.countImages", { n: rows().length })}
         actions={
           <>
             <button class="btn-clear" onClick={() => void prune()}>
@@ -80,10 +86,10 @@ export function Images() {
         when={rows().length > 0}
         fallback={<EmptyState title={t("img.empty")} desc={t("img.emptyDesc")} icon={<Image size={44} />} />}
       >
-        <table class="data-table">
+        <table class="data-table" ref={tableHost}>
           <thead>
             <tr>
-              <th>Repository</th>
+              <th>{t("img.repository")}</th>
               <th>{t("common.tag")}</th>
               <th>{t("common.size")}</th>
               <th>{t("common.created")}</th>
@@ -93,14 +99,14 @@ export function Images() {
           <tbody>
             <For each={visibleRows()}>
               {(img) => (
-                <tr>
+                <tr tabindex="0">
                   <td>
                     <div class="cell-main">{img.repo}</div>
                     <div class="cell-sub">{shortId(img.id)}</div>
                   </td>
                   <td>{img.tag || "<none>"}</td>
-                  <td class="text-dim">{img.size}</td>
-                  <td class="cell-dim">{img.created}</td>
+                  <td class="text-dim">{fmtBytes(img.sizeBytes)}</td>
+                  <td class="cell-dim">{fmtDate(img.createdAt)}</td>
                   <td class="row-actions-cell">
                     <div class="cell-actions">
                       <button

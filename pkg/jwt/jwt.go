@@ -67,5 +67,6 @@ func (j *JWT) ParseToken(tokenString string) (*Claims, error) {
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
 		return claims, nil
 	}
-	return nil, err
+	// 正常不可达（claims 类型由本函数指定），但避免把 (nil, nil) 交回调用方
+	return nil, errors.New("invalid token")
 }

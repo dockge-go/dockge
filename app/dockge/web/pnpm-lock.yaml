@@ -8,6 +8,24 @@ importers:
 
   .:
     dependencies:
+      '@codemirror/commands':
+        specifier: ^6.11.0
+        version: 6.11.0
+      '@codemirror/lang-yaml':
+        specifier: ^6.1.3
+        version: 6.1.3
+      '@codemirror/language':
+        specifier: ^6.12.4
+        version: 6.12.4
+      '@codemirror/lint':
+        specifier: ^6.9.7
+        version: 6.9.7
+      '@codemirror/state':
+        specifier: ^6.7.4
+        version: 6.7.4
+      '@codemirror/view':
+        specifier: ^6.43.11
+        version: 6.43.11
       '@kobalte/core':
         specifier: ^0.13.13
         version: 0.13.13(solid-js@1.9.15)
@@ -32,10 +50,10 @@ importers:
         version: 7.0.2
       vite:
         specifier: ^8.2.2
-        version: 8.2.2
+        version: 8.2.2(@types/node@22.20.2)
       vite-plugin-solid:
         specifier: ^2.11.14
-        version: 2.11.14(solid-js@1.9.15)(vite@8.2.2)
+        version: 2.11.14(solid-js@1.9.15)(vite@8.2.2(@types/node@22.20.2))
 
 packages:
 
@@ -120,6 +138,27 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
+  '@codemirror/autocomplete@6.20.3':
+    resolution: {integrity: sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==}
+
+  '@codemirror/commands@6.11.0':
+    resolution: {integrity: sha512-/K4Rl5BN0OtTiPWmJCdqODu38XnDMsDxKY5rgrPnCkutPTJf2wVbkoixLfealF5Kwse/s8P8M5jAiURiwSwnFA==}
+
+  '@codemirror/lang-yaml@6.1.3':
+    resolution: {integrity: sha512-AZ8DJBuXGVHybpBQhmZtgew5//4hv3tdkXnr3vDmOUMJRuB6vn/uuwtmTOTlqEaQFg3hQSVeA90NmvIQyUV6FQ==}
+
+  '@codemirror/language@6.12.4':
+    resolution: {integrity: sha512-1q4PaT+o6PbgpkJt4Q8Fv5XJxTy4FUZ4MWETtyiDw3J0Pyr9E2vqcKL+k9wcvjNTIsauxvE7OfmWj3FRPHQ76A==}
+
+  '@codemirror/lint@6.9.7':
+    resolution: {integrity: sha512-28/+iWLYxKxsvGYhSYL7zaCZqLz5+FFFDq9tVsvGv9kv8RY4fFAchJ5WX9M3YrrRlTIsECjsXPqeNgnSmNP2dg==}
+
+  '@codemirror/state@6.7.4':
+    resolution: {integrity: sha512-QhQIVRY+xHZDxwOSFrJ1eUMapJBUID3IdeAjf7dHO7zBUzSkyooHiodnalz5MG3iHzwixKMlAAyn7244y537EA==}
+
+  '@codemirror/view@6.43.11':
+    resolution: {integrity: sha512-2+esucbQX6wB2JYi1eDvdCPFTA31BN8oSy6xCmk3G6CloV11yOvEjYk+gH7kLrP0MuHG94E8WDhjs5oMiu3+Wg==}
+
   '@corvu/utils@0.4.2':
     resolution: {integrity: sha512-Ox2kYyxy7NoXdKWdHeDEjZxClwzO4SKM8plAaVwmAJPxHMqA0rLOoAsa+hBDwRLpctf+ZRnAd/ykguuJidnaTA==}
     peerDependencies:
@@ -162,6 +201,21 @@ packages:
     resolution: {integrity: sha512-jRVXr+zsVHxzDXRoh+CDeXzvCsFJ6uiHhqqNQ26Cw9ZsZ3D6nqPUBt1gGVtj2ZPmRL3a9Uk1v8D1aJ8/I12Dow==}
     peerDependencies:
       solid-js: ^1.8.8
+
+  '@lezer/common@1.5.2':
+    resolution: {integrity: sha512-sxQE460fPZyU3sdc8lafxiPwJHBzZRy/udNFynGQky1SePYBdhkBl1kOagA9uT3pxR8K09bOrmTUqA9wb/PjSQ==}
+
+  '@lezer/highlight@1.2.3':
+    resolution: {integrity: sha512-qXdH7UqTvGfdVBINrgKhDsVTJTxactNNxLk7+UMwZhU13lMHaOBlJe9Vqp907ya56Y3+ed2tlqzys7jDkTmW0g==}
+
+  '@lezer/lr@1.4.10':
+    resolution: {integrity: sha512-rnCpTIBafOx4mRp43xOxDJbFipJm/c0cia/V5TiGlhmMa+wsSdoGmUN3w5Bqrks/09Q/D4tNAmWaT8p6NRi77A==}
+
+  '@lezer/yaml@1.0.4':
+    resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
+
+  '@marijn/find-cluster-break@1.0.4':
+    resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
 
   '@oxc-project/types@0.148.0':
     resolution: {integrity: sha512-Nm4s/jB+4FpFsPhWGEC4h7rzksesmtnMXomo6rCMcg/b8zLQuOziRgkCS1fxDCXOlJB/6Q8oABOZ/OP6RIPj9A==}
@@ -340,6 +394,9 @@ packages:
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
 
+  '@types/node@22.20.2':
+    resolution: {integrity: sha512-xlvWf4Vs9n1PEVYwP1n4vvG07M6y8WgvJ2t0vbrWTmijsIHp1cS+uJ2kMIRdY3nHZK0nCYKrPeD171+SzF4/zw==}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
     engines: {node: '>=16.20.0'}
@@ -495,6 +552,9 @@ packages:
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
+
+  crelt@1.0.7:
+    resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
@@ -714,6 +774,9 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  style-mod@4.1.3:
+    resolution: {integrity: sha512-i/n8VsZydrugj3Iuzll8+x/00GH2vnYsk1eomD8QiRrSAeW6ItbCQDtfXCeJHd0iwiNagqjQkvpvREEPtW3IoQ==}
+
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
@@ -725,6 +788,9 @@ packages:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
     hasBin: true
+
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   update-browserslist-db@1.3.2:
     resolution: {integrity: sha512-UQ+MSxlhRm1bzjhU+DcuXfjFO1FzNtqhK5+9Yvlp90ItDLk5vT932A0rFu619nf7RVS+Y/VeaUW1jaRDqZ8VJw==}
@@ -792,6 +858,9 @@ packages:
     peerDependenciesMeta:
       vite:
         optional: true
+
+  w3c-keyname@2.2.8:
+    resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
 
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
@@ -909,6 +978,56 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@codemirror/autocomplete@6.20.3':
+    dependencies:
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.4
+      '@codemirror/view': 6.43.11
+      '@lezer/common': 1.5.2
+
+  '@codemirror/commands@6.11.0':
+    dependencies:
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.4
+      '@codemirror/view': 6.43.11
+      '@lezer/common': 1.5.2
+
+  '@codemirror/lang-yaml@6.1.3':
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.4
+      '@lezer/common': 1.5.2
+      '@lezer/highlight': 1.2.3
+      '@lezer/lr': 1.4.10
+      '@lezer/yaml': 1.0.4
+
+  '@codemirror/language@6.12.4':
+    dependencies:
+      '@codemirror/state': 6.7.4
+      '@codemirror/view': 6.43.11
+      '@lezer/common': 1.5.2
+      '@lezer/highlight': 1.2.3
+      '@lezer/lr': 1.4.10
+      style-mod: 4.1.3
+
+  '@codemirror/lint@6.9.7':
+    dependencies:
+      '@codemirror/state': 6.7.4
+      '@codemirror/view': 6.43.11
+      crelt: 1.0.7
+
+  '@codemirror/state@6.7.4':
+    dependencies:
+      '@marijn/find-cluster-break': 1.0.4
+
+  '@codemirror/view@6.43.11':
+    dependencies:
+      '@codemirror/state': 6.7.4
+      crelt: 1.0.7
+      style-mod: 4.1.3
+      w3c-keyname: 2.2.8
+
   '@corvu/utils@0.4.2(solid-js@1.9.15)':
     dependencies:
       '@floating-ui/dom': 1.8.0
@@ -969,6 +1088,24 @@ snapshots:
       '@solid-primitives/refs': 1.1.4(solid-js@1.9.15)
       '@solid-primitives/utils': 6.4.1(solid-js@1.9.15)
       solid-js: 1.9.15
+
+  '@lezer/common@1.5.2': {}
+
+  '@lezer/highlight@1.2.3':
+    dependencies:
+      '@lezer/common': 1.5.2
+
+  '@lezer/lr@1.4.10':
+    dependencies:
+      '@lezer/common': 1.5.2
+
+  '@lezer/yaml@1.0.4':
+    dependencies:
+      '@lezer/common': 1.5.2
+      '@lezer/highlight': 1.2.3
+      '@lezer/lr': 1.4.10
+
+  '@marijn/find-cluster-break@1.0.4': {}
 
   '@oxc-project/types@0.148.0': {}
 
@@ -1107,6 +1244,11 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.8
 
+  '@types/node@22.20.2':
+    dependencies:
+      undici-types: 6.21.0
+    optional: true
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -1200,6 +1342,8 @@ snapshots:
   caniuse-lite@1.0.30001810: {}
 
   convert-source-map@2.0.0: {}
+
+  crelt@1.0.7: {}
 
   csstype@3.2.3: {}
 
@@ -1371,6 +1515,8 @@ snapshots:
 
   source-map-js@1.2.1: {}
 
+  style-mod@4.1.3: {}
+
   tinyglobby@0.2.17:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.7)
@@ -1401,13 +1547,16 @@ snapshots:
       '@typescript/typescript-win32-arm64': 7.0.2
       '@typescript/typescript-win32-x64': 7.0.2
 
+  undici-types@6.21.0:
+    optional: true
+
   update-browserslist-db@1.3.2(browserslist@4.28.9):
     dependencies:
       browserslist: 4.28.9
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  vite-plugin-solid@2.11.14(solid-js@1.9.15)(vite@8.2.2):
+  vite-plugin-solid@2.11.14(solid-js@1.9.15)(vite@8.2.2(@types/node@22.20.2)):
     dependencies:
       '@babel/core': 7.29.7
       '@types/babel__core': 7.20.5
@@ -1415,12 +1564,12 @@ snapshots:
       merge-anything: 5.1.7
       solid-js: 1.9.15
       solid-refresh: 0.6.3(solid-js@1.9.15)
-      vite: 8.2.2
-      vitefu: 1.1.3(vite@8.2.2)
+      vite: 8.2.2(@types/node@22.20.2)
+      vitefu: 1.1.3(vite@8.2.2(@types/node@22.20.2))
     transitivePeerDependencies:
       - supports-color
 
-  vite@8.2.2:
+  vite@8.2.2(@types/node@22.20.2):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -1428,10 +1577,13 @@ snapshots:
       rolldown: 1.2.7
       tinyglobby: 0.2.17
     optionalDependencies:
+      '@types/node': 22.20.2
       fsevents: 2.3.3
 
-  vitefu@1.1.3(vite@8.2.2):
+  vitefu@1.1.3(vite@8.2.2(@types/node@22.20.2)):
     optionalDependencies:
-      vite: 8.2.2
+      vite: 8.2.2(@types/node@22.20.2)
+
+  w3c-keyname@2.2.8: {}
 
   yallist@3.1.1: {}

@@ -17,7 +17,6 @@ import (
 	"dockge/app/dockge/internal/repository"
 	"dockge/pkg/hash"
 	"dockge/pkg/rate"
-	"dockge/pkg/totp"
 
 	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
@@ -40,16 +39,9 @@ type AuthService interface {
 	ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error
 	Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error)
 	CheckNeedSetup(ctx context.Context) (bool, error)
-	Check2FA(ctx context.Context, req *v1.TwoFARequest, clientIP string) (*v1.LoginResponseData, error)
-	Enable2FA(ctx context.Context, uid uint) (string, error)
-	Disable2FA(ctx context.Context, uid uint) error
-	GetSetting(ctx context.Context, key string) (string, error)
-	SetSetting(ctx context.Context, key, value, typ string) error
-	GetAllSettings(ctx context.Context, typ string) (map[string]string, error)
-	// CheckSession 供认证中间件逐请求校验：用户存在、启用且密码哈希未变。
+	// CheckSession 供 StrictAuth 逐请求校验：用户存在、启用且密码哈希未变
+	// （已接线关闭债务 D12：停用/改密后旧 token 下一次请求即 401）。
 	CheckSession(ctx context.Context, uid uint, h string) error
-	// IsAdmin 报告指定用户是否为管理员。
-	IsAdmin(ctx context.Context, uid uint) (bool, error)
 	// ProxyLogin 把受信反代注入的身份换成本地会话。
 	ProxyLogin(ctx context.Context, username string, remoteAddr string) (*v1.LoginResponseData, error)
 	// OIDCLogin 把验签后的 OIDC 身份换成本地会话。
@@ -61,6 +53,12 @@ type AuthService interface {
 	// AutoLogin 免登录模式下以首个活跃用户自动登录。
 	AutoLogin(ctx context.Context) (*v1.LoginResponseData, error)
 	GetLatestVersion(ctx context.Context) (string, error)
+	// ---- 用户管理（admin 专用；角色守卫在 handler 层，领域不变量在本层）----
+	AdminListUsers(ctx context.Context) ([]model.DockgeUser, error)
+	AdminCreateUser(ctx context.Context, req *v1.UserCreateRequest) (model.DockgeUser, error)
+	AdminSetUserRole(ctx context.Context, actorID, targetID uint, role string) error
+	AdminSetUserActive(ctx context.Context, actorID, targetID uint, active bool) error
+	AdminDeleteUser(ctx context.Context, actorID, targetID uint) error
 }
 
 type authService struct {
@@ -102,54 +100,7 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP 
 	if err := hash.BcryptCheck(req.Password, user.Password); err != nil {
 		return nil, v1.ErrUnauthorized
 	}
-	if user.TwofaStatus {
-		data, err := s.session(&user)
-		if err != nil {
-			return nil, err
-		}
-		data.TokenRequired = true
-		return data, nil
-	}
 	return s.session(&user)
-}
-
-// Check2FA 校验 TOTP 验证码（防重放），通过后签发正式会话令牌。
-func (s *authService) Check2FA(ctx context.Context, req *v1.TwoFARequest, clientIP string) (*v1.LoginResponseData, error) {
-	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {
-		return nil, v1.ErrUnauthorized
-	}
-	user, err := s.repo.GetUserByUsername(ctx, req.Username)
-	if err != nil {
-		return nil, v1.ErrUnauthorized
-	}
-	if !user.Active || !user.TwofaStatus {
-		return nil, v1.ErrUnauthorized
-	}
-	if !totp.Verify(req.Token, user.TwofaSecret) || user.TwofaLastToken == req.Token {
-		return nil, &v1.Error{Code: 401, Message: "authInvalidToken"}
-	}
-	_ = s.repo.UpdateUserTwofa(ctx, user.ID, user.TwofaSecret, req.Token, user.TwofaStatus)
-	return s.session(&user)
-}
-
-// Enable2FA 生成 TOTP 密钥并立即启用，返回 otpauth 二维码 URL。
-func (s *authService) Enable2FA(ctx context.Context, uid uint) (string, error) {
-	secret, err := totp.GenerateSecret()
-	if err != nil {
-		return "", fmt.Errorf("generate totp secret: %w", err)
-	}
-	if err := s.repo.UpdateUserTwofa(ctx, uid, secret, "", true); err != nil {
-		return "", err
-	}
-	return totp.QRCodeURL(secret), nil
-}
-
-// Disable2FA 清除 2FA 密钥并停用两步验证。
-func (s *authService) Disable2FA(ctx context.Context, uid uint) error {
-	if _, err := s.repo.GetUser(ctx, uid); err != nil {
-		return err
-	}
-	return s.repo.UpdateUserTwofa(ctx, uid, "", "", false)
 }
 
 // Setup 创建首个管理员账号（仅当无任何用户时），成功即返回登录态。
@@ -161,7 +112,7 @@ func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.Logi
 	if count > 0 {
 		return nil, &v1.Error{Code: 409, Message: "Dockge has been initialized."}
 	}
-	if !totp.ValidatePasswordStrength(req.Password) {
+	if !validatePasswordStrength(req.Password) {
 		return nil, &v1.Error{Code: 400, Message: "Password is too weak. It should contain alphabetic and numeric characters. It must be at least 6 characters in length."}
 	}
 	hashed, err := hash.BcryptHash(req.Password)
@@ -175,11 +126,7 @@ func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.Logi
 	if err := s.repo.CreateUser(ctx, user); err != nil {
 		return nil, v1.ErrInternalServerError
 	}
-	data, err := s.session(user)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return s.session(user)
 }
 
 // CheckNeedSetup 判断是否需要首次安装引导（用户数为 0）。
@@ -217,7 +164,7 @@ func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.Chan
 	if err := hash.BcryptCheck(req.OldPassword, user.Password); err != nil {
 		return v1.ErrBadRequest
 	}
-	if !totp.ValidatePasswordStrength(req.NewPassword) {
+	if !validatePasswordStrength(req.NewPassword) {
 		return fmt.Errorf("%w: 密码至少6位且需包含字母和数字", v1.ErrBadRequest)
 	}
 	hashed, err := hash.BcryptHash(req.NewPassword)
@@ -243,18 +190,6 @@ func (s *authService) CheckSession(ctx context.Context, uid uint, h string) erro
 		return v1.ErrUnauthorized // 密码已修改，旧 token 失效
 	}
 	return nil
-}
-
-// IsAdmin 报告指定用户是否为管理员。
-func (s *authService) IsAdmin(ctx context.Context, uid uint) (bool, error) {
-	user, err := s.repo.GetUser(ctx, uid)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return false, v1.ErrUnauthorized
-		}
-		return false, err
-	}
-	return user.IsAdmin(), nil
 }
 
 // ProxyLogin 受信反代模式：来源命中受信网段时读取身份头，映射为本地会话。
@@ -372,21 +307,6 @@ func (s *authService) session(user *model.DockgeUser) (*v1.LoginResponseData, er
 	return &v1.LoginResponseData{AccessToken: token, User: meData(user)}, nil
 }
 
-// GetSetting 读取原始设置项（供认证相关逻辑使用）。
-func (s *authService) GetSetting(ctx context.Context, key string) (string, error) {
-	return s.repo.GetSetting(ctx, key)
-}
-
-// SetSetting 写入原始设置项。
-func (s *authService) SetSetting(ctx context.Context, key, value, typ string) error {
-	return s.repo.SetSetting(ctx, key, value, typ)
-}
-
-// GetAllSettings 返回指定分组的全部设置项。
-func (s *authService) GetAllSettings(ctx context.Context, typ string) (map[string]string, error) {
-	return s.repo.GetAllSettingsByType(ctx, typ)
-}
-
 // GetLatestVersion 返回 GitHub 最新 release tag。
 func (s *authService) GetLatestVersion(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/louislam/dockge/releases/latest", nil)
@@ -424,6 +344,6 @@ func meData(u *model.DockgeUser) v1.MeUserData {
 	}
 	return v1.MeUserData{
 		ID: u.ID, Username: u.Username, Nickname: u.Nickname,
-		Role: role, TwoFA: u.TwofaStatus,
+		Role: role,
 	}
 }

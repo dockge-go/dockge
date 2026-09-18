@@ -29,6 +29,7 @@ var Package = do.Package(
 	do.Lazy(NewComposerizeHandler),
 	do.Lazy(NewTerminalHandler),
 	do.Lazy(NewOIDCHandler),
+	do.Lazy(NewUsersHandler),
 )
 
 // New 构造 handler 公共依赖，由注入容器调用。
@@ -73,4 +74,13 @@ func withDetail(sentinel *v1.Error, err error) error {
 		return sentinel
 	}
 	return &v1.Error{Code: sentinel.Code, Message: err.Error()}
+}
+
+// writeSSEHeaders 写出 SSE 流式响应的公共响应头并提交 200。
+func writeSSEHeaders(ctx *gin.Context) {
+	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
+	ctx.Writer.Header().Set("Cache-Control", "no-cache")
+	ctx.Writer.Header().Set("Connection", "keep-alive")
+	ctx.Writer.Header().Set("X-Accel-Buffering", "no")
+	ctx.Writer.WriteHeader(http.StatusOK)
 }

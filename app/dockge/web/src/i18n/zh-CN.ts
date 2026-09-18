@@ -61,6 +61,7 @@ export default {
   "dash.labelImages": "镜像",
   "dash.containerStatus": "容器状态",
   "dash.resourceUsage": "资源占用",
+  "dash.statsUnavailable": "实时统计不可用：数据源 /proc 仅在 Linux 提供；当前平台或运行环境不支持，连接保持重试。",
   "dash.recentContainers": "最近容器",
   "dash.noContainers": "暂无容器",
   "legend.running": "{n} running",
@@ -113,7 +114,6 @@ export default {
   "toast.sseRunning": "已进入运行状态",
   "toast.sseExited": "已停止",
   "toast.ssePaused": "已暂停",
-  "toast.2faNotSupported": "该账号已启用两步验证，暂不支持在此登录",
 
   "stack.new": "新建编排栈",
   "stack.name": "Stack 名称",
@@ -217,6 +217,7 @@ export default {
   "login.title": "登录到容器管理控制台",
   "login.ssoLogin": "SSO 登录",
   "login.proxyHint": "反向代理已认证，点击进入控制台",
+  "login.oidcFailed": "SSO 登录失败：{msg}",
   "login.orPassword": "或通过用户名密码登录",
   "login.loggingIn": "登录中…",
   "login.login": "登录",
@@ -257,8 +258,9 @@ export default {
   "form.usernamePlaceholder": "用户名",
   "form.passwordPlaceholder": "密码",
 
-  "editor.validYaml": "YAML 结构有效",
-  "editor.missingServices": "缺少 services 段",
+  "editor.checking": "校验中…",
+  "editor.validCompose": "compose 有效",
+  "editor.invalidCompose": "{n} 个问题",
   "editor.exitFullscreen": "退出全屏",
   "editor.fullscreen": "全屏",
   "editor.lines": "{n} 行",
@@ -284,5 +286,54 @@ export default {
   "pagination.pageOf": "第 {p} / {n} 页",
   "pagination.prev": "上一页",
   "pagination.next": "下一页",
+
+  // ---- 视图标题 / 资源计数（j/k 可导航） ----
+  "view.containers": "容器",
+  "view.stacks": "栈",
+  "view.settings": "设置",
+  "view.sysinfo": "系统信息",
+  "res.subtitle": "{total} 总计 · {running} 运行中",
+  "res.countImages": "{n} 个镜像",
+  "res.countNetworks": "{n} 个网络",
+  "res.countVolumes": "{n} 个数据卷",
+  "img.repository": "仓库",
+
+  // ---- 容器状态 ----
+  "state.running": "运行中",
+  "state.exited": "已停止",
+  "state.paused": "已暂停",
+  "state.created": "已创建",
+  "state.dead": "无响应",
+  "state.restarting": "重启中",
+  "state.removing": "移除中",
+
+  // ---- 登录 · 2FA 步骤 ----
+
+  // ---- 账号安全 ----
+  "sec.title": "账号安全",
+
+  // ---- 用户管理（admin） ----
+  "users.title": "用户管理",
+  "users.desc": "停用或删除账号会使其全部会话立即失效。",
+  "users.role": "角色",
+  "users.source": "来源",
+  "users.actions": "操作",
+  "users.active": "活跃",
+  "users.disabled": "已停用",
+  "users.enabled": "已启用",
+  "users.enable": "启用",
+  "users.disable": "停用",
+  "users.create": "创建成员账号",
+  "users.creating": "创建中…",
+  "users.created": "已创建账号 {name}",
+  "users.roleChanged": "已更新角色",
+  "users.deleted": "已删除账号 {name}",
+  "users.confirmDelete": "删除用户 {name}？",
+  "users.confirmDeleteDesc": "删除后其全部会话立即失效，且不可恢复。",
+  "users.sourceLocal": "本地",
+  "users.sourceProxy": "反向代理",
+  "users.sourceOIDC": "OIDC",
+  "users.passwordHelp": "至少 6 位，需包含字母和数字",
+  "users.roleHelp": "member 可查看与操作资源；admin 可管理用户与设置",
 
 } as const;

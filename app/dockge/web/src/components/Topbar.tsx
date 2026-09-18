@@ -3,6 +3,7 @@ import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-j
 import { useLocation, useNavigate } from "@solidjs/router";
 import { Menu, Moon, RefreshCw, Search, Sun } from "lucide-solid";
 import { refresh, snapshot, setPendingContainer, setPendingStack } from "../store/index";
+import { fmtBytes } from "../api/format";
 import { setLocale, t, useLocale, type LocaleKey } from "../i18n/index";
 import { toggleTheme, useTheme } from "../lib/theme";
 
@@ -82,7 +83,7 @@ export function Topbar(props: { onHamburger: () => void }) {
     for (const img of snap.images) {
       const ref = `${img.repo}:${img.tag}`;
       if (ref.toLowerCase().includes(q) || img.id.toLowerCase().includes(q)) {
-        hits.push({ group: "Images", name: ref, meta: img.size, go: () => navigate("/images") });
+        hits.push({ group: "Images", name: ref, meta: fmtBytes(img.sizeBytes), go: () => navigate("/images") });
       }
     }
     for (const v of snap.volumes) {

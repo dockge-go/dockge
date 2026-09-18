@@ -37,6 +37,8 @@ export function Sidebar(props: { open: boolean; onNavigate: () => void }) {
           to: "/containers",
           label: () => t("nav.containers"),
           icon: <Container size={18} />,
+          // 三个计数徽标均由容器状态流（SSE 长连接）随帧推送的 counts 实时驱动：
+          // docker events 监听 container+image 事件，采集失败帧省略 counts、保持旧值。
           badge: () => {
             const snap = snapshot();
             if (!snap) return undefined;
@@ -53,7 +55,7 @@ export function Sidebar(props: { open: boolean; onNavigate: () => void }) {
           to: "/images",
           label: () => t("nav.images"),
           icon: <Image size={18} />,
-          badge: () => snapshot()?.images.length?.toString(),
+          badge: () => snapshot()?.docker.imagesTotal?.toString(),
         },
         { to: "/volumes", label: () => t("nav.volumes"), icon: <HardDrive size={18} /> },
         { to: "/networks", label: () => t("nav.networks"), icon: <Network size={18} /> },

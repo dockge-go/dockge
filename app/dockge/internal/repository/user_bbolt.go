@@ -11,20 +11,6 @@ import (
 	"dockge/app/dockge/internal/model"
 )
 
-// EncodeUint 将 uint64 编码为 8 字节大端序列（供外部包如 migration 使用）。
-func EncodeUint(v uint64) []byte {
-	b := make([]byte, 8)
-	for i := uint(0); i < 8; i++ {
-		b[i] = byte(v >> (56 - i*8))
-	}
-	return b
-}
-
-// encodeUint 将 uint 编码为 8 字节大端序列。
-func encodeUint(v uint) []byte {
-	return EncodeUint(uint64(v))
-}
-
 // ==================== User ====================
 
 func (r *Repository) CreateUser(ctx context.Context, m *model.DockgeUser) error {
@@ -44,7 +30,6 @@ func (r *Repository) CreateUser(ctx context.Context, m *model.DockgeUser) error 
 }
 
 // GetUserByUsername 按用户名查询用户记录（users bucket 以 username 为 key）。
-
 func (r *Repository) GetUserByUsername(ctx context.Context, username string) (model.DockgeUser, error) {
 	var result model.DockgeUser
 	err := r.db.View(func(tx *bbolt.Tx) error {
@@ -62,7 +47,6 @@ func (r *Repository) GetUserByUsername(ctx context.Context, username string) (mo
 }
 
 // CountUsers 返回用户总数（用于判断是否需要首次安装引导）。
-
 func (r *Repository) CountUsers(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.View(func(tx *bbolt.Tx) error {
@@ -77,7 +61,7 @@ func (r *Repository) CountUsers(ctx context.Context) (int64, error) {
 }
 
 // GetUser 按 ID 查找用户。users bucket 以 username 为 key（与迁移/创建逻辑一致），
-// 因此这里遍历匹配 user.ID，而不是用 encodeUint(uid) 作为 key。
+// 因此这里遍历匹配 user.ID，而不是按数值 key 直查。
 func (r *Repository) GetUser(ctx context.Context, uid uint) (model.DockgeUser, error) {
 	var result model.DockgeUser
 	var found bool
@@ -137,25 +121,55 @@ func (r *Repository) updateUser(ctx context.Context, uid uint, mutate func(*mode
 }
 
 // UpdatePassword 按 ID 定位用户并更新密码哈希。
-
 func (r *Repository) UpdatePassword(ctx context.Context, uid uint, passwordHash string) error {
 	return r.updateUser(ctx, uid, func(u *model.DockgeUser) {
 		u.Password = passwordHash
 	})
 }
 
-// UpdateUserTwofa 按 ID 更新 2FA 密钥、防重放令牌与启用状态。
-
-func (r *Repository) UpdateUserTwofa(ctx context.Context, uid uint, secret, lastToken string, status bool) error {
+// SetUserActive 按 ID 启用或停用账号（停用即时生效：CheckSession 拒绝其会话）。
+func (r *Repository) SetUserActive(ctx context.Context, uid uint, active bool) error {
 	return r.updateUser(ctx, uid, func(u *model.DockgeUser) {
-		u.TwofaSecret = secret
-		u.TwofaLastToken = lastToken
-		u.TwofaStatus = status
+		u.Active = active
+	})
+}
+
+// SetUserRole 按 ID 变更账号角色（admin / member）。
+func (r *Repository) SetUserRole(ctx context.Context, uid uint, role string) error {
+	return r.updateUser(ctx, uid, func(u *model.DockgeUser) {
+		u.Role = role
+	})
+}
+
+// DeleteUser 按 ID 删除账号（users bucket 以 username 为 key，需遍历定位原 key）。
+func (r *Repository) DeleteUser(ctx context.Context, uid uint) error {
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		b, err := TxBucket(tx, bucketUsers)
+		if err != nil {
+			return err
+		}
+		var targetKey []byte
+		err = b.ForEach(func(k, v []byte) error {
+			var u model.DockgeUser
+			if err := unmarshalUser(v, &u); err != nil {
+				return nil
+			}
+			if u.ID == uid {
+				targetKey = append([]byte{}, k...)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if targetKey == nil {
+			return ErrNotFound
+		}
+		return b.Delete(targetKey)
 	})
 }
 
 // ListUsers 返回全部用户（按 ID 升序）。
-
 func (r *Repository) ListUsers(ctx context.Context) ([]model.DockgeUser, error) {
 	var users []model.DockgeUser
 	err := r.db.View(func(tx *bbolt.Tx) error {
@@ -185,7 +199,6 @@ type settingPayload struct {
 }
 
 // GetSetting 读取单个设置项的值；不存在时返回错误。
-
 func (r *Repository) GetSetting(ctx context.Context, key string) (string, error) {
 	var value string
 	err := r.db.View(func(tx *bbolt.Tx) error {
@@ -210,7 +223,6 @@ func (r *Repository) GetSetting(ctx context.Context, key string) (string, error)
 }
 
 // SetSetting 写入设置项（payload 含类型分组）。
-
 func (r *Repository) SetSetting(ctx context.Context, key, value, typ string) error {
 	return r.db.Update(func(tx *bbolt.Tx) error {
 		b, err := TxBucket(tx, bucketSettings)
@@ -227,7 +239,6 @@ func (r *Repository) SetSetting(ctx context.Context, key, value, typ string) err
 }
 
 // GetAllSettingsByType 返回指定分组的全部设置项。
-
 func (r *Repository) GetAllSettingsByType(ctx context.Context, typ string) (map[string]string, error) {
 	result := make(map[string]string)
 	err := r.db.View(func(tx *bbolt.Tx) error {

@@ -109,4 +109,4 @@ Dockge 是一间安静、精确的单机容器控制室。界面采用 Apple tra
 
 | Item | Location | Why accepted | Owner / Exit |
 | --- | --- | --- | --- |
-| 原型使用 textarea 而非完整 CodeMirror | Stack 编辑器 | 当前依赖中未包含 CodeMirror，先保持零新增依赖并完成信息架构 | 编辑能力需要语法诊断或快捷键体系时引入 |
+| ~~原型使用 textarea 而非完整 CodeMirror~~ | Stack 编辑器 | — | ✅ **已解决**（2026-09-12 引入 CodeMirror 6：YAML 高亮、行号、当前行、undo、Tab 缩进；深色控制台岛主题） |

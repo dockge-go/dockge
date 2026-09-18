@@ -1,4 +1,5 @@
-// 登录页：用户名密码 → JWT 入库 → 跳转仪表盘；未安装时引导至 /setup。
+// 登录页：用户名密码 → 会话建立 → 仪表盘；
+// OIDC/proxy 模式按 /v1/auth/config 渲染对应入口；未安装时引导至 /setup。
 import { createSignal, For, onMount, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { LogIn } from "lucide-solid";
@@ -30,6 +31,12 @@ export function Login() {
       setAuthConfig(cfg);
     } catch {
       // 探测失败不阻塞登录表单
+    }
+    // OIDC 回调失败会 302 回本页并携带 oidc_error，展示后清理地址栏
+    const oidcError = new URLSearchParams(location.search).get("oidc_error");
+    if (oidcError) {
+      setError(t("login.oidcFailed", { msg: oidcError }));
+      history.replaceState(null, "", "/login");
     }
   });
 
@@ -81,7 +88,11 @@ export function Login() {
           <button
             class="btn btn-primary"
             style={{ width: "100%", "justify-content": "center", "margin-bottom": "12px" }}
-            onClick={() => navigate("/", { replace: true })}
+            onClick={() => {
+              // 整页加载而非 SPA 跳转：让请求重新经过 Traefik → ProxyAuth 中间件链，
+              // SPA 内跳转只会重复已失败的 boot()，形成登录页死循环。
+              window.location.href = "/";
+            }}
           >
             <LogIn size={14} />
             {t("login.ssoLogin")}

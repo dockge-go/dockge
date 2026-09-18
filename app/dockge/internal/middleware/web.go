@@ -29,8 +29,13 @@ type proxyLoginService interface {
 	ProxyLogin(ctx context.Context, username string, remoteAddr string) (*v1.LoginResponseData, error)
 }
 
-// CORSMiddleware 回显请求 Origin 并放行跨域；OPTIONS 预检直接短路。
+// sessionChecker 是 StrictAuth 逐请求会话校验依赖的最小接口
+// （实现：authService.CheckSession——用户存在、启用且密码哈希未变）。
+type sessionChecker interface {
+	CheckSession(ctx context.Context, uid uint, h string) error
+}
 
+// CORSMiddleware 回显请求 Origin 并放行跨域；OPTIONS 预检直接短路。
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
@@ -48,7 +53,6 @@ func CORSMiddleware() gin.HandlerFunc {
 }
 
 // RequestLog 记录每个请求的方法、路径、状态码与耗时。
-
 func RequestLog(logger *log.Logger) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		start := time.Now()
@@ -66,7 +70,9 @@ func RequestLog(logger *log.Logger) gin.HandlerFunc {
 // WebSocket/EventSource 无法自定义请求头，额外接受 ?token= 查询参数；
 // OIDC/proxy 模式签发的会话以 httpOnly cookie（dockge_token）形式存在，同样接受。
 // 若 ctxProxyAuthDone 已设置（proxy 模式由上游中间件完成认证），则跳过校验。
-func StrictAuth(j *jwt.JWT, logger *log.Logger) gin.HandlerFunc {
+// token 解析成功后逐请求校验会话（CheckSession）：账号被停用/删除或改密后，
+// 旧 token 的下一次请求立即 401（债务 D12 接线）。
+func StrictAuth(j *jwt.JWT, logger *log.Logger, sessions sessionChecker) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		if ctx.GetBool(ctxProxyAuthDone) {
 			ctx.Next()
@@ -90,6 +96,14 @@ func StrictAuth(j *jwt.JWT, logger *log.Logger) gin.HandlerFunc {
 			v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
 			ctx.Abort()
 			return
+		}
+		if sessions != nil {
+			if err := sessions.CheckSession(ctx, claims.UserId, claims.H); err != nil {
+				logger.WithContext(ctx).Warn().Uint("uid", claims.UserId).Err(err).Msg("session invalid")
+				v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
+				ctx.Abort()
+				return
+			}
 		}
 		ctx.Set("claims", claims)
 		ctx.Next()

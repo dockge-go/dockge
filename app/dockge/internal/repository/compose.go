@@ -6,12 +6,9 @@ package repository
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +20,10 @@ const composeOpTimeout = 3 * time.Minute
 
 // composeUpdateTimeout 是 update（pull + up）的超时，镜像拉取可能较慢。
 const composeUpdateTimeout = 10 * time.Minute
+
+// composeValidateTimeout 是草稿校验（docker compose config）的超时；
+// config 只做插值与结构渲染，正常毫秒级完成。
+const composeValidateTimeout = 15 * time.Second
 
 // composeLsItem 映射 `docker compose ls --all --format json` 的一行。
 type composeLsItem struct {
@@ -109,7 +110,7 @@ func fileExists(path string) bool {
 }
 
 // composeArgs 组装栈操作的 compose 参数：托管栈仅 -p；外部栈附带 -f 指向真实配置文件。
-func composeArgs(name string, dir string, files []string, extra ...string) []string {
+func composeArgs(name string, files []string, extra ...string) []string {
 	args := []string{"compose", "-p", name}
 	if len(files) > 0 {
 		for _, f := range files {
@@ -125,13 +126,10 @@ func composeArgs(name string, dir string, files []string, extra ...string) []str
 func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Container, error) {
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return []model.Container{}, nil
-		}
 		return nil, err
 	}
 	out, err := runDockerIn(ctx, stackDir, composeOpTimeout,
-		composeArgs(name, stackDir, files, "ps", "--all", "--format", "json")...)
+		composeArgs(name, files, "ps", "--all", "--format", "json")...)
 	if err != nil {
 		// compose v2 在项目不存在时可能报错，统一按无容器处理
 		return []model.Container{}, nil
@@ -183,7 +181,7 @@ func (r *Repository) StackOp(ctx context.Context, name, op string) (string, erro
 		return "", fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
 	}
 	runCompose := func(timeout time.Duration, args ...string) (string, error) {
-		return runDockerIn(ctx, stackDir, timeout, composeArgs(name, stackDir, files, args...)...)
+		return runDockerIn(ctx, stackDir, timeout, composeArgs(name, files, args...)...)
 	}
 	switch op {
 	case "start":
@@ -217,25 +215,30 @@ func (r *Repository) StackOp(ctx context.Context, name, op string) (string, erro
 	}
 }
 
+// ValidateCompose 对草稿执行 docker compose config：写入临时目录后以该目录
+// 为工作目录运行，零副作用（不落盘栈目录、不创建 docker 资源），defer 清理。
+// env 非空时一并写入 .env，使变量插值与真实部署一致。
+func (r *Repository) ValidateCompose(ctx context.Context, yaml, env string) (string, error) {
+	dir, err := os.MkdirTemp("", "dockge-validate-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(yaml), 0o600); err != nil {
+		return "", fmt.Errorf("write draft compose: %w", err)
+	}
+	if env != "" {
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
+			return "", fmt.Errorf("write draft env: %w", err)
+		}
+	}
+	return runDockerIn(ctx, dir, composeValidateTimeout,
+		"compose", "-p", "dockge-validate", "-f", "compose.yaml", "config")
+}
+
 // StackExecDir 返回栈 compose 操作的工作目录：
 // 托管栈为栈目录，外部栈为 compose 配置文件所在目录。
 func (r *Repository) StackExecDir(ctx context.Context, name string) (string, error) {
 	dir, _, err := r.resolveStackExec(ctx, name)
 	return dir, err
-}
-
-// StackLogsStream 返回栈组合日志的实时流（docker compose logs -f --tail N）。
-// 返回读取端，调用方负责在 ctx 取消前持续读取；找不到栈的 compose 文件时报错。
-func (r *Repository) StackLogsStream(ctx context.Context, name string, tail int) (<-chan string, error) {
-	if tail <= 0 || tail > 5000 {
-		tail = 200
-	}
-	dir, files, err := r.resolveStackExec(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	args := composeArgs(name, dir, files, "logs", "-f", "--tail", strconv.Itoa(tail), "--no-color")
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = dir
-	return streamCmd(ctx, cmd)
 }

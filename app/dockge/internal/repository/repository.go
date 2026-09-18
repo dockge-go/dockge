@@ -57,11 +57,6 @@ func New(i do.Injector) (*Repository, error) {
 	return repo, nil
 }
 
-// StacksDir 返回 compose 栈的根目录（绝对化，供 docker/podman CLI 设置工作目录）。
-func (r *Repository) StacksDir() string {
-	return r.stacksDir
-}
-
 // StackPath 返回指定栈的目录路径（已校验名的调用方负责传入合法 name）。
 func (r *Repository) StackPath(name string) string {
 	return filepath.Join(r.stacksDir, name)
@@ -80,10 +75,7 @@ func NewBBolt(i do.Injector) (*bbolt.DB, error) {
 			return nil, fmt.Errorf("create bbolt db dir: %w", err)
 		}
 	}
-	db, err := bbolt.Open(dsn, 0o600, &bbolt.Options{
-		Timeout:    5 * 0, // bbolt 无 busy_timeout，用默认 1s
-		NoGrowSync: false,
-	})
+	db, err := bbolt.Open(dsn, 0o600, &bbolt.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("open bbolt database %q: %w", dsn, err)
 	}

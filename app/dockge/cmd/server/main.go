@@ -48,10 +48,16 @@ func main() {
 		handler.Package,
 		server.Package,
 		func(i do.Injector) {
-			baseURL := fmt.Sprintf("http://%s:%d",
-				conf.GetString("http.host"),
-				conf.GetInt("http.port"),
-			)
+			// 外部可达地址（供 OIDC redirect URI 等使用）：
+			// 反向代理/TLS 终止在外层时，http.host:port 是内网地址，
+			// MUST 通过 http.base_url 配置公网地址（如 https://dockge.example.com）。
+			baseURL := conf.GetString("http.base_url")
+			if baseURL == "" {
+				baseURL = fmt.Sprintf("http://%s:%d",
+					conf.GetString("http.host"),
+					conf.GetInt("http.port"),
+				)
+			}
 			do.Provide(i, func(i do.Injector) (*authoidc.Manager, error) {
 				return authoidc.NewManager(context.Background(), conf, baseURL)
 			})

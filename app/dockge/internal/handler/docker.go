@@ -85,11 +85,7 @@ func (h *DockerHandler) ContainerStatusStream(ctx *gin.Context) {
 	messages, last := h.statusHub.Subscribe()
 	defer h.statusHub.Unsubscribe(messages)
 
-	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
-	ctx.Writer.Header().Set("Cache-Control", "no-cache")
-	ctx.Writer.Header().Set("Connection", "keep-alive")
-	ctx.Writer.Header().Set("X-Accel-Buffering", "no")
-	ctx.Writer.WriteHeader(http.StatusOK)
+	writeSSEHeaders(ctx)
 
 	write := func(payload []byte) bool {
 		if _, err := ctx.Writer.WriteString("data: " + string(payload) + "\n\n"); err != nil {
@@ -148,11 +144,7 @@ func (h *DockerHandler) StatsStream(ctx *gin.Context) {
 		handleServiceError(ctx, err)
 		return
 	}
-	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
-	ctx.Writer.Header().Set("Cache-Control", "no-cache")
-	ctx.Writer.Header().Set("Connection", "keep-alive")
-	ctx.Writer.Header().Set("X-Accel-Buffering", "no")
-	ctx.Writer.WriteHeader(http.StatusOK)
+	writeSSEHeaders(ctx)
 	done := ctx.Request.Context().Done()
 	for {
 		select {
@@ -183,11 +175,7 @@ func (h *DockerHandler) ContainerLogs(ctx *gin.Context) {
 		handleServiceError(ctx, err)
 		return
 	}
-	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
-	ctx.Writer.Header().Set("Cache-Control", "no-cache")
-	ctx.Writer.Header().Set("Connection", "keep-alive")
-	ctx.Writer.Header().Set("X-Accel-Buffering", "no")
-	ctx.Writer.WriteHeader(http.StatusOK)
+	writeSSEHeaders(ctx)
 	done := ctx.Request.Context().Done()
 	for {
 		select {

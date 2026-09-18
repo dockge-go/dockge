@@ -7,7 +7,6 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/pquerna/otp v1.4.0
 	github.com/prometheus/procfs v0.22.0
 	github.com/rs/zerolog v1.35.1
 	github.com/samber/do/v2 v2.1.0

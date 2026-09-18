@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dockge 愿景原型 · 目标形态</title>
+<style>
+/* ============================================================
+   Dockge 愿景原型 —— 按 DESIGN.md (Crate 设计系统) token 绘制
+   本文件是静态原型文档：标注「目标」的屏位为 F/D 项完成后的形态，
+   标注「现状」的屏位为已实现形态的对照。不含任何框架依赖。
+   ============================================================ */
+:root {
+  /* DESIGN.md §2 Color（浅色为规范原值；暗色为映射扩展） */
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --surface-warm: #fbfbfd;
+  --surface-dark: #1d1d1f;
+  --fg: #1d1d1f;
+  --fg-2: #424245;
+  --muted: #6e6e73;
+  --border: #d2d2d7;
+  --border-soft: #e8e8ed;
+  --accent: #0071e3;
+  --success: #16a34a;
+  --warn: #eab308;
+  --danger: #dc2626;
+  --console-fg: #e8e8ed;
+  --console-muted: #8e8e93;
+  --accent-soft: rgba(0, 113, 227, 0.10);
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  --success-soft: rgba(22, 163, 74, 0.10);
+  /* DESIGN.md §3 Typography */
+  --text-xl: 28px; --text-lg: 21px; --text-base: 17px; --text-sm: 14px; --text-xs: 12px;
+  --font-display: "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-text: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  /* DESIGN.md §6 Motion */
+  --motion-fast: 150ms; --motion-base: 220ms; --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+[data-theme="dark"] {
+  --bg: #161618;
+  --surface: #1d1d1f;
+  --surface-warm: #202024;
+  --surface-dark: #111113;
+  --fg: #f5f5f7;
+  --fg-2: #d2d2d7;
+  --muted: #8e8e93;
+  --border: #3a3a3e;
+  --border-soft: #2c2c30;
+  --accent: #2997ff;
+  --success: #30d158;
+  --warn: #ffd60a;
+  --danger: #ff453a;
+  --console-fg: #e8e8ed;
+  --console-muted: #8e8e93;
+  --accent-soft: rgba(41, 151, 255, 0.14);
+  --danger-soft: rgba(255, 69, 58, 0.12);
+  --success-soft: rgba(48, 209, 88, 0.14);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font-text);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.prototype-header {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 14px 32px;
+  display: flex; align-items: center; gap: 16px;
+}
+.prototype-header h1 { font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2px; }
+.prototype-header .proto-note { color: var(--muted); font-size: var(--text-xs); }
+.theme-toggle {
+  margin-left: auto; font-size: var(--text-xs); font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  color: var(--fg-2); background: var(--surface-warm);
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px;
+  transition: color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+main { max-width: 1200px; margin: 0 auto; padding: 40px 32px 96px; }
+.prototype-section { margin-bottom: 72px; }
+.section-meta { margin-bottom: 20px; }
+.section-meta .kicker {
+  font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.section-meta h2 { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; margin: 4px 0 6px; }
+.section-meta p { color: var(--fg-2); font-size: var(--text-sm); max-width: 68ch; }
+.badge-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.badge {
+  font-size: var(--text-xs); font-weight: 600; padding: 3px 10px; border-radius: 6px;
+  border: 1px solid var(--border-soft); color: var(--fg-2); background: var(--surface-warm);
+}
+.badge.target { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
+.badge.current { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, transparent); background: var(--success-soft); }
+.frame {
+  border: 1px solid var(--border-soft); border-radius: 14px; overflow: hidden;
+  background: var(--bg); box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.frame-bar {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border-bottom: 1px solid var(--border-soft);
+  padding: 10px 16px; font-size: var(--text-xs); color: var(--muted);
+}
+.frame-bar .dots { display: inline-flex; gap: 6px; }
+.frame-bar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+.frame-bar .url {
+  font-family: var(--font-mono); background: var(--bg); border: 1px solid var(--border-soft);
+  border-radius: 6px; padding: 2px 10px;
+}
+/* ---- 登录屏（2FA 目标形态） ---- */
+.login-stage { display: grid; place-items: center; padding: 56px 24px; background: var(--surface-warm); }
+.login-card {
+  width: 100%; max-width: 380px; background: var(--bg);
+  border: 1px solid var(--border-soft); border-radius: 14px; padding: 32px;
+}
+.login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; color: var(--fg); }
+.login-brand svg { color: var(--fg-2); }
+.login-brand strong { font-size: var(--text-lg); font-weight: 600; }
+.login-sub { color: var(--muted); font-size: var(--text-sm); margin-bottom: 24px; }
+.step-strip { display: flex; gap: 6px; margin-bottom: 22px; }
+.step-strip span { flex: 1; height: 3px; border-radius: 2px; background: var(--border-soft); }
+.step-strip span.done { background: var(--accent); }
+.field-label { display: block; font-size: var(--text-xs); font-weight: 600; color: var(--fg-2); margin: 14px 0 6px; }
+.field-input {
+  width: 100%; font: inherit; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px;
+  background: var(--bg); color: var(--fg); outline: none;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+}
+.field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field-input.mono { font-family: var(--font-mono); letter-spacing: 0.42em; text-align: center; font-size: var(--text-lg); }
+.field-help { font-size: var(--text-xs); color: var(--muted); margin-top: 6px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font: inherit; font-size: var(--text-sm); font-weight: 600; cursor: pointer;
+  border-radius: 9px; padding: 9px 16px; border: 1px solid transparent;
+  transition: transform var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
+}
+.btn:active { transform: scale(0.98); }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { opacity: 0.9; }
+.btn-secondary { background: var(--bg); color: var(--fg-2); border-color: var(--border); }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-block { width: 100%; margin-top: 22px; }
+.login-sso { margin-top: 18px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: var(--text-xs); }
+.login-sso::before, .login-sso::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+.sso-row { display: flex; gap: 8px; margin-top: 10px; }
+.sso-row .btn { flex: 1; }
+/* ---- 应用外壳 ---- */
+.app { display: grid; grid-template-columns: 232px 1fr; min-height: 560px; }
+.sidebar {
+  background: var(--surface); border-right: 1px solid var(--border-soft);
+  padding: 18px 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 0 10px 16px; color: var(--fg); }
+.sidebar-brand strong { font-size: var(--text-sm); font-weight: 600; }
+.nav-group-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--muted); padding: 14px 10px 6px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); color: var(--fg-2);
+  padding: 7px 10px; border-radius: 8px; text-decoration: none;
+}
+.nav-item svg { opacity: 0.75; }
+.nav-item:hover { background: var(--bg); color: var(--fg); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-item .count { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); }
+.sidebar-footer { margin-top: auto; padding: 12px 10px 0; border-top: 1px solid var(--border-soft); display: flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--muted); }
+.engine-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.content { background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  border-bottom: 1px solid var(--border-soft); padding: 12px 22px;
+}
+.topbar h3 { font-size: var(--text-sm); font-weight: 600; }
+.topbar .spacer { flex: 1; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; border: none; cursor: pointer;
+  background: transparent; color: var(--fg-2);
+}
+.icon-btn:hover { background: var(--surface); color: var(--accent); }
+.content-body { padding: 24px 22px; }
+/* ---- 设置页：账号安全 + 用户管理（F11/F4 目标形态） ---- */
+.settings-grid { display: grid; grid-template-columns: 1fr 1.35fr; gap: 18px; align-items: start; }
+.card { border: 1px solid var(--border-soft); border-radius: 12px; background: var(--bg); overflow: hidden; }
+.card-head { padding: 16px 18px 0; }
+.card-head h4 { font-size: var(--text-sm); font-weight: 600; }
+.card-head p { font-size: var(--text-xs); color: var(--muted); margin-top: 3px; }
+.card-body { padding: 14px 18px 18px; }
+.twofa-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.twofa-row:last-child { border-bottom: none; }
+.twofa-row .info { flex: 1; }
+.twofa-row .info strong { display: block; font-size: var(--text-sm); font-weight: 600; }
+.twofa-row .info span { font-size: var(--text-xs); color: var(--muted); }
+.switch { position: relative; width: 42px; height: 26px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch i {
+  position: absolute; inset: 0; border-radius: 999px; background: var(--border);
+  transition: background var(--motion-base) var(--ease-standard);
+}
+.switch i::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+.switch input:checked + i { background: var(--success); }
+.switch input:checked + i::after { transform: translateX(16px); }
+.user-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.user-table th {
+  text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border-soft);
+}
+.user-table td { padding: 10px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+.user-table tr:last-child td { border-bottom: none; }
+.user-cell strong { display: block; font-weight: 600; }
+.user-cell span { font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
+.role-pill {
+  display: inline-block; font-size: var(--text-xs); font-weight: 600; padding: 2px 9px; border-radius: 999px;
+}
+.role-pill.admin { color: var(--accent); background: var(--accent-soft); }
+.role-pill.member { color: var(--fg-2); background: var(--surface); }
+.state-dot { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--fg-2); }
+.state-dot i { width: 7px; height: 7px; border-radius: 50%; }
+.state-dot.on i { background: var(--success); }
+.state-dot.off i { background: var(--border); }
+.table-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.card-foot { border-top: 1px solid var(--border-soft); padding: 12px 18px; display: flex; justify-content: flex-end; gap: 8px; background: var(--surface-warm); }
+/* ---- 栈工作台：CodeMirror 目标形态 ---- */
+.stack-workbench { display: grid; grid-template-columns: 176px 1fr 208px; min-height: 470px; }
+.stack-rail { border-right: 1px solid var(--border-soft); background: var(--surface); padding: 14px 10px; }
+.rail-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 4px 10px 8px; }
+.rail-btn {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; font: inherit;
+  font-size: var(--text-sm); color: var(--fg-2); background: none; border: none;
+  border-radius: 8px; padding: 7px 10px; cursor: pointer; font-family: var(--font-mono); font-size: 13px;
+}
+.rail-btn:hover { background: var(--bg); color: var(--fg); }
+.rail-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.cm-wrap { background: var(--surface-dark); color: var(--console-fg); display: flex; flex-direction: column; min-width: 0; }
+.cm-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: var(--text-xs); color: var(--console-muted);
+}
+.cm-valid { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-weight: 600; }
+.cm-body { display: flex; flex: 1; overflow: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.65; }
+.cm-gutter {
+  padding: 12px 0; text-align: right; color: var(--console-muted); opacity: 0.55;
+  border-right: 1px solid rgba(255,255,255,0.08); user-select: none; min-width: 44px;
+}
+.cm-gutter div { padding: 0 10px; }
+.cm-code { padding: 12px 16px; white-space: pre; flex: 1; }
+.cm-code .ln-active { background: rgba(255,255,255,0.055); margin: 0 -16px; padding: 0 16px; border-left: 2px solid var(--accent); margin-left: -18px; padding-left: 16px; }
+.y-key { color: #2997ff; }
+.y-str { color: #30d158; }
+.y-num { color: #ff9f0a; }
+.y-com { color: #8e8e93; font-style: italic; }
+.y-anchor { color: #bf5af2; }
+.cm-status {
+  display: flex; gap: 16px; padding: 6px 14px; border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 11px; color: var(--console-muted); font-family: var(--font-mono);
+}
+.cm-out {
+  border-top: 1px solid rgba(255,255,255,0.08); padding: 10px 16px; max-height: 96px; overflow: auto;
+  font-family: var(--font-mono); font-size: 12px; color: var(--console-fg); white-space: pre-wrap;
+}
+.cm-out .prompt { color: var(--success); }
+.summary-rail { border-left: 1px solid var(--border-soft); background: var(--surface-warm); padding: 16px 14px; }
+.summary-rail h5 { font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin-bottom: 10px; }
+.count-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.count-cell { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 9px; padding: 8px 10px; }
+.count-cell span { display: block; font-size: 11px; color: var(--muted); }
+.count-cell strong { font-size: var(--text-lg); font-weight: 600; }
+.svc-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: var(--text-xs); }
+.svc-row:last-child { border-bottom: none; }
+.svc-row .grow { flex: 1; min-width: 0; }
+.svc-row .grow strong { display: block; font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
+.svc-row .grow span { color: var(--muted); font-size: 11px; }
+.status-badge { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.status-badge.running { color: var(--success); background: var(--success-soft); }
+.status-badge.exited { color: var(--muted); background: var(--surface); }
+.workbench-foot {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+  border-top: 1px solid var(--border-soft); background: var(--surface);
+  padding: 10px 18px; font-size: var(--text-xs); color: var(--muted);
+}
+.workbench-foot .grow { flex: 1; }
+/* ---- 仪表盘现状对照 ---- */
+.stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
+.stat-card { border: 1px solid var(--border-soft); border-radius: 12px; padding: 14px 16px; background: var(--bg); }
+.stat-card .lbl { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--muted); font-weight: 600; }
+.stat-card .val { font-family: var(--font-display); font-size: 26px; font-weight: 600; margin-top: 4px; }
+.stat-card .val.running { color: var(--success); }
+.stat-card .val.stopped { color: var(--muted); }
+.stat-card .val.warn { color: var(--warn); }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.dash-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
+.bar-stacked { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 12px 0 10px; background: var(--surface); }
+.bar-stacked .running { background: var(--success); }
+.bar-stacked .paused { background: var(--warn); }
+.bar-stacked .exited { background: var(--border); }
+.chart-legend { display: flex; gap: 14px; font-size: var(--text-xs); color: var(--muted); }
+.chart-legend span { display: inline-flex; gap: 5px; align-items: center; }
+.chart-legend i { width: 8px; height: 8px; border-radius: 50%; }
+.res-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: var(--text-xs); }
+.res-row .track { flex: 1; height: 8px; border-radius: 5px; background: var(--surface); overflow: hidden; }
+.res-row .fill { height: 100%; border-radius: 5px; }
+.res-row .fill.cpu { background: var(--accent); }
+.res-row .fill.mem { background: var(--success); }
+.res-row .val { font-family: var(--font-mono); min-width: 40px; text-align: right; }
+/* ---- 注释块 ---- */
+.anno {
+  margin-top: 14px; border-left: 3px solid var(--accent); background: var(--surface-warm);
+  border-radius: 0 10px 10px 0; padding: 12px 16px; font-size: var(--text-xs); color: var(--fg-2);
+}
+.anno strong { color: var(--fg); }
+.anno code { font-family: var(--font-mono); background: var(--surface); border: 1px solid var(--border-soft); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .settings-grid, .dash-grid { grid-template-columns: 1fr; }
+  .stack-workbench { grid-template-columns: 1fr; }
+  .stack-rail, .summary-rail { border: none; border-bottom: 1px solid var(--border-soft); }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<header class="prototype-header">
+  <h1>Dockge · 愿景原型</h1>
+  <span class="proto-note">目标形态静态原型 · 依据 DESIGN.md (Crate) token · 深色控制台岛恒暗</span>
+  <button class="theme-toggle" id="themeToggle" type="button">切换明暗</button>
+</header>
+
+<main>
+
+  <!-- ================= A. 登录 + 2FA（目标：F4） ================= -->
+  <section class="prototype-section">
+    <div class="section-meta">
+      <div class="kicker">Screen A · 认证</div>
+      <h2>登录页内建 2FA 步骤</h2>
+      <p>账号开启 TOTP 后，登录从「用户名密码」直接进入「验证码」步骤；不再出现 2FA 不可用的报错 toast。步骤进度条提示所处阶段。</p>
+      <div class="badge-row">
+        <span class="badge target">目标 · F4</span>
+        <span class="badge">后端已就绪：POST /v1/2fa</span>
+        <span class="badge">涉及 web/src/views/Login.tsx</span>
+      </div>
+    </div>
+    <div class="frame">
+      <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="url">127.0.0.1:5001/login</span></div>
+      <div class="login-stage">
+        <div class="login-card">
+          <div class="login-brand">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2m2 0h2m2 0h2M7 11h10"/></svg>
+            <strong>Dockge</strong>
+          </div>
+          <div class="login-sub">输入账号 <span class="mono" style="font-family:var(--font-mono)">admin</span> 的六位验证码</div>
+          <div class="step-strip"><span class="done"></span><span class="done"></span></div>
+          <label class="field-label" for="totp">验证码（TOTP）</label>
+          <input id="totp" class="field-input mono" inputmode="numeric" autocomplete="one-time-code" placeholder="••••••" value="482 91">
+          <p class="field-help">打开验证器 App 获取 30 秒时效的验证码；每码仅可使用一次（防重放）。</p>
+          <button class="btn btn-primary btn-block" type="button">验证并登录</button>
+          <div class="login-sso">单点登录</div>
+          <div class="sso-row">
+            <button class="btn btn-secondary" type="button">SSO · Authelia</button>
+            <button class="btn btn-secondary" type="button">SSO · OIDC</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="anno">
+      <strong>差距 → 目标</strong>：现状 <code>tokenRequired</code> 时直接 toast「暂不支持 2FA」（REQUIREMENTS P7）。目标流程：密码步骤 → <code>TokenRequired</code> → 验证码步骤 → <code>POST /v1/2fa</code> → 会话建立。设置页开启入口见 Screen B。
+    </div>
+  </section>
+
+  <!-- ================= B. 设置页：账号安全 + 用户管理（目标：F11 / F4 / D12） ================= -->
+  <section class="prototype-section">
+    <div class="section-meta">
+      <div class="kicker">Screen B · 管理</div>
+      <h2>设置页：2FA 开关与用户管理</h2>
+      <p>admin 在设置页管理成员账号（创建 / 停用 / 角色切换），并为本人扫码开启 TOTP。停用即失效：被停用用户的 token 下一次请求即 401。</p>
+      <div class="badge-row">
+        <span class="badge target">目标 · F11</span>
+        <span class="badge target">目标 · D12 接线</span>
+        <span class="badge">数据模型已就绪：Role / Active / Source</span>
+        <span class="badge">不开放自助注册（决策 Q1）</span>
+      </div>
+    </div>
+    <div class="frame">
+      <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="url">127.0.0.1:5001/settings</span></div>
+      <div class="app">
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2m2 0h2m2 0h2M7 11h10"/></svg>
+            <strong>Dockge</strong>
+          </div>
+          <div class="nav-group-label">概览</div>
+          <a class="nav-item" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘</a>
+          <div class="nav-group-label">资源</div>
+          <a class="nav-item" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13"/><rect x="3" y="4" width="4" height="4" rx="1"/></svg>容器<span class="count">7/9</span></a>
+          <a class="nav-item" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>栈<span class="count">4</span></a>
+          <a class="nav-item" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>镜像<span class="count">12</span></a>
+          <div class="nav-group-label">系统</div>
+          <a class="nav-item active" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</a>
+          <div class="sidebar-footer"><span class="engine-dot"></span><span>Docker 27.3.1</span></div>
+        </aside>
+        <div class="content">
+          <div class="topbar">
+            <h3>设置</h3>
+            <div class="spacer"></div>
+            <span style="font-size:var(--text-xs);color:var(--muted)">admin · <span class="mono" style="font-family:var(--font-mono)">本地账号</span></span>
+          </div>
+          <div class="content-body">
+            <div class="settings-grid">
+              <div class="card">
+                <div class="card-head"><h4>账号安全</h4><p>两步验证与登录保护</p></div>
+                <div class="card-body">
+                  <div class="twofa-row">
+                    <div class="info"><strong>TOTP 两步验证</strong><span id="twofaDesc">开启后登录需输入验证器 App 的六位验证码</span></div>
+                    <label class="switch"><input type="checkbox" id="twofaSwitch" aria-label="TOTP 两步验证"><i></i></label>
+                  </div>
+                  <div class="twofa-row">
+                    <div class="info"><strong>登出全部会话</strong><span>修改密码后旧会话自动失效（密码摘要绑定）</span></div>
+                    <button class="btn btn-secondary" type="button" style="font-size:var(--text-xs)">修改密码</button>
+                  </div>
+                </div>
+                <div class="card-foot"><button class="btn btn-secondary" type="button">导出备份码</button></div>
+              </div>
+              <div class="card">
+                <div class="card-head"><h4>用户管理</h4><p>admin 可管理成员账号；停用立即终止其全部会话</p></div>
+                <div class="card-body" style="padding-top:4px">
+                  <table class="user-table">
+                    <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>来源</th><th style="text-align:right">操作</th></tr></thead>
+                    <tbody>
+                      <tr>
+                        <td class="user-cell"><strong>admin</strong><span>管理员 · 本地</span></td>
+                        <td><span class="role-pill admin">admin</span></td>
+                        <td><span class="state-dot on"><i></i>活跃</span></td>
+                        <td style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted)">local</td>
+                        <td><div class="table-actions"><button class="icon-btn" title="修改角色" aria-label="修改角色"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button></div></td>
+                      </tr>
+                      <tr>
+                        <td class="user-cell"><strong>ops</strong><span>运维 · 反代开户</span></td>
+                        <td><span class="role-pill member">member</span></td>
+                        <td><span class="state-dot on"><i></i>活跃</span></td>
+                        <td style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted)">proxy</td>
+                        <td><div class="table-actions"><button class="icon-btn" title="停用（立即失效其会话）" aria-label="停用用户"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></button><button class="icon-btn" title="删除" aria-label="删除用户"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--danger)"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button></div></td>
+                      </tr>
+                      <tr>
+                        <td class="user-cell"><strong>ci-deploy</strong><span>部署机 · OIDC</span></td>
+                        <td><span class="role-pill member">member</span></td>
+                        <td><span class="state-dot off"><i></i>已停用</span></td>
+                        <td style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted)">oidc</td>
+                        <td><div class="table-actions"><button class="icon-btn" title="启用" aria-label="启用用户"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg></button></div></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-foot"><button class="btn btn-primary" type="button">创建成员账号</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="anno">
+      <strong>差距 → 目标</strong>：需新增 <code>/v1/users</code> 5 端点（列表/创建/停用/角色/删除，F11）并在 StrictAuth 中接线 <code>CheckSession</code>（D12：校验用户存在、启用且密码哈希未变——实现已在 <code>service/auth.go</code> 就位）。member 角色仅可观栈与容器，管理类操作（删除/清理/用户管理）仅 admin。
+    </div>
+  </section>
+
+  <!-- ================= C. 栈工作台：CodeMirror（目标：P1 编辑器升级） ================= -->
+  <section class="prototype-section">
+    <div class="section-meta">
+      <div class="kicker">Screen C · 编辑</div>
+      <h2>栈工作台：YAML 工作台（CodeMirror 6）</h2>
+      <p>语法高亮、行号、当前行指示与括号配对；docker run 转换结果直接落入编辑器；保存或部署失败不关闭工作区，compose 输出贴在编辑器下方。深色控制台岛不随主题切换。</p>
+      <div class="badge-row">
+        <span class="badge target">目标 · CodeMirror 6</span>
+        <span class="badge current">三栏工作台 · 已实现</span>
+        <span class="badge">composerize · 已实现</span>
+      </div>
+    </div>
+    <div class="frame">
+      <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="url">127.0.0.1:5001/stacks</span></div>
+      <div class="stack-workbench">
+        <aside class="stack-rail">
+          <div class="rail-label">文件</div>
+          <button class="rail-btn active" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>compose.yaml</button>
+          <button class="rail-btn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/></svg>.env</button>
+          <div class="rail-label">工具</div>
+          <button class="rail-btn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>栈日志</button>
+        </aside>
+        <div class="cm-wrap">
+          <div class="cm-toolbar">
+            <span class="cm-valid"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>YAML 有效</span>
+            <span>compose · services: 2 · 行 14，列 27</span>
+            <span style="margin-left:auto">⌘S 保存</span>
+          </div>
+          <div class="cm-body">
+            <div class="cm-gutter" aria-hidden="true"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div><div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div></div>
+            <div class="cm-code"><span class="y-com"># 反代 + 应用 + 缓存的三服务栈</span>
+<span class="y-key">services</span><span class="y-anchor">:</span>
+  <span class="y-key">web</span><span class="y-anchor">:</span>
+    <span class="y-key">image</span><span class="y-anchor">:</span> <span class="y-str">nginx:1.27-alpine</span>
+    <span class="y-key">ports</span><span class="y-anchor">:</span>
+      - <span class="y-str">"8080:80"</span>
+    <span class="y-key">depends_on</span><span class="y-anchor">:</span> <span class="y-anchor">[</span><span class="y-str">app</span><span class="y-anchor">]</span>
+<span class="ln-active">  <span class="y-key">app</span><span class="y-anchor">:</span>
+    <span class="y-key">image</span><span class="y-anchor">:</span> <span class="y-str">ghcr.io/example/app:2.4.1</span>
+    <span class="y-key">environment</span><span class="y-anchor">:</span>
+      - <span class="y-str">DATABASE_URL=${DB_URL}</span>
+    <span class="y-key">deploy</span><span class="y-anchor">:</span>
+      <span class="y-key">replicas</span><span class="y-anchor">:</span> <span class="y-num">2</span></span>
+  <span class="y-key">redis</span><span class="y-anchor">:</span>
+    <span class="y-key">image</span><span class="y-anchor">:</span> <span class="y-str">redis:7-alpine</span>
+
+<span class="y-key">x-dockge</span><span class="y-anchor">:</span>
+  <span class="y-key">urls</span><span class="y-anchor">:</span>
+    - <span class="y-str">http://localhost:8080</span></div>
+          </div>
+          <div class="cm-status"><span>UTF-8</span><span>YAML</span><span>空格：2</span><span>16 行</span></div>
+          <div class="cm-out"><span class="prompt">$ docker compose up -d --remove-orphans</span>
+ Container web-1  Started
+ Container app-1  Started
+ Container app-2  Started
+ Container redis-1  Healthy</div>
+        </div>
+        <aside class="summary-rail">
+          <h5>部署摘要</h5>
+          <div class="count-grid">
+            <div class="count-cell"><span>服务</span><strong>3</strong></div>
+            <div class="count-cell"><span>端口</span><strong>1</strong></div>
+            <div class="count-cell"><span>数据卷</span><strong>0</strong></div>
+            <div class="count-cell"><span>网络</span><strong>default</strong></div>
+          </div>
+          <h5>服务状态</h5>
+          <div class="svc-row"><div class="grow"><strong>web</strong><span>web-1 · nginx:1.27</span></div><span class="status-badge running">运行中</span></div>
+          <div class="svc-row"><div class="grow"><strong>app</strong><span>app-1 · 运行中</span></div><span class="status-badge running">运行中</span></div>
+          <div class="svc-row"><div class="grow"><strong>app</strong><span>app-2 · 运行中</span></div><span class="status-badge running">运行中</span></div>
+          <div class="svc-row"><div class="grow"><strong>redis</strong><span>redis-1 · 健康检查通过</span></div><span class="status-badge running">运行中</span></div>
+        </aside>
+        <div class="workbench-foot">
+          <span>校验或部署失败不会关闭工作区，草稿保留</span>
+          <span class="grow"></span>
+          <button class="btn btn-secondary" type="button">仅保存</button>
+          <button class="btn btn-primary" type="button">保存并重新部署</button>
+        </div>
+      </div>
+    </div>
+    <div class="anno">
+      <strong>差距 → 目标</strong>：三栏结构、部署摘要、composerize、失败不关工作区均已实现；唯一差距是编辑器本体从 textarea 升级为 CodeMirror 6（DESIGN.md 登记在案的接受债务，PROJECT_SPEC §7.3 P1：YAML 高亮 + 行号 + 软换行）。
+    </div>
+  </section>
+
+  <!-- ================= D. 仪表盘（现状对照） ================= -->
+  <section class="prototype-section">
+    <div class="section-meta">
+      <div class="kicker">Screen D · 概览</div>
+      <h2>仪表盘（已实现形态 · 对照）</h2>
+      <p>统计卡、容器状态占比、SSE 实时 CPU/内存与最近容器——此屏位当前产品已具备，展示基线气质：数据密度、tabular 数字、安静的脉冲指示。</p>
+      <div class="badge-row"><span class="badge current">现状 · 已实现</span><span class="badge">SSE · /docker/stats/stream</span></div>
+    </div>
+    <div class="frame">
+      <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="url">127.0.0.1:5001/</span></div>
+      <div style="padding: 22px; background: var(--bg);">
+        <div class="stat-grid">
+          <div class="stat-card"><div class="lbl">运行中 <span class="live-dot"></span></div><div class="val running">7</div></div>
+          <div class="stat-card"><div class="lbl">已停止</div><div class="val stopped">2</div></div>
+          <div class="stat-card"><div class="lbl">已暂停</div><div class="val warn">0</div></div>
+          <div class="stat-card"><div class="lbl">栈</div><div class="val">4</div></div>
+          <div class="stat-card"><div class="lbl">镜像</div><div class="val">12</div></div>
+        </div>
+        <div class="dash-grid">
+          <div class="card">
+            <div class="card-head"><h4>容器状态</h4></div>
+            <div class="card-body">
+              <div class="bar-stacked"><span class="running" style="width:78%"></span><span class="paused" style="width:0%"></span><span class="exited" style="width:22%"></span></div>
+              <div class="chart-legend"><span><i style="background:var(--success)"></i>运行中 7</span><span><i style="background:var(--warn)"></i>已暂停 0</span><span><i style="background:var(--border)"></i>已停止 2</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h4>资源占用 <span class="live-dot"></span></h4></div>
+            <div class="card-body">
+              <div class="res-row"><span style="width:34px">CPU</span><div class="track"><div class="fill cpu" style="width:23%"></div></div><span class="val">23%</span></div>
+              <div class="res-row"><span style="width:34px">内存</span><div class="track"><div class="fill mem" style="width:41%"></div></div><span class="val">41%</span></div>
+              <p style="font-size:var(--text-xs);color:var(--muted);margin-top:8px">已用 3.2 GB / 总量 8.0 GB · 2 秒帧推送</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="anno"><strong>基线说明</strong>：本屏为已实现能力（REST 快照 + SSE 流），用于对照目标屏位的气质与密度——目标不是重做它，而是在同一系统上补齐 A/B/C 三屏位。</div>
+  </section>
+
+</main>
+
+<script>
+// 主题切换：data-theme 写 <html>，控制台岛（.cm-wrap）恒暗由 CSS 变量保证。
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("themeToggle");
+  var saved = null;
+  try { saved = localStorage.getItem("dockge.theme"); } catch (e) {}
+  if (saved === "dark" || saved === "light") root.dataset.theme = saved;
+  else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) root.dataset.theme = "dark";
+  btn.addEventListener("click", function () {
+    var next = root.dataset.theme === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("dockge.theme", next); } catch (e) {}
+  });
+  // 2FA 开关：原型内演示开启后的文案变化
+  var sw = document.getElementById("twofaSwitch");
+  var desc = document.getElementById("twofaDesc");
+  sw.addEventListener("change", function () {
+    desc.textContent = sw.checked ? "已开启 · 登录时需输入六位验证码" : "开启后登录需输入验证器 App 的六位验证码";
+  });
+})();
+</script>
+</body>
+</html>

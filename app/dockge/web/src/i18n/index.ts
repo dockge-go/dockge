@@ -16,8 +16,6 @@ const dicts: Record<LocaleKey, Record<MsgKey, string>> = {
   "en-US": enUS,
 };
 
-export const locales = { "zh-CN": "简体中文", "en-US": "English" } as const;
-
 // 兼容设计定稿时代存的 'zh' / 'en' 短码
 function normalize(v: string | null): LocaleKey | null {
   if (v === "zh-CN" || v === "zh") return "zh-CN";

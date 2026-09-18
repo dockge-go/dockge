@@ -63,6 +63,7 @@ const enUS: Record<MsgKey, string> = {
   "dash.labelImages": "Images",
   "dash.containerStatus": "Container Status",
   "dash.resourceUsage": "Resource Usage",
+  "dash.statsUnavailable": "Live stats unavailable: /proc is Linux-only; the current platform or runtime does not provide it. The stream keeps retrying.",
   "dash.recentContainers": "Recent Containers",
   "dash.noContainers": "No containers",
   "legend.running": "{n} running",
@@ -115,7 +116,6 @@ const enUS: Record<MsgKey, string> = {
   "toast.sseRunning": "Entered running state",
   "toast.sseExited": "Stopped",
   "toast.ssePaused": "Paused",
-  "toast.2faNotSupported": "Two-factor authentication is enabled for this account; login here is not supported",
 
   "stack.new": "New Stack",
   "stack.name": "Stack name",
@@ -219,6 +219,7 @@ const enUS: Record<MsgKey, string> = {
   "login.title": "Sign in to container management console",
   "login.ssoLogin": "SSO Login",
   "login.proxyHint": "Authenticated by reverse proxy, click to enter console",
+  "login.oidcFailed": "SSO login failed: {msg}",
   "login.orPassword": "Or sign in with username and password",
   "login.loggingIn": "Signing in…",
   "login.login": "Sign in",
@@ -259,8 +260,9 @@ const enUS: Record<MsgKey, string> = {
   "form.usernamePlaceholder": "Username",
   "form.passwordPlaceholder": "Password",
 
-  "editor.validYaml": "YAML structure valid",
-  "editor.missingServices": "Missing services section",
+  "editor.checking": "Checking…",
+  "editor.validCompose": "Compose valid",
+  "editor.invalidCompose": "{n} issues",
   "editor.exitFullscreen": "Exit fullscreen",
   "editor.fullscreen": "Fullscreen",
   "editor.lines": "{n} lines",
@@ -286,6 +288,55 @@ const enUS: Record<MsgKey, string> = {
   "pagination.pageOf": "Page {p} / {n}",
   "pagination.prev": "Previous",
   "pagination.next": "Next",
+
+  // ---- View titles / resource counts (j/k navigable) ----
+  "view.containers": "Containers",
+  "view.stacks": "Stacks",
+  "view.settings": "Settings",
+  "view.sysinfo": "System Info",
+  "res.subtitle": "{total} total · {running} running",
+  "res.countImages": "{n} images",
+  "res.countNetworks": "{n} networks",
+  "res.countVolumes": "{n} volumes",
+  "img.repository": "Repository",
+
+  // ---- Container states ----
+  "state.running": "Running",
+  "state.exited": "Exited",
+  "state.paused": "Paused",
+  "state.created": "Created",
+  "state.dead": "Dead",
+  "state.restarting": "Restarting",
+  "state.removing": "Removing",
+
+  // ---- Login · 2FA step ----
+
+  // ---- Account security ----
+  "sec.title": "Account Security",
+
+  // ---- User management (admin) ----
+  "users.title": "Users",
+  "users.desc": "Deactivating or deleting an account invalidates all of its sessions immediately.",
+  "users.role": "Role",
+  "users.source": "Source",
+  "users.actions": "Actions",
+  "users.active": "Active",
+  "users.disabled": "Disabled",
+  "users.enabled": "Enabled",
+  "users.enable": "Enable",
+  "users.disable": "Disable",
+  "users.create": "Create member",
+  "users.creating": "Creating…",
+  "users.created": "Account {name} created",
+  "users.roleChanged": "Role updated",
+  "users.deleted": "Account {name} deleted",
+  "users.confirmDelete": "Delete user {name}?",
+  "users.confirmDeleteDesc": "All sessions of this account are invalidated immediately. This cannot be undone.",
+  "users.sourceLocal": "Local",
+  "users.sourceProxy": "Reverse proxy",
+  "users.sourceOIDC": "OIDC",
+  "users.passwordHelp": "At least 6 characters with letters and digits",
+  "users.roleHelp": "Members can view and operate resources; admins manage users and settings",
 
 };
 

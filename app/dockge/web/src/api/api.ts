@@ -1,13 +1,13 @@
 // API 客户端：统一响应包（{code,message,data}）解析、JWT 注入与 401 处理。
 // 接口契约与后端 app/dockge/api/v1 的 DTO 一一对应。
 
-export const TOKEN_KEY = "crate_token";
+const TOKEN_KEY = "crate_token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY) ?? "";
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(
     public code: number,
     message: string,
@@ -27,16 +27,15 @@ export interface UserData {
   id: number;
   username: string;
   nickname: string;
-  twoFA?: boolean;
+  role?: string; // admin / member
 }
 
-export interface LoginData {
+interface LoginData {
   accessToken: string;
   user: UserData;
-  tokenRequired?: boolean;
 }
 
-export interface StackSummary {
+interface StackSummary {
   name: string;
   status: number; // 0 未知 / 1 未部署 / 2 已创建 / 3 运行中 / 4 已停止
   statusLabel: string;
@@ -45,7 +44,7 @@ export interface StackSummary {
   configFiles?: string;
 }
 
-export interface StackContainer {
+interface StackContainer {
   id: string;
   name: string;
   service?: string;
@@ -88,20 +87,21 @@ export interface NetworkInspectData {
   IPAM?: { Config?: Array<{ Subnet?: string; Gateway?: string }> };
 }
 
+/** 镜像列表行（REST 与 SSE 帧同形状，对齐后端 v1.DockerImageData）。 */
 export interface ImageRow {
   id: string;
   repo: string;
   tag: string;
-  size: string;
-  created: string;
+  sizeBytes: number;
+  createdAt: number;
 }
 
-export interface VolumeRow {
+interface VolumeRow {
   name: string;
   driver: string;
 }
 
-export interface DockerInfo {
+interface DockerInfo {
   version: string;
   os: string;
   arch: string;
@@ -109,6 +109,7 @@ export interface DockerInfo {
   stacksRunning: number;
   containersTotal: number;
   containersRunning: number;
+  imagesTotal?: number;
 }
 
 export interface VersionSummary {
@@ -118,23 +119,16 @@ export interface VersionSummary {
   arch: string;
 }
 
-export interface ContainerStat {
-  id: string;
-  name: string;
-  cpu: number;
-  memPercent: number;
-  memUsage: string;
-}
-
 export interface DockerStats {
   cpuUsage: number;
   memUsage: number;
   memTotalMB: number;
   memPercent: number;
-  containers?: ContainerStat[];
+  /** 非空 = 错误帧：stats_unavailable（数据源不可用，如非 Linux 平台） */
+  error?: string;
 }
 
-export interface DfCategory {
+interface DfCategory {
   type: string;
   count: number;
   active: number;
@@ -142,7 +136,7 @@ export interface DfCategory {
   reclaimable: string;
 }
 
-export interface VersionCheck {
+interface VersionCheck {
   latestVersion: string;
   currentVersion: string;
   hasUpdate: boolean;
@@ -152,6 +146,15 @@ export interface AuthConfig {
   mode: "jwt" | "proxy" | "oidc" | "disable";
   providers: Array<{ id: string; info: { label: string } }>;
   disableAuth: boolean;
+}
+
+export interface UserRow {
+  id: number;
+  username: string;
+  nickname: string;
+  role: string; // admin / member
+  active: boolean;
+  source: string; // local / proxy / oidc
 }
 
 /** REST 聚合后的前端资源快照。 */
@@ -165,11 +168,34 @@ export interface Snapshot {
   volumes: VolumeRow[];
 }
 
+/** 状态帧携带的实时资源计数（后端随 docker events 同帧推送；采集失败帧会省略）。 */
+export interface ResourceCounts {
+  containersTotal: number;
+  containersRunning: number;
+  stacksTotal: number;
+  stacksRunning: number;
+  imagesTotal: number;
+}
+
 export interface ContainerStatusFrame {
   containers: Array<Pick<ContainerRow, "id" | "state" | "status">>;
+  counts?: ResourceCounts;
+  images?: ImageRow[];
 }
 
 export type StackOp = "start" | "stop" | "restart" | "down" | "update";
+
+/** /stacks/validate 的单条诊断（对齐 v1.StackValidateError）；line=0 表示无法定位行。 */
+export interface ValidateError {
+  line: number;
+  message: string;
+}
+
+/** /stacks/validate 响应（对齐 v1.StackValidateResponse）。 */
+export interface ValidateResult {
+  valid: boolean;
+  errors: ValidateError[];
+}
 
 // ---- 请求核心 ----
 
@@ -211,6 +237,16 @@ export const api = {
   changePassword: (oldPassword: string, newPassword: string) =>
     request<void>("PUT", "/me/password", { oldPassword, newPassword }),
 
+  // 用户管理（admin）
+  users: () => request<{ list: UserRow[] }>("GET", "/users"),
+  createUser: (username: string, password: string, role: string) =>
+    request<UserRow>("POST", "/users", { username, password, role }),
+  setUserRole: (id: number, role: string) =>
+    request<void>("PUT", `/users/${id}/role`, { role }),
+  setUserActive: (id: number, active: boolean) =>
+    request<void>("PUT", `/users/${id}/active`, { active }),
+  removeUser: (id: number) => request<void>("DELETE", `/users/${id}`),
+
   // 栈
   stacks: () => request<{ list: StackSummary[] }>("GET", "/stacks"),
   stack: (name: string) => request<StackDetail>("GET", `/stacks/${encodeURIComponent(name)}`),
@@ -221,6 +257,8 @@ export const api = {
   deleteStack: (name: string) => request<void>("DELETE", `/stacks/${encodeURIComponent(name)}`),
   stackOp: (name: string, op: StackOp) =>
     request<{ output: string }>("POST", `/stacks/${encodeURIComponent(name)}/${op}`),
+  validateStack: (yaml: string, env: string) =>
+    request<ValidateResult>("POST", "/stacks/validate", { yaml, env }),
 
   // docker 资源
   version: () => request<VersionSummary>("GET", "/docker/version"),

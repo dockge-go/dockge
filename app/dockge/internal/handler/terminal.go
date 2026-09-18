@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
-	"regexp"
 	"strconv"
 
 	"dockge/app/dockge/internal/repository"
@@ -14,9 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/samber/do/v2"
 )
-
-// containerIDPattern 校验 exec 终端参数中的容器 ID/名称。
-var containerIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // upgrader 把 HTTP 连接升级为 WebSocket；站点自带 JWT 认证，放行全部来源。
 var upgrader = websocket.Upgrader{
@@ -68,7 +64,7 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 	var cmd *exec.Cmd
 	switch typ {
 	case "exec":
-		if !containerIDPattern.MatchString(name) {
+		if !repository.ContainerIDPattern.MatchString(name) {
 			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "非法容器 ID: " + name})
 			return
 		}
@@ -151,7 +147,7 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 			_ = pty.SetWinsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 			continue
 		}
-		// compose 日志为只读流，忽略输入；宿主 shell 与容器 exec 转发原始字节
+		// compose 日志为只读流，忽略输入；容器 exec 转发原始字节
 		if typ != "compose-logs" {
 			_, _ = ptmx.Write(msg)
 		}

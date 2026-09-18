@@ -32,16 +32,3 @@ func Shake256(password string) string {
 	h.Read(b)
 	return hex.EncodeToString(b)
 }
-
-// NeedRehash 判断 bcrypt 哈希是否需要重新哈希（成本因子不足或格式异常）。
-func NeedRehash(hash string) bool {
-	if len(hash) < 20 {
-		return true
-	}
-	// bcrypt 成本因子在 $2a$XX$ 中，XX < 10 时需要重哈希
-	cost := hash[4:6]
-	if cost < "10" {
-		return true
-	}
-	return false
-}

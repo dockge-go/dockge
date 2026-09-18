@@ -1,5 +1,7 @@
 # Resource Workspaces Implementation Plan
 
+> **状态：已完成（2026-09-08）**。本计划对应的 OpenSpec 变更 `redesign-resource-workspaces` 已全部实现并归档（tasks 13/13）；本文仅作历史过程记录保留，当前有效规格见 `openspec/specs/`，勿据此执行。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 Dockge 资源页重构为统一分页、共享实时数据和 Apple System 主从工作区，并重点完成 Compose 优先的 Stack 新建/编辑流程。

@@ -1,5 +1,5 @@
 // 数据卷管理：列表（SSE 快照）、删除（确认）、清理未使用。
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { HardDrive, Trash2 } from "lucide-solid";
 import { api } from "../api/api";
 import { refresh, snapshot, toast } from "../store/index";
@@ -8,10 +8,16 @@ import { EmptyState, SectionHeader } from "../components/widgets";
 import { errText } from "../api/format";
 import { Pagination } from "../components/Pagination";
 import { clampPage, paginate } from "../lib/pagination";
+import { listNav } from "../lib/listnav";
 import { t } from "../i18n";
 
 export function Volumes() {
   const [page, setPage] = createSignal(1);
+  let tableHost: HTMLTableElement | undefined;
+
+  onMount(() => {
+    if (tableHost) onCleanup(listNav(tableHost));
+  });
   const rows = () => snapshot()?.volumes ?? [];
   const visibleRows = createMemo(() => paginate(rows(), page()));
 
@@ -43,7 +49,7 @@ export function Volumes() {
     <div class="view-section">
       <SectionHeader
         title={t("vol.title")}
-        subtitle={`${rows().length} volumes`}
+        subtitle={t("res.countVolumes", { n: rows().length })}
         actions={
           <button class="btn-clear" onClick={() => void prune()}>
             {t("vol.clearUnused", { n: rows().length })}
@@ -54,7 +60,7 @@ export function Volumes() {
         when={rows().length > 0}
         fallback={<EmptyState title={t("vol.empty")} icon={<HardDrive size={44} />} />}
       >
-        <table class="data-table">
+        <table class="data-table" ref={tableHost}>
           <thead>
             <tr>
               <th>{t("net.detailName")}</th>
@@ -65,7 +71,7 @@ export function Volumes() {
           <tbody>
             <For each={visibleRows()}>
               {(v) => (
-                <tr>
+                <tr tabindex="0">
                   <td class="cell-main">{v.name}</td>
                   <td class="text-dim">{v.driver}</td>
                   <td class="row-actions-cell">

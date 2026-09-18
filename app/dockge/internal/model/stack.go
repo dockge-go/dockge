@@ -64,21 +64,12 @@ type Container struct {
 	Stack   string // 所属 compose 项目（来自容器 label，可空）
 }
 
-// ContainerStat 是单次容器资源采样（CPU/内存）。
-type ContainerStat struct {
-	ID         string
-	Name       string
-	CPUPercent float64
-	MemPercent float64
-	MemUsage   string // 人类可读用量，如 "120MiB / 3.8GiB"
-}
-
 // DfCategory 是一类 Docker 资源的磁盘占用汇总。
 type DfCategory struct {
-	Type            string
-	Count           int
-	Active          int
-	SizeBytes       int64
+	Type             string
+	Count            int
+	Active           int
+	SizeBytes        int64
 	ReclaimableBytes int64
 }
 
@@ -119,33 +110,16 @@ const (
 )
 
 // DockgeUser 是 dockge 控制台的登录账号。
+// （TOTP/2FA 字段已随功能移除：存量 bbolt 记录中的旧 JSON 字段在反序列化时被忽略。）
 type DockgeUser struct {
-	ID             uint
-	Username       string
-	Nickname       string
-	Password       string // bcrypt 哈希
-	Role           string // admin / member；空值兼容旧数据，按 admin 处理
-	Active         bool
-	Timezone       string
-	TwofaSecret    string // TOTP 密钥（base32）
-	TwofaStatus    bool
-	TwofaLastToken string // 上次 TOTP 令牌（防重放）
-	Source         string // "local" | "oidc" | "proxy"，记录账号来源
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-// IsAdmin 报告该用户是否具备管理员权限。
-// 历史数据（多用户改造前）无角色字段，一律视为 admin。
-func (u *DockgeUser) IsAdmin() bool {
-	return u.Role == "" || u.Role == RoleAdmin
-}
-
-// ---- 设置 ----
-
-// Setting 是 setting 表的一行。
-type Setting struct {
-	Key   string
-	Value string // JSON 字符串或纯文本
-	Type  string // 分组：general / security / ...
+	ID        uint
+	Username  string
+	Nickname  string
+	Password  string // bcrypt 哈希
+	Role      string // admin / member；空值兼容旧数据，按 admin 处理
+	Active    bool
+	Timezone  string
+	Source    string // "local" | "oidc" | "proxy"，记录账号来源
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

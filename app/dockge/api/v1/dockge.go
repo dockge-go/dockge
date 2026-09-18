@@ -20,7 +20,6 @@ type Error struct {
 }
 
 // Error 实现 error 接口，返回业务错误消息。
-
 func (e *Error) Error() string { return e.Message }
 
 var (
@@ -36,7 +35,6 @@ var (
 func newError(code int, msg string) *Error { return &Error{Code: code, Message: msg} }
 
 // HandleSuccess 以统一响应包（code=0）写出成功结果；data 为 nil 时填充空对象。
-
 func HandleSuccess(ctx *gin.Context, data interface{}) {
 	if data == nil {
 		data = map[string]interface{}{}
@@ -45,7 +43,6 @@ func HandleSuccess(ctx *gin.Context, data interface{}) {
 }
 
 // HandleError 以统一响应包写出失败结果；无法归类的错误按未知错误处理。
-
 func HandleError(ctx *gin.Context, httpCode int, err error, data interface{}) {
 	if data == nil {
 		data = map[string]string{}
@@ -69,7 +66,6 @@ type MeUserData struct {
 	Username string `json:"username"`
 	Nickname string `json:"nickname"`
 	Role     string `json:"role,omitempty"` // admin / member
-	TwoFA    bool   `json:"twoFA,omitempty"`
 }
 
 type ChangePasswordRequest struct {
@@ -82,15 +78,9 @@ type SetupRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
-type TwoFARequest struct {
-	Username string `json:"username" binding:"required"`
-	Token    string `json:"token" binding:"required"`
-}
-
 type LoginResponseData struct {
-	AccessToken   string     `json:"accessToken"`
-	User          MeUserData `json:"user"`
-	TokenRequired bool       `json:"tokenRequired,omitempty"`
+	AccessToken string     `json:"accessToken"`
+	User        MeUserData `json:"user"`
 }
 
 // -------- 设置 --------
@@ -145,6 +135,23 @@ type StackOpResponse struct {
 	Output string `json:"output"`
 }
 
+type StackValidateRequest struct {
+	Yaml string `json:"yaml" binding:"required"`
+	Env  string `json:"env"`
+}
+
+// StackValidateError 是一条校验诊断；Line 为 0 表示无法定位行号，
+// 前端应降级为列表呈现而非行内标记。
+type StackValidateError struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+}
+
+type StackValidateResponse struct {
+	Valid  bool                 `json:"valid"`
+	Errors []StackValidateError `json:"errors"`
+}
+
 // -------- docker --------
 
 type DockerVersionData struct {
@@ -159,8 +166,23 @@ type DockerContainersData struct {
 }
 
 // ContainerStatusFrame 是容器状态长连接的单帧数据。
+// 容器状态、资源计数与镜像列表同帧同源：前端一次性原子写入快照，
+// 徽标计数（imagesTotal/stacksTotal 等）与列表永远一致——要删一起删、要留一起留。
+// 后端任一资源采集失败则本帧整帧不推（下一事件或 30s 兜底重试），前端保持旧值。
 type ContainerStatusFrame struct {
 	Containers []ContainerStatusData `json:"containers"`
+	Counts     *ResourceCounts       `json:"counts,omitempty"`
+	Images     []DockerImageData     `json:"images,omitempty"`
+}
+
+// ResourceCounts 是侧栏徽标与仪表盘卡片的实时计数（由 docker events
+// container+image 事件驱动，与容器状态同帧推送）。
+type ResourceCounts struct {
+	ContainersTotal   int `json:"containersTotal"`
+	ContainersRunning int `json:"containersRunning"`
+	StacksTotal       int `json:"stacksTotal"`
+	StacksRunning     int `json:"stacksRunning"`
+	ImagesTotal       int `json:"imagesTotal"`
 }
 
 // ContainerStatusData 仅携带会实时变化的容器字段。
@@ -196,22 +218,17 @@ type DockerInfoData struct {
 	StacksRunning     int    `json:"stacksRunning"`
 	ContainersTotal   int    `json:"containersTotal"`
 	ContainersRunning int    `json:"containersRunning"`
-}
-
-type ContainerStatData struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	CPU        float64 `json:"cpu"`
-	MemPercent float64 `json:"memPercent"`
-	MemUsage   string  `json:"memUsage"`
+	ImagesTotal       int    `json:"imagesTotal"`
 }
 
 type DockerStatsData struct {
-	CPUUsage   float64             `json:"cpuUsage"`             // 系统 CPU 使用率（0-100 百分数）
-	MemUsage   float64             `json:"memUsage"`             // 已用内存 MB
-	MemTotalMB float64             `json:"memTotalMB"`           // 内存总量 MB
-	MemPercent float64             `json:"memPercent"`           // 内存使用率（0-100 百分数）
-	Containers []ContainerStatData `json:"containers,omitempty"` // 运行中容器的单次采样
+	CPUUsage   float64 `json:"cpuUsage"`   // 系统 CPU 使用率（0-100 百分数）
+	MemUsage   float64 `json:"memUsage"`   // 已用内存 MB
+	MemTotalMB float64 `json:"memTotalMB"` // 内存总量 MB
+	MemPercent float64 `json:"memPercent"` // 内存使用率（0-100 百分数）
+	// Error 非空表示本帧为错误帧（码语义，前端映射文案）：
+	// stats_unavailable = 数据源不可用（如非 Linux 平台无 /proc），流保持 2s 重试兼作心跳。
+	Error string `json:"error,omitempty"`
 }
 
 type DockerDfCategory struct {
@@ -220,10 +237,6 @@ type DockerDfCategory struct {
 	Active           int    `json:"active"`
 	SizeBytes        int64  `json:"sizeBytes"`
 	ReclaimableBytes int64  `json:"reclaimableBytes"`
-}
-
-type DockerDfData struct {
-	List []DockerDfCategory `json:"list"`
 }
 
 // -------- composerize --------
@@ -253,17 +266,9 @@ type DockerImageData struct {
 	CreatedUnix int64  `json:"createdAt"` // 构建时间 unix 秒
 }
 
-type DockerImagesData struct {
-	List []DockerImageData `json:"list"`
-}
-
 type DockerVolumeData struct {
 	Name   string `json:"name"`
 	Driver string `json:"driver"`
-}
-
-type DockerVolumesData struct {
-	List []DockerVolumeData `json:"list"`
 }
 
 // DockerNetworkData 是网络列表的一行。
@@ -283,39 +288,27 @@ type NetworkCreateRequest struct {
 	Subnet string `json:"subnet"`
 }
 
-// -------- 用户管理 --------
+// -------- 用户管理（admin 专用） --------
 
-// UserData 是用户管理列表与响应中的用户视图（不含凭证）。
-type UserData struct {
+type UserRow struct {
 	ID       uint   `json:"id"`
 	Username string `json:"username"`
 	Nickname string `json:"nickname"`
-	Role     string `json:"role"`
-	Source   string `json:"source,omitempty"` // local / proxy / oidc
-	Active   bool   `json:"active"`
-	TwoFA    bool   `json:"twoFA"`
+	Role     string `json:"role"`   // admin / member
+	Active   bool   `json:"active"` // 停用即时失效其全部会话（CheckSession）
+	Source   string `json:"source"` // local / proxy / oidc
 }
 
-type UserListData struct {
-	List []UserData `json:"list"`
-}
-
-// CreateUserRequest 是管理员创建用户的请求体。
-type CreateUserRequest struct {
+type UserCreateRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required,min=6"`
-	Nickname string `json:"nickname"`
-	Role     string `json:"role"`
+	Role     string `json:"role"` // 空 = member
 }
 
-// UpdateUserRequest 是管理员更新用户资料的请求体。
-type UpdateUserRequest struct {
-	Nickname string `json:"nickname"`
-	Role     string `json:"role"`
-	Active   *bool  `json:"active"`
+type UserRoleRequest struct {
+	Role string `json:"role" binding:"required"`
 }
 
-// ResetUserPasswordRequest 是管理员重置用户密码的请求体。
-type ResetUserPasswordRequest struct {
-	NewPassword string `json:"newPassword" binding:"required,min=6"`
+type UserActiveRequest struct {
+	Active bool `json:"active"`
 }

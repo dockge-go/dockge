@@ -1,24 +1,13 @@
 package authproxy
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
+	"dockge/app/dockge/internal/testutil"
 )
 
-func viperFromYAML(t *testing.T, yaml string) *viper.Viper {
-	t.Helper()
-	conf := viper.New()
-	conf.SetConfigType("yaml")
-	if err := conf.ReadConfig(strings.NewReader(yaml)); err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	return conf
-}
-
 func TestFromViperDefaults(t *testing.T) {
-	cfg := FromViper(viperFromYAML(t, "security:\n  auth:\n    proxy: {}\n"))
+	cfg := FromViper(testutil.ViperFromYAML(t, "security:\n  auth:\n    proxy: {}\n"))
 	if cfg.UsernameHeader != "X-Forwarded-User" {
 		t.Errorf("UsernameHeader = %q, want X-Forwarded-User", cfg.UsernameHeader)
 	}
@@ -31,7 +20,7 @@ func TestFromViperDefaults(t *testing.T) {
 }
 
 func TestFromViperFull(t *testing.T) {
-	cfg := FromViper(viperFromYAML(t, `
+	cfg := FromViper(testutil.ViperFromYAML(t, `
 security:
   auth:
     proxy:
@@ -51,7 +40,7 @@ security:
 }
 
 func TestTrustedIP(t *testing.T) {
-	cfg := FromViper(viperFromYAML(t, `
+	cfg := FromViper(testutil.ViperFromYAML(t, `
 security:
   auth:
     proxy:
@@ -75,7 +64,7 @@ security:
 }
 
 func TestTrustedIPFailClosedWithoutCIDRs(t *testing.T) {
-	cfg := FromViper(viperFromYAML(t, "security:\n  auth:\n    proxy: {}\n"))
+	cfg := FromViper(testutil.ViperFromYAML(t, "security:\n  auth:\n    proxy: {}\n"))
 	if cfg.TrustedIP("127.0.0.1:5001") {
 		t.Error("TrustedIP accepted loopback with no trusted_proxies configured; must fail closed")
 	}

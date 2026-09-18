@@ -3,24 +3,13 @@ package authoidc
 import (
 	"context"
 	"reflect"
-	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
+	"dockge/app/dockge/internal/testutil"
 )
 
-func viperFromYAML(t *testing.T, yaml string) *viper.Viper {
-	t.Helper()
-	conf := viper.New()
-	conf.SetConfigType("yaml")
-	if err := conf.ReadConfig(strings.NewReader(yaml)); err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	return conf
-}
-
 func TestParseProviders(t *testing.T) {
-	conf := viperFromYAML(t, `
+	conf := testutil.ViperFromYAML(t, `
 security:
   auth:
     mode: oidc
@@ -63,7 +52,7 @@ security:
 }
 
 func TestProviderIDsSorted(t *testing.T) {
-	conf := viperFromYAML(t, `
+	conf := testutil.ViperFromYAML(t, `
 security:
   auth:
     oidc:
@@ -82,7 +71,7 @@ security:
 }
 
 func TestNewManagerSkipsDiscoveryWhenNotOIDC(t *testing.T) {
-	conf := viperFromYAML(t, `
+	conf := testutil.ViperFromYAML(t, `
 security:
   auth:
     mode: jwt

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { Play, RotateCw, Square, Trash2 } from "lucide-solid";
 
 import { api, type ContainerInspectData } from "../api/api";
@@ -8,6 +8,7 @@ import { Pagination } from "../components/Pagination";
 import { EmptyState, LiveDot, SectionHeader, StatusBadge } from "../components/widgets";
 import { errText, shortId } from "../api/format";
 import { clampPage, paginate } from "../lib/pagination";
+import { listNav } from "../lib/listnav";
 import { pendingContainer, refresh, setPendingContainer, snapshot, toast } from "../store/index";
 import { t } from "../i18n";
 
@@ -17,6 +18,11 @@ export function Containers() {
   const [detailId, setDetailId] = createSignal<string | null>(null);
   const [inspect, setInspect] = createSignal<ContainerInspectData | null>(null);
   const [busy, setBusy] = createSignal(false);
+  let listHost: HTMLDivElement | undefined;
+
+  onMount(() => {
+    if (listHost) onCleanup(listNav(listHost));
+  });
 
   const rows = createMemo(() => {
     const containers = snapshot()?.containers ?? [];
@@ -89,8 +95,8 @@ export function Containers() {
   return (
     <div class="view-section workspace-view">
       <SectionHeader
-        title={<>Containers <LiveDot /></>}
-        subtitle={`${snapshot()?.docker.containersTotal ?? 0} total · ${snapshot()?.docker.containersRunning ?? 0} running · SSE`}
+        title={<>{t("view.containers")} <LiveDot /></>}
+        subtitle={t("res.subtitle", { total: snapshot()?.docker.containersTotal ?? 0, running: snapshot()?.docker.containersRunning ?? 0 })}
         actions={
           <>
             <button class="btn-clear" onClick={() => void pruneStopped()}>{t("ctn.clearStopped", { n: stoppedCount() })}</button>
@@ -105,7 +111,7 @@ export function Containers() {
       <div class="master-detail" classList={{ "has-detail": Boolean(current()) }}>
         <section class="master-pane" aria-label={t("aria.containerList")}>
           <Show when={rows().length > 0} fallback={<EmptyState title={showAll() ? t("ctn.noEmpty") : t("ctn.noRunning")} />}>
-            <div class="resource-list">
+            <div class="resource-list" ref={listHost}>
               <For each={visibleRows()}>
                 {(container) => (
                   <article

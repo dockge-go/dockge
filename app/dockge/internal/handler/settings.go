@@ -22,7 +22,6 @@ type SettingsHandler struct {
 }
 
 // NewSettingsHandler 构造设置处理器，由注入容器调用。
-
 func NewSettingsHandler(i do.Injector) (*SettingsHandler, error) {
 	return &SettingsHandler{
 		Handler:         do.MustInvoke[*Handler](i),
@@ -63,19 +62,17 @@ func (h *SettingsHandler) AuthConfig(ctx *gin.Context) {
 	type providerInfo struct {
 		Label string `json:"label"`
 	}
-	pList := make([]struct {
+	type providerItem struct {
 		ID   string       `json:"id"`
 		Info providerInfo `json:"info"`
-	}, 0, len(providers))
+	}
+	pList := make([]providerItem, 0, len(providers))
 	for _, id := range authoidc.ProviderIDs(providers) {
 		info := providerInfo{Label: "SSO"}
 		if l := providers[id].Label; l != "" {
 			info.Label = l
 		}
-		pList = append(pList, struct {
-			ID   string       `json:"id"`
-			Info providerInfo `json:"info"`
-		}{ID: id, Info: info})
+		pList = append(pList, providerItem{ID: id, Info: info})
 	}
 	v1.HandleSuccess(ctx, gin.H{
 		"mode":        mode,

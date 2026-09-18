@@ -10,7 +10,7 @@ bootstrap: migrate web-build
 run:
 	go run ./app/dockge/cmd/server -conf config/dockge/local.yml
 
-# 数据库迁移（破坏性重建所有表：dockge_users/setting/agent，种子 admin/123456）+ 创建 stacks 目录
+# 数据库迁移（初始化 users/settings bucket，种子 admin/123456）+ 创建 stacks 目录
 migrate:
 	go run ./app/dockge/cmd/migration
 

@@ -22,20 +22,25 @@ func TestSplitRepoTag(t *testing.T) {
 	}
 }
 
-// TestFormatBytes 校验字节的人类可读格式化。
-func TestFormatBytes(t *testing.T) {
-	tests := []struct {
-		bytes float64
-		want  string
-	}{
-		{0, "0.0B"},
-		{512, "512.0B"},
-		{1024 * 1024, "1.0MB"},
-		{1.5 * 1024 * 1024 * 1024, "1.5GB"},
+// TestImageRefPattern 锁定镜像引用校验：带 tag/digest/registry 端口的合法引用
+// MUST 放行（曾因复用容器 ID 模式而全数误拒），注入元字符 MUST 拒绝。
+func TestImageRefPattern(t *testing.T) {
+	valid := []string{
+		"hello-world", "hello-world:latest", "nginx:alpine",
+		"registry.example.com:5000/app/web:v1.2", "busybox@sha256:abc123def",
+		"docker.io/library/redis:7-alpine",
 	}
-	for _, tt := range tests {
-		if got := formatBytes(tt.bytes); got != tt.want {
-			t.Errorf("formatBytes(%v) = %q, want %q", tt.bytes, got, tt.want)
+	invalid := []string{
+		"", "nginx:alpine; rm -rf /", "a b", "nginx$(id)", "nginx`id`", ":tag",
+	}
+	for _, ref := range valid {
+		if !ImageRefPattern.MatchString(ref) {
+			t.Errorf("ImageRefPattern 拒绝了合法引用 %q", ref)
+		}
+	}
+	for _, ref := range invalid {
+		if ImageRefPattern.MatchString(ref) {
+			t.Errorf("ImageRefPattern 放行了非法引用 %q", ref)
 		}
 	}
 }

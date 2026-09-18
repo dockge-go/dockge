@@ -16,8 +16,13 @@ import (
 	"time"
 )
 
-// containerIDPattern 校验容器 ID/名称/镜像引用（CLI 参数），防止参数注入。
-var containerIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+// ContainerIDPattern 校验容器 ID/名称（CLI 参数），防止参数注入。
+var ContainerIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+// ImageRefPattern 校验镜像引用（CLI 参数），防止参数注入。
+// 覆盖 registry:port/name:tag 与 name@sha256:digest 两种形态；
+// 空格与 shell 元字符均不在集合内。
+var ImageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/@:-]*$`)
 
 // runDocker 执行 docker CLI 并返回标准输出（stderr 拼入错误信息）。
 func runDocker(ctx context.Context, timeout time.Duration, args ...string) (string, error) {

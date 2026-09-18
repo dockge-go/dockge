@@ -29,7 +29,7 @@ func (r *Repository) DockerImages(ctx context.Context) ([]model.Image, error) {
 					repo, tag = splitRepoTag(s.Names[0])
 				}
 				result = append(result, model.Image{
-					ID:          truncateID(s.ID),
+					ID:          shortID(s.ID),
 					Repo:        repo,
 					Tag:         tag,
 					SizeBytes:   s.Size,
@@ -51,11 +51,11 @@ func (r *Repository) DockerImages(ctx context.Context) ([]model.Image, error) {
 			continue
 		}
 		var item struct {
-			ID           string `json:"ID"`
-			Repository   string `json:"Repository"`
-			Tag          string `json:"Tag"`
-			Size         string `json:"Size"`
-			CreatedAt    string `json:"CreatedAt"`
+			ID         string `json:"ID"`
+			Repository string `json:"Repository"`
+			Tag        string `json:"Tag"`
+			Size       string `json:"Size"`
+			CreatedAt  string `json:"CreatedAt"`
 		}
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			return nil, fmt.Errorf("parse docker images output: %w", err)
@@ -90,7 +90,7 @@ func (r *Repository) RemoveImage(ctx context.Context, id string) error {
 // PullImage 拉取镜像（耗时操作，超时放宽到 10 分钟）。
 // podman client 优先，不可用时降级 docker CLI，返回组合输出。
 func (r *Repository) PullImage(ctx context.Context, reference string) (string, error) {
-	if !containerIDPattern.MatchString(reference) || strings.Contains(reference, " ") {
+	if !ImageRefPattern.MatchString(reference) || strings.Contains(reference, " ") {
 		return "", fmt.Errorf("非法镜像引用: %s", reference)
 	}
 	pullCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -102,11 +102,30 @@ func (r *Repository) PullImage(ctx context.Context, reference string) (string, e
 			r.logger.Warn().Err(err).Msg("podman pull failed, falling back to docker CLI")
 		}
 	}
-	out, err := runDocker(pullCtx, 10*time.Minute, "pull", reference)
-	if err != nil {
-		return out, err
+	return runDocker(pullCtx, 10*time.Minute, "pull", reference)
+}
+
+// ImageCount 返回本地镜像总数（轻量计数：podman 摘要长度或 docker images -q 行数，
+// 不拉取全量元数据——供状态帧与仪表盘高频调用）。
+func (r *Repository) ImageCount(ctx context.Context) (int, error) {
+	if r.podman != nil && r.podman.IsAvailable() {
+		summaries, err := images.List(ctx, &images.ListOptions{})
+		if err == nil {
+			return len(summaries), nil
+		}
+		r.logger.Warn().Err(err).Msg("podman image count failed, falling back to docker CLI")
 	}
-	return out, nil
+	out, err := runDocker(ctx, 15*time.Second, "images", "-q")
+	if err != nil {
+		return 0, fmt.Errorf("docker images: %w", err)
+	}
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // splitRepoTag 把 "nginx:alpine" 拆成仓库名与标签（跳过 registry 端口冒号）。
@@ -116,18 +135,6 @@ func splitRepoTag(repoTag string) (string, string) {
 		return repoTag, "latest"
 	}
 	return repoTag[:idx], repoTag[idx+1:]
-}
-
-// formatBytes 把字节数格式化为人类可读大小（1024 进制，供 stats 内存用量展示）。
-func formatBytes(b float64) string {
-	units := []string{"B", "KB", "MB", "GB", "TB"}
-	for _, u := range units {
-		if b < 1024 {
-			return fmt.Sprintf("%.1f%s", b, u)
-		}
-		b /= 1024
-	}
-	return fmt.Sprintf("%.1fPB", b)
 }
 
 // dockerSizeUnits 是 docker CLI 人类可读大小到字节数的乘数表：

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	v1 "dockge/app/dockge/api/v1"
 	"dockge/app/dockge/internal/service"
@@ -75,6 +74,16 @@ func (h *StackHandler) Update(ctx *gin.Context) {
 	v1.HandleSuccess(ctx, nil)
 }
 
+// Validate 处理草稿校验请求；校验结果是数据，失败也走成功响应。
+func (h *StackHandler) Validate(ctx *gin.Context) {
+	var req v1.StackValidateRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
+		return
+	}
+	v1.HandleSuccess(ctx, h.stackService.Validate(ctx, &req))
+}
+
 // Delete 处理删除栈请求（down + 删目录）。
 func (h *StackHandler) Delete(ctx *gin.Context) {
 	data, err := h.stackService.Delete(ctx, ctx.Param("name"))
@@ -83,37 +92,6 @@ func (h *StackHandler) Delete(ctx *gin.Context) {
 		return
 	}
 	v1.HandleSuccess(ctx, data)
-}
-
-// Logs 处理栈组合日志的 SSE 实时流请求（docker compose logs -f --tail=N）。
-// EventSource 无法自定义请求头，认证依赖 StrictAuth 的 ?token= 支持。
-func (h *StackHandler) Logs(ctx *gin.Context) {
-	tail, _ := strconv.Atoi(ctx.DefaultQuery("tail", "200"))
-	stream, err := h.stackService.LogsStream(ctx.Request.Context(), ctx.Param("name"), tail)
-	if err != nil {
-		handleServiceError(ctx, err)
-		return
-	}
-	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
-	ctx.Writer.Header().Set("Cache-Control", "no-cache")
-	ctx.Writer.Header().Set("Connection", "keep-alive")
-	ctx.Writer.Header().Set("X-Accel-Buffering", "no")
-	ctx.Writer.WriteHeader(http.StatusOK)
-	done := ctx.Request.Context().Done()
-	for {
-		select {
-		case <-done:
-			return
-		case line, ok := <-stream:
-			if !ok {
-				return
-			}
-			if _, err := ctx.Writer.WriteString("data: " + line + "\n\n"); err != nil {
-				return
-			}
-			ctx.Writer.Flush()
-		}
-	}
 }
 
 // Op 处理栈生命周期操作（start/stop/restart/down/update）。

@@ -209,7 +209,7 @@ func (r *Repository) ContainerLogsStream(ctx context.Context, id string, tail in
 	if tail <= 0 || tail > 5000 {
 		tail = 200
 	}
-	if !containerIDPattern.MatchString(id) {
+	if !ContainerIDPattern.MatchString(id) {
 		return nil, fmt.Errorf("非法容器 ID: %s", id)
 	}
 	if r.podman != nil && r.podman.IsAvailable() {
@@ -294,7 +294,7 @@ func podmanToContainers(items []podmanTypes.ListContainer) []model.Container {
 			})
 		}
 		result = append(result, model.Container{
-			ID:     truncateID(ic.ID),
+			ID:     shortID(ic.ID),
 			Name:   name,
 			Image:  ic.Image,
 			State:  state,
@@ -305,85 +305,10 @@ func podmanToContainers(items []podmanTypes.ListContainer) []model.Container {
 	return result
 }
 
-func truncateID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
-}
-
-// ContainerStats 返回全部运行中容器的单次资源采样。
-// podman bindings 优先（类型化数值）；不可用时降级 docker stats CLI（字符串解析）。
-func (r *Repository) ContainerStats(ctx context.Context) ([]model.ContainerStat, error) {
-	if r.podman != nil && r.podman.IsAvailable() {
-		ch, err := containers.Stats(ctx, []string{}, &containers.StatsOptions{
-			All:      boolPtr(false),
-			Stream:   boolPtr(false),
-			Interval: intPtr(1),
-		})
-		if err == nil {
-			report := <-ch
-			if report.Error != nil {
-				return nil, report.Error
-			}
-			result := make([]model.ContainerStat, 0, len(report.Stats))
-			for _, s := range report.Stats {
-				result = append(result, model.ContainerStat{
-					ID:         truncateID(s.ContainerID),
-					Name:       s.Name,
-					CPUPercent: s.CPU,
-					MemPercent: s.MemPerc,
-					MemUsage:   formatBytes(float64(s.MemUsage)),
-				})
-			}
-			return result, nil
-		}
-		r.logger.Warn().Err(err).Msg("podman stats failed, falling back to docker CLI")
-	}
-	out, err := runDocker(ctx, 30*time.Second, "stats", "--no-stream", "--format", "{{json .}}")
-	if err != nil {
-		return nil, fmt.Errorf("docker stats: %w", err)
-	}
-	result := make([]model.ContainerStat, 0)
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var item struct {
-			ID       string `json:"ID"`
-			Name     string `json:"Name"`
-			CPUPerc  string `json:"CPUPerc"`
-			MemPerc  string `json:"MemPerc"`
-			MemUsage string `json:"MemUsage"`
-		}
-		if err := json.Unmarshal([]byte(line), &item); err != nil {
-			return nil, fmt.Errorf("parse docker stats output: %w", err)
-		}
-		result = append(result, model.ContainerStat{
-			ID:         item.ID,
-			Name:       item.Name,
-			CPUPercent: parsePercent(item.CPUPerc),
-			MemPercent: parsePercent(item.MemPerc),
-			MemUsage:   item.MemUsage,
-		})
-	}
-	return result, nil
-}
-
-// parsePercent 解析 "1.23%" 形式的百分数；无法解析时返回 0。
-func parsePercent(s string) float64 {
-	v, _ := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(s), "%"), 64)
-	return v
-}
-
-// intPtr 返回整数指针（podman bindings 选项用）。
-func intPtr(i int) *int { return &i }
-
 // ContainerInspect 返回容器底层详情（env/mounts/网络等完整信息）。
 // podman bindings 优先；不可用时降级 docker inspect CLI。
 func (r *Repository) ContainerInspect(ctx context.Context, id string) (map[string]any, error) {
-	if !containerIDPattern.MatchString(id) {
+	if !ContainerIDPattern.MatchString(id) {
 		return nil, fmt.Errorf("非法容器 ID: %s", id)
 	}
 	if r.podman != nil && r.podman.IsAvailable() {

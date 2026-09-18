@@ -69,22 +69,6 @@ func (h *AuthHandler) NeedSetup(ctx *gin.Context) {
 	v1.HandleSuccess(ctx, gin.H{"needSetup": need})
 }
 
-// Check2FA 验证 2FA 验证码。
-func (h *AuthHandler) Check2FA(ctx *gin.Context) {
-	var req v1.TwoFARequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
-		return
-	}
-	clientIP := ctx.ClientIP()
-	data, err := h.authService.Check2FA(ctx, &req, clientIP)
-	if err != nil {
-		v1.HandleError(ctx, http.StatusUnauthorized, err, nil)
-		return
-	}
-	v1.HandleSuccess(ctx, data)
-}
-
 // Me 返回当前用户信息。
 func (h *AuthHandler) Me(ctx *gin.Context) {
 	data, err := h.authService.Me(ctx, GetUserIdFromCtx(ctx))
@@ -103,27 +87,6 @@ func (h *AuthHandler) ChangePassword(ctx *gin.Context) {
 		return
 	}
 	if err := h.authService.ChangePassword(ctx, GetUserIdFromCtx(ctx), &req); err != nil {
-		handleServiceError(ctx, err)
-		return
-	}
-	v1.HandleSuccess(ctx, nil)
-}
-
-// Enable2FA 启用 2FA，返回 QR 码 URL。
-func (h *AuthHandler) Enable2FA(ctx *gin.Context) {
-	uid := GetUserIdFromCtx(ctx)
-	url, err := h.authService.Enable2FA(ctx, uid)
-	if err != nil {
-		handleServiceError(ctx, err)
-		return
-	}
-	v1.HandleSuccess(ctx, gin.H{"qrCodeURL": url})
-}
-
-// Disable2FA 禁用 2FA。
-func (h *AuthHandler) Disable2FA(ctx *gin.Context) {
-	uid := GetUserIdFromCtx(ctx)
-	if err := h.authService.Disable2FA(ctx, uid); err != nil {
 		handleServiceError(ctx, err)
 		return
 	}

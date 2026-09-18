@@ -22,7 +22,6 @@ import (
 )
 
 // NewHTTPServer 装配静态资源、路由、中间件并返回 HTTP server。
-
 func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 	logger := do.MustInvoke[*log.Logger](i)
 	j := do.MustInvoke[*jwt.JWT](i)
@@ -34,6 +33,7 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 	settingsHandler := do.MustInvoke[*handler.SettingsHandler](i)
 	composerizeHandler := do.MustInvoke[*handler.ComposerizeHandler](i)
 	terminalHandler := do.MustInvoke[*handler.TerminalHandler](i)
+	usersHandler := do.MustInvoke[*handler.UsersHandler](i)
 
 	if do.MustInvoke[*viper.Viper](i).GetString("env") == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -86,7 +86,6 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			noAuthRouter.POST("/login", authHandler.Login)
 			noAuthRouter.POST("/setup", authHandler.Setup)
 			noAuthRouter.GET("/setup/need", authHandler.NeedSetup)
-			noAuthRouter.POST("/2fa", authHandler.Check2FA)
 			noAuthRouter.GET("/health", dockerHandler.Health)
 			noAuthRouter.GET("/robots.txt", func(c *gin.Context) {
 				c.String(200, "User-agent: *\nDisallow: /")
@@ -120,17 +119,16 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 		if security.AuthMode(do.MustInvoke[*viper.Viper](i)) == security.ModeProxy {
 			strictAuthRouter.Use(middleware.ProxyAuth(authService, logger, do.MustInvoke[*viper.Viper](i)))
 		}
-		strictAuthRouter.Use(middleware.StrictAuth(j, logger))
+		strictAuthRouter.Use(middleware.StrictAuth(j, logger, authService))
 		{
 			strictAuthRouter.GET("/me", authHandler.Me)
 			strictAuthRouter.PUT("/me/password", authHandler.ChangePassword)
-			strictAuthRouter.POST("/me/2fa/enable", authHandler.Enable2FA)
-			strictAuthRouter.DELETE("/me/2fa", authHandler.Disable2FA)
 			strictAuthRouter.GET("/me/disableauth", authHandler.GetDisableAuth)
 			strictAuthRouter.POST("/me/disableauth", authHandler.ToggleDisableAuth)
 
 			strictAuthRouter.GET("/stacks", stackHandler.List)
 			strictAuthRouter.POST("/stacks", stackHandler.Create)
+			strictAuthRouter.POST("/stacks/validate", stackHandler.Validate)
 			strictAuthRouter.GET("/stacks/:name", stackHandler.Get)
 			strictAuthRouter.PUT("/stacks/:name", stackHandler.Update)
 			strictAuthRouter.DELETE("/stacks/:name", stackHandler.Delete)
@@ -165,6 +163,15 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 
 			strictAuthRouter.GET("/settings/globalenv", settingsHandler.GetGlobalEnv)
 			strictAuthRouter.PUT("/settings/globalenv", settingsHandler.SetGlobalEnv)
+
+			usersAdmin := strictAuthRouter.Group("/users", usersHandler.RequireAdmin)
+			{
+				usersAdmin.GET("", usersHandler.List)
+				usersAdmin.POST("", usersHandler.Create)
+				usersAdmin.PUT("/:id/role", usersHandler.SetRole)
+				usersAdmin.PUT("/:id/active", usersHandler.SetActive)
+				usersAdmin.DELETE("/:id", usersHandler.Delete)
+			}
 
 			strictAuthRouter.POST("/composerize", composerizeHandler.Convert)
 

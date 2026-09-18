@@ -45,24 +45,26 @@ setUnauthorizedHandler(() => {
   setUser(null);
 });
 
-export async function login(username: string, password: string) {
-  const data = await api.login(username, password);
-  if (data.tokenRequired) throw new Error(t("toast.2faNotSupported"));
+/** 建立/复位会话的公共收尾：token 入库、先拉全量快照（保证 SSE 初帧到达时
+ * snapshot 已就绪、不被丢弃），再预热用户与实时流。 */
+async function completeLogin(data: { accessToken: string; user: UserData }) {
   setToken(data.accessToken);
   setUser(data.user);
   setAuthed(true);
   await refresh(false);
   startContainerStatusStream();
+}
+
+/** 密码登录：建立会话并预热用户与实时流。 */
+export async function login(username: string, password: string) {
+  const data = await api.login(username, password);
+  completeLogin(data);
   return data.user;
 }
 
 export async function setup(username: string, password: string) {
   const data = await api.setup(username, password);
-  setToken(data.accessToken);
-  setUser(data.user);
-  setAuthed(true);
-  await refresh(false);
-  startContainerStatusStream();
+  completeLogin(data);
 }
 
 export function logout() {
@@ -100,9 +102,33 @@ const STATE_TOAST: Record<string, { labelKey: "toast.sseRunning" | "toast.sseExi
   paused: { labelKey: "toast.ssePaused", type: "info" },
 };
 
+/** 精准增量：仅刷新容器列表与仪表盘计数（新容器由 SSE 帧发现时调用，
+ * 不触碰栈/镜像/网络/卷等其他资源，避免全局重拉）。 */
+async function refreshContainers() {
+  const prev = snapshot();
+  if (!prev) return;
+  try {
+    const [containers, info] = await Promise.all([api.containers(), api.info()]);
+    setSnapshot({ ...prev, containers: containers.list, docker: info });
+  } catch {
+    // 静默失败：下一帧/下次全量刷新会自愈
+  }
+}
+
+// SSE 状态帧只携带 id/state/status：列表里没有的新容器无法由帧补全字段，
+// 检测到未知 id 时节流触发精准容器刷新（5s 节流：事件驱动帧本身已防抖，
+// 无风暴风险；新容器应在秒级入列而非等用户手动刷新）。
+let lastUnknownContainerRefresh = 0;
+
 function applyContainerStatus(frame: ContainerStatusFrame) {
   const prev = snapshot();
   if (!prev) return;
+  const known = new Set(prev.containers.map((container) => container.id));
+  const hasUnknown = frame.containers.some((container) => !known.has(container.id));
+  if (hasUnknown && Date.now() - lastUnknownContainerRefresh > 5_000) {
+    lastUnknownContainerRefresh = Date.now();
+    void refreshContainers();
+  }
   const changed = new Map(frame.containers.map((container) => [container.id, container.state]));
   for (const container of prev.containers) {
     const state = changed.get(container.id);
@@ -112,11 +138,21 @@ function applyContainerStatus(frame: ContainerStatusFrame) {
     }
   }
   const containers = mergeContainerStatus(prev.containers, frame);
-  setSnapshot({ ...prev, containers, docker: {
-    ...prev.docker,
-    containersTotal: containers.length,
-    containersRunning: containers.filter((container) => container.state === "running").length,
-  } });
+  const images = frame.images;
+  const c = frame.counts;
+  setSnapshot({
+    ...prev,
+    containers,
+    // 镜像列表与计数同帧同源：帧带全量镜像时整体替换，徽标与列表一起删/一起留。
+    ...(images ? { images } : {}),
+    docker: {
+      ...prev.docker,
+      containersTotal: c?.containersTotal ?? containers.length,
+      containersRunning: c?.containersRunning ?? containers.filter((container) => container.state === "running").length,
+      ...(c ? { stacksTotal: c.stacksTotal, stacksRunning: c.stacksRunning } : {}),
+      imagesTotal: c?.imagesTotal ?? (images ? images.length : prev.docker.imagesTotal),
+    },
+  });
 }
 
 let es: EventSource | null = null;

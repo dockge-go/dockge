@@ -17,7 +17,6 @@ type DockerService interface {
 	Info(ctx context.Context) (*v1.DockerInfoData, error)
 	Networks(ctx context.Context) ([]v1.DockerNetworkData, error)
 	NetworkInspect(ctx context.Context, name string) (map[string]any, error)
-	Stats(ctx context.Context) (*v1.DockerStatsData, error)
 	StatsStream(ctx context.Context) (<-chan *v1.DockerStatsData, error)
 	StopContainer(ctx context.Context, id string) error
 	StartContainer(ctx context.Context, id string) error
@@ -30,7 +29,6 @@ type DockerService interface {
 	ListVolumes(ctx context.Context) ([]v1.DockerVolumeData, error)
 	RemoveVolume(ctx context.Context, name string) error
 	PullImage(ctx context.Context, reference string) (*v1.StackOpResponse, error)
-	ContainerStats(ctx context.Context) ([]v1.ContainerStatData, error)
 	ContainerInspect(ctx context.Context, id string) (map[string]any, error)
 	NetworkCreate(ctx context.Context, name, driver, subnet string) error
 	DockerDf(ctx context.Context) ([]v1.DockerDfCategory, error)
@@ -117,6 +115,10 @@ func (s *dockerService) Info(ctx context.Context) (*v1.DockerInfoData, error) {
 			}
 		}
 	}
+	// 镜像计数：轻量调用，失败忽略（进入页面时有值即可，实时由状态帧维护）
+	if n, err := s.repo.ImageCount(ctx); err == nil {
+		info.ImagesTotal = n
+	}
 	return info, nil
 }
 
@@ -138,45 +140,18 @@ func (s *dockerService) NetworkInspect(ctx context.Context, name string) (map[st
 	return s.repo.NetworkInspect(ctx, name)
 }
 
-// Stats 返回宿主机系统级 CPU/内存使用率采样 + 运行中容器的单次资源采样。
+// Stats 返回宿主机系统级 CPU/内存使用率采样。
 func (s *dockerService) Stats(ctx context.Context) (*v1.DockerStatsData, error) {
 	cpu, memPerc, memUsedMB, memTotalMB, err := s.repo.DockerStats(ctx)
 	if err != nil {
 		return nil, err
 	}
-	data := &v1.DockerStatsData{
+	return &v1.DockerStatsData{
 		CPUUsage:   cpu,
 		MemUsage:   memUsedMB,
 		MemPercent: memPerc,
 		MemTotalMB: memTotalMB,
-	}
-	// 容器采样失败不影响系统统计的返回
-	if ctrs, cerr := s.repo.ContainerStats(ctx); cerr == nil {
-		data.Containers = make([]v1.ContainerStatData, 0, len(ctrs))
-		for _, c := range ctrs {
-			data.Containers = append(data.Containers, v1.ContainerStatData{
-				ID: c.ID, Name: c.Name, CPU: c.CPUPercent,
-				MemPercent: c.MemPercent, MemUsage: c.MemUsage,
-			})
-		}
-	}
-	return data, nil
-}
-
-// ContainerStats 返回运行中容器的资源采样。
-func (s *dockerService) ContainerStats(ctx context.Context) ([]v1.ContainerStatData, error) {
-	ctrs, err := s.repo.ContainerStats(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]v1.ContainerStatData, 0, len(ctrs))
-	for _, c := range ctrs {
-		out = append(out, v1.ContainerStatData{
-			ID: c.ID, Name: c.Name, CPU: c.CPUPercent,
-			MemPercent: c.MemPercent, MemUsage: c.MemUsage,
-		})
-	}
-	return out, nil
+	}, nil
 }
 
 // ContainerInspect 返回容器底层详情。
@@ -209,12 +184,13 @@ func (s *dockerService) DockerDf(ctx context.Context) ([]v1.DockerDfCategory, er
 }
 
 // StopContainer 停止指定容器（podman 优先，10 秒宽限）。
-
 func (s *dockerService) StopContainer(ctx context.Context, id string) error {
 	return s.repo.StopContainer(ctx, id)
 }
 
 // StatsStream 持续采样系统 CPU/内存并推送（每 2s 一次），随 ctx 取消结束。
+// 数据源不可用（如非 Linux 平台无 /proc）时推送 stats_unavailable 错误帧并继续
+// 重试——错误帧同时充当心跳，前端据此展示「统计不可用」而非永远 0%。
 func (s *dockerService) StatsStream(ctx context.Context) (<-chan *v1.DockerStatsData, error) {
 	out := make(chan *v1.DockerStatsData, 4)
 	go func() {
@@ -224,7 +200,7 @@ func (s *dockerService) StatsStream(ctx context.Context) (<-chan *v1.DockerStats
 		push := func() {
 			data, err := s.Stats(ctx)
 			if err != nil {
-				return
+				data = &v1.DockerStatsData{Error: "stats_unavailable"}
 			}
 			select {
 			case <-ctx.Done():
@@ -337,7 +313,6 @@ func (s *dockerService) RestartContainer(ctx context.Context, id string) error {
 }
 
 // RemoveContainer 强制删除指定容器（含运行中）。
-
 func (s *dockerService) RemoveContainer(ctx context.Context, id string) error {
 	return s.repo.RemoveContainer(ctx, id)
 }

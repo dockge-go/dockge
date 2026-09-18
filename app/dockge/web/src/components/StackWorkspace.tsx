@@ -3,6 +3,7 @@ import { ArrowLeft, FileCode2, FileKey2, Play, RotateCw, Square, Terminal, Trash
 
 import type { StackDetail, StackOp } from "../api/api";
 import { summarizeCompose } from "../lib/compose-summary";
+import type { ValidationState } from "../lib/validate";
 import { StackEditor } from "./StackEditor";
 import { TerminalPane } from "./Terminal";
 import { StackStatusBadge, StatusBadge } from "./widgets";
@@ -17,6 +18,7 @@ export function StackWorkspace(props: {
   name: string;
   yaml: string;
   env: string;
+  validation: ValidationState;
   output: string;
   busy: boolean;
   runCommand: string;
@@ -93,7 +95,7 @@ export function StackWorkspace(props: {
 
         <main class="stack-center">
           <Show when={center() === "editor"}>
-            <StackEditor file={file()} yaml={props.yaml} env={props.env} readonly={!managed()} fullscreen={fullscreen()} output={props.output} onYamlChange={props.onYamlChange} onEnvChange={props.onEnvChange} onFullscreenChange={setFullscreen} />
+            <StackEditor file={file()} yaml={props.yaml} env={props.env} readonly={!managed()} fullscreen={fullscreen()} validation={props.validation} output={props.output} onYamlChange={props.onYamlChange} onEnvChange={props.onEnvChange} onFullscreenChange={setFullscreen} />
           </Show>
           <Show when={center() === "logs"}><TerminalPane name={props.name} type="compose-logs" /></Show>
           <Show when={center() === "exec" && execId()}><TerminalPane name={execId()} type="exec" /></Show>

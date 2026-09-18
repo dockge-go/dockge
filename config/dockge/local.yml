@@ -2,6 +2,9 @@ env: local
 http:
   host: 127.0.0.1
   port: 5001
+  # 外部可达地址（OIDC redirect 等用途）：反代/TLS 终止在外层时 MUST 配置，
+  # 例如 https://dockge.example.com；留空回退 host:port 拼接（仅适合直连部署）。
+  base_url: ""
 ssl:
   cert: ""
   key: ""
@@ -18,7 +21,8 @@ dockge:
   stacks_dir: storage/stacks
 data:
   db:
-    dsn: storage/dockge.db
+    user:
+      dsn: storage/dockge.db
 log:
   log_level: debug
   mode: console

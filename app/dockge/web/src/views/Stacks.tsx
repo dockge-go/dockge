@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { Layers, Play, Plus, RotateCw, Square, Trash2 } from "lucide-solid";
 
 import { api, type StackDetail, type StackOp } from "../api/api";
@@ -8,6 +8,8 @@ import { StackWorkspace } from "../components/StackWorkspace";
 import { EmptyState, SectionHeader, StackStatusBadge } from "../components/widgets";
 import { errText } from "../api/format";
 import { clampPage, paginate } from "../lib/pagination";
+import { listNav } from "../lib/listnav";
+import type { ValidationState } from "../lib/validate";
 import { pendingNewStack, pendingStack, refresh, setPendingNewStack, setPendingStack, snapshot, toast } from "../store/index";
 import { t } from "../i18n";
 
@@ -30,12 +32,45 @@ export function Stacks() {
   const [runCommand, setRunCommand] = createSignal("");
   const [output, setOutput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [validation, setValidation] = createSignal<ValidationState>({ status: "checking" });
+  let listHost: HTMLDivElement | undefined;
 
   const rows = createMemo(() => snapshot()?.stacks ?? []);
   const visibleRows = createMemo(() => paginate(rows(), page()));
   const containerCount = (stack: string) => (snapshot()?.containers ?? []).filter((container) => container.stack === stack).length;
 
   createEffect(() => setPage((value) => clampPage(value, rows().length)));
+
+  // 校验闭环（被动）：工作区打开时，compose/env 任一变更防抖 2s 后草稿校验；
+  // 序号守卫丢弃在途过期响应。打开栈、composerize 落入、保存均经 yaml/env
+  // 信号触发同一循环，无需在各处插桩。
+  let validateTimer: ReturnType<typeof setTimeout> | undefined;
+  let validateSeq = 0;
+  createEffect(
+    on(
+      () => [mode(), yaml(), env()] as const,
+      ([current]) => {
+        if (current === "list") return;
+        validateSeq++;
+        setValidation({ status: "checking" });
+        clearTimeout(validateTimer);
+        validateTimer = setTimeout(() => {
+          const seq = validateSeq;
+          api
+            .validateStack(yaml(), env())
+            .then((result) => {
+              if (seq === validateSeq) setValidation({ status: "done", result });
+            })
+            .catch((error: unknown) => {
+              if (seq === validateSeq) {
+                setValidation({ status: "done", result: { valid: false, errors: [{ line: 0, message: errText(error) }] } });
+              }
+            });
+        }, 2000);
+      },
+    ),
+  );
+  onCleanup(() => clearTimeout(validateTimer));
 
   const openDetail = async (stackName: string, keepOutput = false) => {
     setMode("detail");
@@ -64,6 +99,7 @@ export function Stacks() {
   };
 
   onMount(() => {
+    if (listHost) onCleanup(listNav(listHost));
     const stack = pendingStack();
     if (stack) {
       setPendingStack(null);
@@ -175,11 +211,11 @@ export function Stacks() {
 
   return (
     <div class="view-section workspace-view">
-      <SectionHeader title="Stacks" subtitle={t("stack.workspaceSubtitle")} actions={<button class="btn btn-primary" onClick={openCreate}><Plus size={14} /> {t("stack.new")}</button>} />
+      <SectionHeader title={t("view.stacks")} subtitle={t("stack.workspaceSubtitle")} actions={<button class="btn btn-primary" onClick={openCreate}><Plus size={14} /> {t("stack.new")}</button>} />
       <div class="master-detail stack-master-detail" classList={{ "has-detail": mode() !== "list" }}>
         <section class="master-pane" aria-label={t("aria.stackList")}>
           <Show when={rows().length > 0} fallback={<EmptyState title={t("stack.noStacks")} desc={t("stack.noStacksDesc")} icon={<Layers size={44} />} />}>
-            <div class="resource-list">
+            <div class="resource-list" ref={listHost}>
               <For each={visibleRows()}>
                 {(stack) => (
                   <article class="resource-row" classList={{ selected: mode() === "detail" && name() === stack.name }} tabindex="0" onClick={() => void openDetail(stack.name)} onKeyDown={(event) => event.key === "Enter" && void openDetail(stack.name)}>
@@ -202,7 +238,7 @@ export function Stacks() {
         </section>
 
         <Show when={mode() !== "list"} fallback={<div class="detail-placeholder"><p>{t("stack.selectHint")}</p></div>}>
-          <StackWorkspace mode={mode() === "create" ? "create" : "detail"} detail={detail()} name={name()} yaml={yaml()} env={env()} output={output()} busy={busy()} runCommand={runCommand()} onBack={() => setMode("list")} onNameChange={setName} onYamlChange={setYaml} onEnvChange={setEnv} onRunCommandChange={setRunCommand} onConvert={() => void convert()} onSave={() => mode() === "create" ? void createStack(false) : void saveExisting()} onPrimary={() => void primary()} onOperation={(operation) => void runOperation(operation)} onRemove={() => void remove()} />
+          <StackWorkspace mode={mode() === "create" ? "create" : "detail"} detail={detail()} name={name()} yaml={yaml()} env={env()} validation={validation()} output={output()} busy={busy()} runCommand={runCommand()} onBack={() => setMode("list")} onNameChange={setName} onYamlChange={setYaml} onEnvChange={setEnv} onRunCommandChange={setRunCommand} onConvert={() => void convert()} onSave={() => mode() === "create" ? void createStack(false) : void saveExisting()} onPrimary={() => void primary()} onOperation={(operation) => void runOperation(operation)} onRemove={() => void remove()} />
         </Show>
       </div>
     </div>

@@ -33,7 +33,7 @@ export function SysInfo() {
   return (
     <div class="view-section">
       <SectionHeader
-        title="System Info"
+        title={t("view.sysinfo")}
         subtitle={t("sysinfo.subtitle")}
         actions={
           <button class="btn btn-secondary" onClick={() => void refetch()}>

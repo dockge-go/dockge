@@ -42,7 +42,7 @@ export function Dashboard() {
           <StatCard label={t("dash.labelRunning")} live tone="running" value={counts().running} onClick={() => navigate("/containers")} />
           <StatCard label={t("dash.labelStopped")} tone="stopped" value={counts().stopped} onClick={() => navigate("/containers")} />
           <StatCard label={t("dash.labelPaused")} tone="warning" value={counts().paused} onClick={() => navigate("/containers")} />
-          <StatCard label="Stacks" value={snapshot()!.docker.stacksTotal} onClick={() => navigate("/stacks")} />
+          <StatCard label={t("view.stacks")} value={snapshot()!.docker.stacksTotal} onClick={() => navigate("/stacks")} />
           <StatCard label={t("dash.labelImages")} value={snapshot()!.images.length} onClick={() => navigate("/images")} />
         </div>
 
@@ -106,23 +106,32 @@ export function Dashboard() {
           <div class="chart-card">
             <div class="chart-card-title">{t("dash.resourceUsage")}</div>
             <div style={{ "margin-top": "12px" }}>
-              <div class="resource-row">
-                <span class="resource-label">{t("res.cpu")}</span>
-                <div class="resource-track">
-                  <div class="resource-fill cpu" style={{ width: `${stats()?.cpuUsage ?? 0}%` }} />
+              <Show
+                when={!stats()?.error}
+                fallback={
+                  <p class="text-dim" style={{ "font-size": "var(--text-xs)", margin: "14px 0 0" }}>
+                    {t("dash.statsUnavailable")}
+                  </p>
+                }
+              >
+                <div class="resource-row">
+                  <span class="resource-label">{t("res.cpu")}</span>
+                  <div class="resource-track">
+                    <div class="resource-fill cpu" style={{ width: `${stats()?.cpuUsage ?? 0}%` }} />
+                  </div>
+                  <span class="resource-val">{(stats()?.cpuUsage ?? 0).toFixed(0)}%</span>
                 </div>
-                <span class="resource-val">{(stats()?.cpuUsage ?? 0).toFixed(0)}%</span>
-              </div>
-              <div class="resource-row">
-                <span class="resource-label">{t("res.memory")}</span>
-                <div class="resource-track">
-                  <div class="resource-fill mem" style={{ width: `${stats()?.memPercent ?? 0}%` }} />
+                <div class="resource-row">
+                  <span class="resource-label">{t("res.memory")}</span>
+                  <div class="resource-track">
+                    <div class="resource-fill mem" style={{ width: `${stats()?.memPercent ?? 0}%` }} />
+                  </div>
+                  <span class="resource-val">{(stats()?.memPercent ?? 0).toFixed(0)}%</span>
                 </div>
-                <span class="resource-val">{(stats()?.memPercent ?? 0).toFixed(0)}%</span>
-              </div>
-              <p class="stat-detail">
-                {t("res.memDetail", { used: (stats()?.memUsage ?? 0).toFixed(0), total: ((stats()?.memTotalMB ?? 0) / 1024).toFixed(1) })}
-              </p>
+                <p class="stat-detail">
+                  {t("res.memDetail", { used: (stats()?.memUsage ?? 0).toFixed(0), total: ((stats()?.memTotalMB ?? 0) / 1024).toFixed(1) })}
+                </p>
+              </Show>
             </div>
           </div>
         </div>
@@ -133,7 +142,7 @@ export function Dashboard() {
               {t("dash.recentContainers")} <LiveDot />
             </>
           }
-          subtitle={`${counts().total} total · ${counts().running} running`}
+          subtitle={t("res.subtitle", { total: counts().total, running: counts().running })}
           actions={
             <button class="btn btn-secondary" onClick={() => navigate("/containers")}>
               {t("common.viewAll")}

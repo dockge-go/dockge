@@ -1,3 +1,8 @@
+//go:build linux
+
+// Package pty 提供伪终端（/dev/ptmx + ioctl）。仅 Linux 实现：
+// 依赖 TIOCGPTN/TIOCSPTLCK 等 Linux 专有 ioctl（债务 D10 的显式声明）。
+// 其他平台使用 pty_other.go 的 stub（Open 返回错误，调用方按需降级）。
 package pty
 
 import (

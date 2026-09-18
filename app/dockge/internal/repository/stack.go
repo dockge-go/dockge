@@ -80,6 +80,7 @@ func (r *Repository) List(ctx context.Context) ([]model.Stack, error) {
 // stacks 目录中不存在但 compose 已注册的（外部栈）也能取到状态，只是无文件内容。
 func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) {
 	stack := model.Stack{Name: name, Status: model.StatusUnknown}
+	external := false
 
 	if composeFile, ok := r.findComposeFile(name); ok {
 		stack.Managed = true
@@ -95,6 +96,7 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 		}
 	} else {
 		// 目录不存在：仍可能是由 compose 管理的外部栈
+		external = true
 		items, err := r.ComposeLs(ctx)
 		if err != nil {
 			return model.Stack{}, err
@@ -119,13 +121,16 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 		}
 	}
 
-	lsItems, err := r.ComposeLs(ctx)
-	if err == nil {
-		for _, item := range lsItems {
-			if item.Name == name {
-				stack.Status = StackStatusFromString(item.Status)
-				stack.ConfigFiles = item.ConfigFiles
-				break
+	// 托管栈的状态在上方文件读取时未知，需查询 compose ls；
+	// 外部栈分支刚刚查过并已设置状态，跳过以免重复调用 CLI。
+	if !external {
+		if lsItems, err := r.ComposeLs(ctx); err == nil {
+			for _, item := range lsItems {
+				if item.Name == name {
+					stack.Status = StackStatusFromString(item.Status)
+					stack.ConfigFiles = item.ConfigFiles
+					break
+				}
 			}
 		}
 	}

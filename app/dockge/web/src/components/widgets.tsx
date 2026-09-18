@@ -1,10 +1,25 @@
 // 小型展示组件：状态徽标、空态、统计卡、标题区。
 import { Show, type JSX } from "solid-js";
-import { stateLabel, statusClass } from "../api/format";
+import { statusClass } from "../api/format";
 import { t } from "../i18n";
 
+/** 容器状态码 → i18n 键（未知状态回退原始字符串，颜色由 statusClass 兜底）。 */
+const CONTAINER_STATE_KEY: Record<string, Parameters<typeof t>[0]> = {
+  running: "state.running",
+  exited: "state.exited",
+  paused: "state.paused",
+  created: "state.created",
+  dead: "state.dead",
+  restarting: "state.restarting",
+  removing: "state.removing",
+};
+
 export function StatusBadge(props: { state: string }) {
-  return <span class={`status-badge ${statusClass(props.state)}`}>{stateLabel(props.state)}</span>;
+  const label = () => {
+    const key = CONTAINER_STATE_KEY[props.state];
+    return key ? t(key) : props.state;
+  };
+  return <span class={`status-badge ${statusClass(props.state)}`}>{label()}</span>;
 }
 
 /** 栈状态码：0 未知 / 1 未部署 / 2 已创建 / 3 运行中 / 4 已停止（与原版 Dockge 语义一致）。

@@ -66,3 +66,57 @@ services: {}
 		t.Errorf("no urls expected, got %v", urls)
 	}
 }
+
+// TestGetExternalStackCallsComposeLsOnce 用 PATH 桩替身 docker CLI，
+// 锁定外部栈 Get 的行为：状态来自 compose ls 且整个 Get 期间
+// 「状态查询」只发一次 compose ls（外部分支 + StackPs 各一次），
+// 防止回归成同函数内重复查询。
+func TestGetExternalStackCallsComposeLsOnce(t *testing.T) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "ls.count")
+
+	// 桩 docker：compose ls 输出一个外部栈并对调用计数；其余 compose 子命令返回空列表。
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = ls ]; then\n" +
+		"printf x >> \"$DOCKER_LS_COUNTER\"\n" +
+		"echo '[{\"Name\":\"ext-stack\",\"Status\":\"running(2)\",\"ConfigFiles\":\"/nonexistent/compose.yaml\"}]'\n" +
+		"exit 0\n" +
+		"fi\n" +
+		"if [ \"$1\" = compose ]; then echo '[]'; exit 0; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DOCKER_LS_COUNTER", counter)
+
+	stacksDir := filepath.Join(dir, "stacks")
+	if err := os.MkdirAll(stacksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := &Repository{stacksDir: stacksDir}
+
+	st, err := repo.Get(context.Background(), "ext-stack")
+	if err != nil {
+		t.Fatalf("Get(ext-stack) error: %v", err)
+	}
+	if st.Managed {
+		t.Error("external stack should not be managed")
+	}
+	if st.Status != model.StatusRunning {
+		t.Errorf("status = %d, want %d (running)", st.Status, model.StatusRunning)
+	}
+
+	data, err := os.ReadFile(counter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 外部栈分支 1 次 + StackPs 的 resolveStackExec 1 次 = 2；重复查询回归会变成 3。
+	if n := len(data); n != 2 {
+		t.Errorf("compose ls called %d times, want 2 (no duplicate status query)", n)
+	}
+}

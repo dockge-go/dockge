@@ -38,11 +38,11 @@ func New(i do.Injector) (*Logger, error) {
 	}
 
 	hook := lumberjack.Logger{
-		Filename:   conf.GetString("log.log_file_name"), // Log file path
-		MaxSize:    conf.GetInt("log.max_size"),         // Maximum size unit for each log file: M
-		MaxBackups: conf.GetInt("log.max_backups"),      // The maximum number of backups that can be saved for log files
-		MaxAge:     conf.GetInt("log.max_age"),          // Maximum number of days the file can be saved
-		Compress:   conf.GetBool("log.compress"),        // Compression or not
+		Filename:   conf.GetString("log.log_file_name"),
+		MaxSize:    conf.GetInt("log.max_size"), // 单位：MB
+		MaxBackups: conf.GetInt("log.max_backups"),
+		MaxAge:     conf.GetInt("log.max_age"),
+		Compress:   conf.GetBool("log.compress"),
 	}
 
 	// default(both) log to console and file
@@ -66,18 +66,7 @@ func New(i do.Injector) (*Logger, error) {
 	return &Logger{logger}, nil
 }
 
-// WithValue adds a field to the logger stored in the specified context
-// and returns a context carrying the enriched logger.
-func (l *Logger) WithValue(ctx context.Context, key string, value any) context.Context {
-	logger := l.contextLogger(ctx).With().Interface(key, value).Logger()
-	if c, ok := ctx.(*gin.Context); ok {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxLoggerKey, &logger))
-		return c
-	}
-	return context.WithValue(ctx, ctxLoggerKey, &logger)
-}
-
-// WithContext returns a logger enriched by values previously attached via WithValue.
+// WithContext 返回请求作用域中注入的日志器；无注入时回退到实例自身。
 func (l *Logger) WithContext(ctx context.Context) *Logger {
 	return &Logger{Logger: *l.contextLogger(ctx)}
 }

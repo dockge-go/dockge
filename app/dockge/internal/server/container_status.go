@@ -9,6 +9,7 @@ import (
 	"time"
 
 	v1 "dockge/app/dockge/api/v1"
+	"dockge/app/dockge/internal/model"
 	"dockge/app/dockge/internal/push"
 	"dockge/app/dockge/internal/repository"
 	"dockge/pkg/log"
@@ -107,7 +108,10 @@ func (s *ContainerStatusServer) broadcastLoop(ctx context.Context) {
 }
 
 func (s *ContainerStatusServer) watchDockerEvents(ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "docker", "events", "--filter", "type=container", "--format", "{{json .}}")
+	// 同时监听容器与镜像事件：容器驱动状态帧，镜像驱动计数（pull/delete 后
+	// 侧栏镜像徽标随帧更新）。栈计数由容器事件与兜底采样顺带刷新。
+	cmd := exec.CommandContext(ctx, "docker", "events",
+		"--filter", "type=container", "--filter", "type=image", "--format", "{{json .}}")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		s.logger.Error().Err(err).Msg("docker events stdout pipe")
@@ -137,12 +141,46 @@ func (s *ContainerStatusServer) broadcast(ctx context.Context) {
 		s.logger.Error().Err(err).Msg("collect container status")
 		return
 	}
-	frame := v1.ContainerStatusFrame{Containers: make([]v1.ContainerStatusData, 0, len(containers))}
+	// 栈与镜像采集同源：任一失败则整帧不推（前端保持旧值），
+	// 等下一次 docker events 或 30s 兜底重试——徽标计数与列表永远一致。
+	stacks, err := s.repo.List(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("collect stack status")
+		return
+	}
+	images, err := s.repo.DockerImages(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("collect image list")
+		return
+	}
+	frame := v1.ContainerStatusFrame{
+		Containers: make([]v1.ContainerStatusData, 0, len(containers)),
+		Images:     make([]v1.DockerImageData, 0, len(images)),
+	}
+	counts := &v1.ResourceCounts{}
 	for _, container := range containers {
 		frame.Containers = append(frame.Containers, v1.ContainerStatusData{
 			ID: container.ID, State: container.State, Status: container.Status,
 		})
+		if container.State == "running" {
+			counts.ContainersRunning++
+		}
 	}
+	counts.ContainersTotal = len(containers)
+	counts.StacksTotal = len(stacks)
+	for _, st := range stacks {
+		if st.Status == model.StatusRunning {
+			counts.StacksRunning++
+		}
+	}
+	for _, img := range images {
+		frame.Images = append(frame.Images, v1.DockerImageData{
+			ID: img.ID, Repo: img.Repo, Tag: img.Tag,
+			SizeBytes: img.SizeBytes, CreatedUnix: img.CreatedUnix,
+		})
+	}
+	counts.ImagesTotal = len(images)
+	frame.Counts = counts
 	payload, err := json.Marshal(frame)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("marshal container status")

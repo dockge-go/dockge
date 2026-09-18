@@ -1,5 +1,5 @@
 // 网络管理：列表（SSE 快照）、详情（inspect）、创建、删除、清理未使用。
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { Network, Plus, Trash2 } from "lucide-solid";
 import { api, type NetworkInspectData } from "../api/api";
 import { refresh, snapshot, toast } from "../store/index";
@@ -9,6 +9,7 @@ import { EmptyState, SectionHeader, SpinnerBlock } from "../components/widgets";
 import { errText } from "../api/format";
 import { Pagination } from "../components/Pagination";
 import { clampPage, paginate } from "../lib/pagination";
+import { listNav } from "../lib/listnav";
 import { t } from "../i18n";
 
 export function Networks() {
@@ -20,6 +21,11 @@ export function Networks() {
   const [subnet, setSubnet] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [page, setPage] = createSignal(1);
+  let tableHost: HTMLTableElement | undefined;
+
+  onMount(() => {
+    if (tableHost) onCleanup(listNav(tableHost));
+  });
 
   const rows = () => snapshot()?.networks ?? [];
   const visibleRows = createMemo(() => paginate(rows(), page()));
@@ -78,7 +84,7 @@ export function Networks() {
     <div class="view-section">
       <SectionHeader
         title={t("net.title")}
-        subtitle={`${rows().length} networks`}
+        subtitle={t("res.countNetworks", { n: rows().length })}
         actions={
           <>
             <button class="btn-clear" onClick={() => void prune()}>
@@ -94,9 +100,9 @@ export function Networks() {
         when={rows().length > 0}
         fallback={<EmptyState title={t("net.empty")} icon={<Network size={44} />} />}
       >
-        <table class="data-table">
+        <table class="data-table" ref={tableHost}>
           <thead>
-            <tr>
+            <tr tabindex="0">
               <th>{t("net.detailName")}</th>
               <th>{t("net.detailDriver")}</th>
               <th style={{ width: "80px" }}></th>

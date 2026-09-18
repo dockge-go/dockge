@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dockge 认证闭环原型 · OIDC / Traefik / 本地密码</title>
+<style>
+/* ============ Crate 设计系统 token（与 vision.html 同源） ============ */
+:root {
+  --bg:#fff; --surface:#f5f5f7; --surface-warm:#fbfbfd; --surface-dark:#1d1d1f;
+  --fg:#1d1d1f; --fg-2:#424245; --muted:#6e6e73; --border:#d2d2d7; --border-soft:#e8e8ed;
+  --accent:#0071e3; --success:#16a34a; --warn:#eab308; --danger:#dc2626;
+  --console-fg:#e8e8ed; --console-muted:#8e8e93;
+  --accent-soft:rgba(0,113,227,.10); --success-soft:rgba(22,163,74,.10); --danger-soft:rgba(220,38,38,.08);
+  --text-xl:28px; --text-lg:21px; --text-base:17px; --text-sm:14px; --text-xs:12px;
+  --font-d:"SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --font-t:"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --font-m:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Monaco,Consolas,monospace;
+  --fast:150ms; --base:220ms; --ease:cubic-bezier(.4,0,.2,1);
+}
+[data-theme=dark]{
+  --bg:#161618; --surface:#1d1d1f; --surface-warm:#202024; --surface-dark:#111113;
+  --fg:#f5f5f7; --fg-2:#d2d2d7; --muted:#8e8e93; --border:#3a3a3e; --border-soft:#2c2c30;
+  --accent:#2997ff; --success:#30d158; --warn:#ffd60a; --danger:#ff453a;
+  --accent-soft:rgba(41,151,255,.14); --success-soft:rgba(48,209,88,.14); --danger-soft:rgba(255,69,58,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-t);background:var(--surface);color:var(--fg);font-size:var(--text-sm);line-height:1.55;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.hdr{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--border-soft);padding:12px 28px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.hdr h1{font-size:var(--text-sm);font-weight:600}
+.hdr .note{color:var(--muted);font-size:var(--text-xs)}
+.hdr button{margin-left:auto;font:inherit;font-size:var(--text-xs);font-weight:600;color:var(--fg-2);background:var(--surface-warm);border:1px solid var(--border);border-radius:999px;padding:4px 13px;cursor:pointer}
+main{max-width:1280px;margin:0 auto;padding:26px 28px 80px}
+/* 模式 tab */
+.tabs{display:flex;gap:8px;margin-bottom:22px;flex-wrap:wrap}
+.tab{font:inherit;font-size:var(--text-sm);font-weight:600;color:var(--fg-2);background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all var(--fast) var(--ease)}
+.tab:hover{border-color:var(--accent);color:var(--accent)}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.tab .k{font-size:10px;font-weight:700;opacity:.65}
+/* 模式说明 */
+.mode-intro{background:var(--surface-warm);border:1px solid var(--border-soft);border-radius:12px;padding:14px 18px;margin-bottom:18px;color:var(--fg-2);font-size:var(--text-sm)}
+.mode-intro strong{color:var(--fg)}
+/* 三栏舞台 */
+.stage{display:grid;grid-template-columns:230px 1fr 400px;gap:14px;align-items:stretch}
+/* 参与者链路 */
+.actors{background:var(--bg);border:1px solid var(--border-soft);border-radius:12px;padding:16px 14px;display:flex;flex-direction:column}
+.actors h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:12px}
+.actor{border:1px solid var(--border-soft);border-radius:10px;padding:8px 10px;margin-bottom:4px;font-size:var(--text-xs);color:var(--muted);transition:all var(--base) var(--ease);position:relative}
+.actor b{display:block;font-size:var(--text-xs);color:var(--fg-2);font-weight:600}
+.actor.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
+.actor.hot b{color:var(--accent)}
+.actor .who{font-family:var(--font-m);font-size:10px}
+.link{align-self:center;color:var(--border);font-size:10px;padding:1px 0}
+.link.on{color:var(--accent);font-weight:700}
+/* 步骤区 */
+.step{display:flex;flex-direction:column;min-width:0}
+.addrbar{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border-soft);border-radius:10px;padding:7px 12px;margin-bottom:12px}
+.addrbar .dots{display:inline-flex;gap:5px}.addrbar .dots i{width:9px;height:9px;border-radius:50%;background:var(--border)}
+.addrbar .url{font-family:var(--font-m);font-size:var(--text-xs);color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.addrbar .method{font-family:var(--font-m);font-size:10px;font-weight:700;color:#fff;border-radius:5px;padding:1px 7px;flex:none}
+.method.GET{background:var(--accent)}.method.POST{background:var(--success)}.method.REDIR{background:var(--warn);color:#1d1d1f}
+.screen{background:var(--bg);border:1px solid var(--border-soft);border-radius:12px;padding:18px;flex:1;min-height:300px;display:flex;flex-direction:column;gap:12px}
+.screen .tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.screen .title{font-family:var(--font-d);font-size:19px;font-weight:600}
+.screen .desc{color:var(--fg-2);font-size:var(--text-sm)}
+.ui-mock{border:1px dashed var(--border);border-radius:10px;padding:14px;background:var(--surface-warm);margin-top:auto}
+.ui-mock .cap{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px}
+.fixflag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--success);background:var(--success-soft);border-radius:6px;padding:2px 9px}
+.gapflag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent);border-radius:6px;padding:2px 9px}
+/* 报文岛 */
+.wire{background:var(--surface-dark);color:var(--console-fg);border-radius:12px;padding:14px 16px;font-family:var(--font-m);font-size:11.5px;line-height:1.75;overflow:auto;max-height:520px;white-space:pre-wrap;word-break:break-all}
+.wire .cap{font-family:var(--font-t);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--console-muted);margin-bottom:8px}
+.wire .m{color:#2997ff;font-weight:700}
+.wire .u{color:#30d158}
+.wire .h{color:#bf5af2}
+.wire .c{color:#ff9f0a}
+.wire .d{color:#8e8e93}
+.wire .g{color:#30d158}
+.wire .r{color:#ff453a}
+/* 导航 */
+.nav{display:flex;align-items:center;gap:14px;margin-top:16px}
+.nav button{font:inherit;font-size:var(--text-sm);font-weight:600;border-radius:9px;padding:8px 18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--fg-2);transition:all var(--fast) var(--ease)}
+.nav button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.nav button:disabled{opacity:.35;cursor:default}
+.nav button.next{background:var(--accent);border-color:var(--accent);color:#fff}
+.dots-nav{display:flex;gap:6px;margin:0 auto}
+.dots-nav span{width:9px;height:9px;border-radius:50%;background:var(--border);cursor:pointer;transition:background var(--fast) var(--ease)}
+.dots-nav span.done{background:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.dots-nav span.cur{background:var(--accent);transform:scale(1.35)}
+.step-label{font-size:var(--text-xs);color:var(--muted);font-family:var(--font-m)}
+/* 规格清单 */
+.spec{margin-top:44px}
+.spec h2{font-family:var(--font-d);font-size:var(--text-lg);font-weight:600;margin-bottom:6px}
+.spec>p{color:var(--fg-2);font-size:var(--text-sm);margin-bottom:14px}
+table.spec-t{width:100%;border-collapse:collapse;background:var(--bg);border:1px solid var(--border-soft);border-radius:12px;overflow:hidden;font-size:var(--text-xs)}
+.spec-t th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:9px 12px;background:var(--surface);border-bottom:1px solid var(--border-soft)}
+.spec-t td{padding:9px 12px;border-bottom:1px solid var(--border-soft);vertical-align:top}
+.spec-t tr:last-child td{border-bottom:none}
+.spec-t code{font-family:var(--font-m);font-size:11px;background:var(--surface);border:1px solid var(--border-soft);border-radius:4px;padding:1px 5px}
+.mk{display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:1px 7px;margin-right:6px}
+.mk.done{color:var(--success);background:var(--success-soft)}
+.mk.now{color:var(--accent);background:var(--accent-soft)}
+@media(max-width:1080px){.stage{grid-template-columns:1fr}.actors{flex-direction:row;flex-wrap:wrap}.actors h4{width:100%}.actor{margin:2px}.link{display:none}.wire{max-height:340px}}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <h1>Dockge · 认证闭环交互原型</h1>
+  <span class="note">前端逻辑闭环状态机 · 每步含真实报文 · 修复项带 ✦ 标记</span>
+  <button id="themeToggle" type="button">切换明暗</button>
+</header>
+
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div class="mode-intro" id="modeIntro"></div>
+
+  <div class="stage">
+    <aside class="actors" id="actors"></aside>
+    <section class="step">
+      <div class="addrbar" id="addrbar"></div>
+      <div class="screen">
+        <span class="tag" id="stepTag"></span>
+        <div class="title" id="stepTitle"></div>
+        <div class="desc" id="stepDesc"></div>
+        <div class="ui-mock"><div class="cap">屏幕示意</div><div id="stepUI"></div></div>
+      </div>
+    </section>
+    <aside class="wire" id="wire"></aside>
+  </div>
+
+  <div class="nav">
+    <button id="prevBtn" type="button">← 上一步</button>
+    <div class="dots-nav" id="dotsNav"></div>
+    <span class="step-label" id="stepLabel"></span>
+    <button id="nextBtn" class="next" type="button">下一步 →</button>
+  </div>
+
+  <section class="spec">
+    <h2>功能确认清单（前端逻辑闭环规格）</h2>
+    <p>逐环节确认三种模式的闭环行为；✦ 已修 = 本次代码已落地的断点修复。</p>
+    <table class="spec-t">
+      <thead><tr><th style="width:90px">模式</th><th style="width:240px">环节</th><th>闭环行为（前端 / 后端契约）</th><th style="width:70px">状态</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="5"><b>OIDC 直连</b><br><span style="color:var(--muted)">mode: oidc</span></td>
+          <td>登录页探测</td><td><code>GET /v1/auth/config</code> → <code>{mode:"oidc", providers:[{id,label}]}</code>；渲染 SSO 按钮 + 本地密码回退（任何模式保留本地登录兜底）</td><td class="mk done">已有</td></tr>
+        <tr><td>发起授权</td><td>按钮整页跳转 <code>GET /v1/oidc/:id/auth</code> → 302 IdP authorize（state + PKCE S256）；<code>oidc_state</code> httpOnly cookie 绑定浏览器会话</td><td class="mk done">已有</td></tr>
+        <tr><td>回调失败 ✦</td><td>任意失败（state 不符 / 换码失败 / 无用户名 / 开户失败）→ 302 <code>/login?oidc_error=…</code>；登录页读取参数展示错误条并清理地址栏（原先返回裸 JSON 401，闭环断裂）</td><td class="mk done">已修</td></tr>
+        <tr><td>回调成功</td><td>验签 ID Token → 提取 <code>preferred_username</code> → groups 命中 <code>admin_groups</code> 即 admin → 自动开户（密码为随机值，不可密码登录）→ <code>Set-Cookie: dockge_token</code>（httpOnly）→ 302 <code>/</code></td><td class="mk done">已有</td></tr>
+        <tr><td>会话建立</td><td>SPA <code>boot()</code> → <code>GET /v1/me</code>（同源 fetch 自动带 cookie）→ StrictAuth cookie 兜底 → 进入应用；SSE / WebSocket 同源同样自动带 cookie，无需 token 参数</td><td class="mk done">已有</td></tr>
+        <tr><td rowspan="4"><b>Traefik 反代</b><br><span style="color:var(--muted)">mode: proxy</span></td>
+          <td>外层认证</td><td>Traefik <code>forwardAuth</code> 委托 Authelia <code>/api/verify</code>；未登录由 Authelia 302 门户；通过后 <code>authResponseHeaders: [Remote-User]</code> 注入身份头</td><td class="mk done">部署项</td></tr>
+        <tr><td>头换会话</td><td>来源 IP ∈ <code>trusted_proxies</code>（traefik 容器网段）→ 读 <code>username_header</code>（配 <code>Remote-User</code>）→ 自动开户 → <code>Set-Cookie: dockge_token</code> → StrictAuth 放行</td><td class="mk done">已有</td></tr>
+        <tr><td>登录页按钮 ✦</td><td>proxy 模式登录页「SSO 登录」= 整页加载 <code>/</code>（重走 Traefik → ProxyAuth 链）；原先 SPA 内跳转会重复失败的 boot()，形成登录页死循环</td><td class="mk done">已修</td></tr>
+        <tr><td>fail-closed</td><td><code>trusted_proxies</code> 为空或来源不命中 → 一律 401（伪造头不可用）；配置见操作指南</td><td class="mk done">已有</td></tr>
+        <tr><td rowspan="3"><b>本地密码</b><br><span style="color:var(--muted)">mode: jwt</span></td>
+          <td>登录</td><td><code>POST /v1/login</code>（IP+账号 10 次/分钟滑动窗口限流）→ JWT 入 localStorage → <code>Authorization: Bearer</code></td><td class="mk done">已有</td></tr>
+        <tr><td>2FA</td><td>开启 TOTP 的账号返回 <code>tokenRequired</code> →（前端验证码步骤为 F4 目标，原型见 vision.html Screen A）</td><td class="mk now">目标</td></tr>
+        <tr><td>回调地址 ✦</td><td>反代/TLS 部署下 OIDC redirect URI 改由 <code>http.base_url</code> 配置（如 <code>https://dockge.example.com</code>）；原先硬拼内网 host:port</td><td class="mk done">已修</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:14px;color:var(--muted);font-size:var(--text-xs)">部署操作步骤（Traefik / Authelia / Authentik / Keycloak 配置文件与 dockge yml）见 <code style="font-family:var(--font-m)">docs/AUTH-DEPLOY.md</code>。</p>
+  </section>
+</main>
+
+<script>
+/* ================= 数据：三模式闭环步骤 ================= */
+const MODES = {
+oidc: {
+  label: "A · OIDC 直连拦截", note: "Dockge 自跳 IdP（Authentik / Keycloak / Authelia OP），Authorization Code + PKCE。适合：不经反代或反代仅做路由，由面板自己完成 SSO。",
+  actors: ["浏览器","SPA (Login.tsx)","Dockge 后端","IdP (Authentik)"],
+  steps: [
+    { url:"/login", method:"GET", hot:[0,1], tag:"第 1 步 · 登录页探测",
+      title:"登录页按 auth/config 渲染 SSO 入口",
+      desc:"SPA 挂载后先问后端当前认证模式。mode=oidc 且 providers 非空 → 渲染 provider 按钮 + 本地密码回退（任何模式都保留密码兜底）。",
+      ui:'<b>登录卡</b>：标题 + 「Authentik SSO」大按钮 + 分隔线「或通过用户名密码登录」+ 紧凑双输入框',
+      wire:'<span class="d">① SPA 探测（公开端点，无需认证）</span>\n<span class="m">GET</span> <span class="u">/v1/auth/config</span>\n<span class="d">→ 200 OK</span>\n{\n  <span class="h">"mode"</span>: <span class="c">"oidc"</span>,\n  <span class="h">"providers"</span>: [{ <span class="h">"id"</span>: <span class="c">"authentik"</span>, <span class="h">"info"</span>: { <span class="h">"label"</span>: <span class="c">"Authentik"</span> } }],\n  <span class="h">"disableAuth"</span>: <span class="c">false</span>\n}' },
+    { url:"/v1/oidc/authentik/auth", method:"REDIR", hot:[0,2,3], tag:"第 2 步 · 发起授权",
+      title:"点击 SSO 按钮 → 302 跳 IdP 授权页",
+      desc:"整页跳转（非 fetch）。后端生成 state 与 PKCE verifier（verifier 只存服务端内存），签发 oidc_state cookie 把 state 绑定到当前浏览器会话。",
+      ui:'<b>浏览器整页跳转</b>——地址栏离开 Dockge，进入 IdP 域名',
+      wire:'<span class="m">GET</span> <span class="u">/v1/oidc/authentik/auth</span>\n<span class="d">→ 302 Found</span>\n<span class="h">Location:</span> https://idp.example.com/application/o/authorize/\n  ?client_id=dockge\n  &amp;redirect_uri=<span class="g">https://dockge.example.com</span>/v1/oidc/authentik/callback  <span class="d">✦ 来自 http.base_url</span>\n  &amp;response_type=code\n  &amp;scope=openid+profile+email\n  &amp;state=8f3a91c04d\n  &amp;code_challenge=j3K9…xQ2  &amp;code_challenge_method=S256\n<span class="h">Set-Cookie:</span> oidce_state=8f3a91c04d; Path=/; Max-Age=300; HttpOnly; SameSite=Lax' },
+    { url:"https://idp.example.com/…/authorize", method:"GET", hot:[0,3], tag:"第 3 步 · IdP 授权页",
+      title:"用户在 IdP 登录并点「授权」",
+      desc:"此页完全属于 IdP，Dockge 不参与。用户登录 IdP 账号、看到 Dockge 请求的 scopes，点授权。",
+      ui:'<b>IdP 页面</b>：应用「Dockge」请求 openid / profile / email → 输入 IdP 凭据 → 「授权」按钮',
+      wire:'<span class="d">浏览器 ↔ IdP 之间的标准 OIDC 授权页交互；Dockge 侧无报文。</span>\n\n<span class="d">授权完成后 IdP 发起回调：</span>\n<span class="m">GET</span> <span class="u">https://dockge.example.com/v1/oidc/authentik/callback?code=K7x2…&amp;state=8f3a91c04d</span>' },
+    { url:"/v1/oidc/authentik/callback", method:"GET", hot:[0,2,3], tag:"第 4 步 · 回调（成功路径）",
+      title:"验 state → 换码 → 验签 → 开户 → 种 cookie",
+      desc:"state 必须与 oidc_state cookie 一致；授权码 + PKCE verifier 换 token；验签 ID Token；提取用户名与 groups；首次登录自动开户（admin_groups 命中即 admin 角色）；签发与本地密码登录等价的会话 cookie。",
+      ui:'<b>用户视角</b>：短暂白屏后进入 Dockge 仪表盘（302 → / → SPA 启动）',
+      wire:'<span class="m">GET</span> <span class="u">/v1/oidc/authentik/callback?code=K7x2…&amp;state=8f3a91c04d</span>\n<span class="h">Cookie:</span> oidc_state=8f3a91c04d\n<span class="d">后端：state ✓ → token exchange（code_verifier）→ ID Token 验签 ✓</span>\n<span class="d">      claims{ preferred_username:"ops", groups:["dockge-admin"] } → 开户 + admin</span>\n<span class="d">→ 302 Found  Location: /</span>\n<span class="h">Set-Cookie:</span> dockge_token=&lt;JWT&gt;; Path=/; Max-Age=604800; HttpOnly; SameSite=Lax\n<span class="h">Set-Cookie:</span> oidc_state=; Max-Age=0  <span class="d">（清除一次性 state）</span>' },
+    { url:"/", method:"GET", hot:[0,1,2], tag:"第 5 步 · 会话建立（闭环完成）",
+      title:"SPA boot：cookie 会话进入应用",
+      desc:"AppShell 的 boot() 调 /v1/me——同源 fetch 自动携带 dockge_token cookie，StrictAuth 的第三优先级来源即 cookie。此后 SSE 与 WebSocket 同源请求同样自动带 cookie，无需 token 查询参数。",
+      ui:'<b>仪表盘</b>：统计卡 + 实时 CPU/内存 + 最近容器（右上角显示 ops · admin）',
+      wire:'<span class="m">GET</span> <span class="u">/v1/me</span>\n<span class="h">Cookie:</span> dockge_token=&lt;JWT&gt;\n<span class="d">→ 200 OK</span>\n{ <span class="h">"id"</span>: 2, <span class="h">"username"</span>: <span class="c">"ops"</span>, <span class="h">"role"</span>: <span class="c">"admin"</span> }\n\n<span class="d">随后同模式发起（均自动带 cookie）：</span>\n<span class="m">GET</span> /v1/docker/info · /v1/stacks · /v1/docker/containers …\n<span class="m">GET</span> /v1/docker/containers/stream  <span class="d">(EventSource·SSE)</span>\n<span class="g">✓ 闭环完成：SSO 按钮 → IdP → 回调 → cookie → 应用</span>' },
+    { url:"/login?oidc_error=…", method:"REDIR", hot:[0,1,2], tag:"失败分支 ✦ 本次修复",
+      title:"回调失败不再返回裸 JSON",
+      desc:"state 被篡改 / 换码失败 / ID Token 验签不过 / 无法提取用户名 / 本地开户失败——统一 302 回登录页并携带 oidc_error；登录页读取参数展示错误条，清理地址栏，保留密码登录兜底。",
+      ui:'<b>登录卡顶部红色错误条</b>：「SSO 登录失败：state 校验失败，请重新发起登录」+ SSO 按钮可重试',
+      wire:'<span class="m">GET</span> <span class="u">/v1/oidc/authentik/callback?code=…&amp;state=<span class="r">TAMPERED</span></span>\n<span class="d">后端：state ≠ cookie → 拒绝</span>\n<span class="d">→ 302 Found</span>\n<span class="h">Location:</span> /login?oidc_error=state%20校验失败…\n\n<span class="d">✦ 修复前：返回 401 JSON —— 用户停留在裸报文页，回不到登录页（闭环断点）</span>\n<span class="d">✦ 修复后：回到登录页 + 错误提示 + 可重试</span>' }
+  ] },
+proxy: {
+  label: "B · Traefik 反代拦截", note: "Traefik forwardAuth 委托 Authelia 验证，通过后注入 Remote-User 头；Dockge 处于 proxy 模式，把该头换成本地会话。适合：已有 Authelia/Authentik 门户的统一接入。链路：浏览器 → Traefik(:443) → Authelia verify → Remote-User → Dockge(:5001)。",
+  actors: ["浏览器","Traefik :443","Authelia verify","Dockge 后端","SPA"],
+  steps: [
+    { url:"https://dockge.example.com/", method:"GET", hot:[0,1,2], tag:"第 1 步 · 未登录首次访问",
+      title:"Traefik 先问 Authelia：未登录 → 302 门户",
+      desc:"请求进入 Traefik 路由，forwardAuth 中间件把请求转给 Authelia 的 /api/verify；无门户会话 → Authelia 返回 302 到门户登录页（rd 参数带回跳地址）。Dockge 全程未参与。",
+      ui:'<b>Authelia 门户页</b>：输入门户账号 → 二步验证（可选）→ 自动回跳',
+      wire:'<span class="m">GET</span> <span class="u">https://dockge.example.com/</span>\n<span class="d">Traefik → Authelia:</span>  <span class="m">GET</span> /api/verify?rd=https%3A%2F%2Fauth.example.com\n<span class="h">X-Forwarded-Uri:</span> /   <span class="h">X-Forwarded-Host:</span> dockge.example.com\n<span class="d">→ 302 Found</span>\n<span class="h">Location:</span> https://auth.example.com/?rd=https%3A%2F%2Fdockge.example.com%2F' },
+    { url:"https://dockge.example.com/", method:"GET", hot:[0,1,2,3], tag:"第 2 步 · 门户通过后回跳",
+      title:"verify 200 + Remote-User → Dockge 换发本地会话",
+      desc:"门户登录后回跳，Authelia verify 返回 200 并带 Remote-User 响应头；Traefik 的 authResponseHeaders 把它复制进转发请求。Dockge 的 ProxyAuth 中间件：来源 IP（traefik 容器 IP）∈ trusted_proxies → 读 username_header（本例配 Remote-User）→ 自动开户 → 签发 dockge_token cookie → StrictAuth 直接放行。",
+      ui:'<b>用户视角</b>：门户回跳后直接进入 Dockge 仪表盘——没有 Dockge 自己的登录页',
+      wire:'<span class="d">Traefik → Authelia:</span>  <span class="m">GET</span> /api/verify → <span class="g">200 OK</span>\n<span class="h">Remote-User:</span> ops\n\n<span class="d">Traefik → Dockge（头已注入）：</span>\n<span class="m">GET</span> <span class="u">/</span>\n<span class="h">Remote-User:</span> ops\n<span class="h">X-Forwarded-For:</span> 203.0.113.7, 172.18.0.4  <span class="d">(traefik 容器)</span>\n\n<span class="d">Dockge ProxyAuth：172.18.0.4 ∈ trusted_proxies ✓ → 开户“ops” →</span>\n<span class="h">Set-Cookie:</span> dockge_token=&lt;JWT&gt;; HttpOnly; SameSite=Lax\n<span class="d">SPA boot → GET /v1/me（cookie）→ 200 → 应用</span>\n<span class="g">✓ 闭环完成：门户 → 头 → 本地会话 → 应用</span>' },
+    { url:"/login", method:"GET", hot:[0,4], tag:"分支 · 头缺失 / 来源不受信",
+      title:"401 → 登录页提示卡（不暴露表单）",
+      desc:"绕过 Traefik 直连 Dockge、或 trusted_proxies 未含 traefik 网段 → ProxyAuth fail-closed 返回 401 → SPA 的 401 处理跳登录页 → proxy 模式渲染提示卡：说明由反代认证 + 「SSO 登录」按钮 + 密码兜底入口。",
+      ui:'<b>登录卡</b>：主按钮「SSO 登录」+ 灰字「反向代理已认证，点击进入控制台」',
+      wire:'<span class="m">GET</span> <span class="u">/v1/auth/config</span> → { <span class="h">"mode"</span>: <span class="c">"proxy"</span>, … }\n\n<span class="d">若此时直连后端（未走 Traefik）：</span>\n<span class="m">GET</span> /v1/me → <span class="r">401</span> { code:401, message:"登录失效，请重新登录~" }\n<span class="d">→ SPA setUnauthorizedHandler → 跳 /login → proxy 提示卡</span>' },
+    { url:"/", method:"GET", hot:[0,1,2,3,4], tag:"按钮行为 ✦ 本次修复",
+      title:"「SSO 登录」= 整页加载，重走认证链",
+      desc:"修复前按钮是 SPA 内 navigate(\"/\")：重复已失败的 boot() → 又弹回登录页，死循环。修复后整页加载 /，请求重新经过 Traefik → forwardAuth → ProxyAuth，此时门户已登录则直接进入。",
+      ui:'<b>点击后</b>：整页刷新 → （门户已登录）直接仪表盘 /（未登录）Authelia 302 门户',
+      wire:'<span class="d">✦ 修复前（死循环）：</span>\nclick → SPA router → / → boot() → /v1/me → <span class="r">401</span> → back to /login ↺\n\n<span class="d">✦ 修复后：</span>\nclick → <span class="g">window.location.href = "/"</span>（整页）\n→ Traefik → Authelia verify → Remote-User → ProxyAuth → cookie → SPA → 应用 ✓' },
+    { url:"—", method:"GET", hot:[3], tag:"安全边界 · fail-closed",
+      title:"伪造头一律无效",
+      desc:"trusted_proxies 为空 → TrustedIP 恒 false（拒绝一切）；来源不命中 → 401。攻击者无法通过自带 Remote-User 头绕过——只有受信网段内的 Traefik 注入的头才被采信。auto_provision=false 时未知用户拒绝（不自动开户）。",
+      ui:'<b>攻击演示</b>：curl -H "Remote-User: admin" https://dockge:5001/v1/me → 401',
+      wire:'<span class="m">GET</span> /v1/me\n<span class="h">Remote-User:</span> admin  <span class="d">（伪造，来源 IP 203.0.113.7 ∉ trusted_proxies）</span>\n<span class="d">TrustedIP → false（fail-closed）</span>\n<span class="d">→ <span class="r">401</span> Unauthorized</span>' }
+  ] },
+jwt: {
+  label: "C · 本地密码（基线）", note: "默认模式。JWT HS256，claims 绑定密码摘要（改密即全员下线）；IP+账号 10 次/分钟限流。任何其他模式都保留此通道作为兜底。",
+  actors: ["浏览器","SPA (Login.tsx)","Dockge 后端"],
+  steps: [
+    { url:"/login", method:"GET", hot:[0,1], tag:"第 1 步 · 表单",
+      title:"标准用户名密码表单",
+      desc:"mode=jwt（或探测失败）→ 渲染标准表单。首次安装（无用户）自动转 /setup 引导。",
+      ui:'<b>登录卡</b>：用户名 + 密码 + 登录按钮',
+      wire:'<span class="m">GET</span> <span class="u">/v1/auth/config</span> → { <span class="h">"mode"</span>: <span class="c">"jwt"</span> }\n<span class="m">GET</span> /v1/setup/need → { <span class="h">"needSetup"</span>: false }' },
+    { url:"/v1/login", method:"POST", hot:[0,1,2], tag:"第 2 步 · 登录（含限流）",
+      title:"限流 → 校验 → 签发 JWT",
+      desc:"IP+账号键滑动窗口 10 次/分钟；bcrypt 校验；JWT 的 h 字段绑定 shake256(密码哈希)——改密后旧 token 全部失效。token 存 localStorage，后续请求带 Authorization: Bearer。",
+      ui:'<b>成功</b>→ 仪表盘；<b>失败</b>→ 错误条（限流触发时同样 401，不泄露原因）',
+      wire:'<span class="m">POST</span> <span class="u">/v1/login</span>\n{ <span class="h">"username"</span>: <span class="c">"admin"</span>, <span class="h">"password"</span>: <span class="c">"••••"</span> }\n<span class="d">→ 200 OK</span>\n{ <span class="h">"accessToken"</span>: <span class="c">"eyJhbGciOi…"</span>, <span class="h">"user"</span>: { <span class="h">"role"</span>: <span class="c">"admin"</span> } }\n\n<span class="d">后续：</span>\n<span class="h">Authorization:</span> Bearer eyJhbGciOi…\n<span class="d">SSE/WS 用 ?token=（浏览器 API 不能自定义头）</span>' },
+    { url:"/", method:"GET", hot:[0,1,2], tag:"对照 · 与 cookie 会话等价",
+      title:"三种 token 来源的优先级",
+      desc:"StrictAuth 依次尝试：Authorization: Bearer → ?token=（SSE/WS）→ dockge_token cookie（oidc/proxy 模式）。三种模式殊途同归——进入应用后的体验完全一致。",
+      ui:'<b>统一</b>：无论哪种模式进来，应用内快照/实时流/终端的行为一致',
+      wire:'<span class="d">StrictAuth 的 token 解析顺序：</span>\n1. <span class="h">Authorization:</span> Bearer &lt;jwt&gt;   <span class="d">（本地密码模式）</span>\n2. ?token=&lt;jwt&gt;                <span class="d">（EventSource / WebSocket）</span>\n3. <span class="h">Cookie:</span> dockge_token       <span class="d">（oidc / proxy 模式）</span>' }
+  ] }
+};
+
+/* ================= 渲染引擎 ================= */
+let curMode = "oidc", curStep = 0;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+
+function renderTabs() {
+  $("tabs").innerHTML = Object.entries(MODES).map(([k,m]) =>
+    `<button class="tab${k===curMode?" active":""}" data-mode="${k}" type="button">${m.label}</button>`).join("");
+  [...document.querySelectorAll(".tab")].forEach(b => b.addEventListener("click", () => { curMode = b.dataset.mode; curStep = 0; renderAll(); }));
+}
+function renderIntro() {
+  const m = MODES[curMode];
+  $("modeIntro").innerHTML = `<strong>${m.label.replace(/^[A-C] · /,"")}</strong> — ${m.note}`;
+}
+function renderActors() {
+  const m = MODES[curMode]; const hot = m.steps[curStep].hot || [];
+  let html = "<h4>参与者 · 当步高亮</h4>";
+  m.actors.forEach((a, i) => {
+    html += `<div class="actor${hot.includes(i)?" hot":""}"><b>${a}</b></div>`;
+    if (i < m.actors.length-1) html += `<div class="link${hot.includes(i)&&hot.includes(i+1)?" on":""}">▼</div>`;
+  });
+  $("actors").innerHTML = html;
+}
+function renderStep() {
+  const s = MODES[curMode].steps[curStep];
+  const methodClass = s.method === "REDIR" ? "REDIR" : s.method;
+  $("addrbar").innerHTML = `<span class="dots"><i></i><i></i><i></i></span><span class="method ${methodClass}">${s.method}</span><span class="url">${esc(s.url)}</span>`;
+  $("stepTag").innerHTML = s.tag;
+  $("stepTitle").textContent = s.title;
+  $("stepDesc").innerHTML = s.desc;
+  $("stepUI").innerHTML = s.ui;
+  $("wire").innerHTML = `<div class="cap">HTTP 报文</div>${s.wire}`;
+  $("prevBtn").disabled = curStep === 0;
+  $("nextBtn").disabled = curStep === MODES[curMode].steps.length - 1;
+  $("stepLabel").textContent = `${curStep+1} / ${MODES[curMode].steps.length}`;
+  const dots = MODES[curMode].steps.map((_, i) => `<span class="${i===curStep?"cur":i<curStep?"done":""}" data-i="${i}"></span>`).join("");
+  $("dotsNav").innerHTML = dots;
+  [...document.querySelectorAll(".dots-nav span")].forEach(d => d.addEventListener("click", () => { curStep = +d.dataset.i; renderAll(); }));
+}
+function renderAll() { renderTabs(); renderIntro(); renderActors(); renderStep(); }
+$("prevBtn").addEventListener("click", () => { if (curStep>0){curStep--;renderAll();} });
+$("nextBtn").addEventListener("click", () => { if (curStep<MODES[curMode].steps.length-1){curStep++;renderAll();} });
+document.addEventListener("keydown", (e) => {
+  if (e.key==="ArrowRight" && !e.target.matches("input,textarea")) $("nextBtn").click();
+  if (e.key==="ArrowLeft" && !e.target.matches("input,textarea")) $("prevBtn").click();
+});
+/* 主题 */
+(function(){const root=document.documentElement,btn=$("themeToggle");let saved=null;
+try{saved=localStorage.getItem("dockge.theme")}catch(e){}
+if(saved==="dark"||saved==="light")root.dataset.theme=saved;
+else if(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)root.dataset.theme="dark";
+btn.addEventListener("click",()=>{const n=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=n;try{localStorage.setItem("dockge.theme",n)}catch(e){}});})();
+renderAll();
+</script>
+</body>
+</html>
