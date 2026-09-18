@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,6 +38,8 @@ type StackService interface {
 	Op(ctx context.Context, name, op string) (*v1.StackOpResponse, error)
 	ServiceOp(ctx context.Context, name, service, op string) (*v1.StackOpResponse, error)
 	Stats(ctx context.Context, name string) ([]v1.ContainerStat, error)
+	Networks(ctx context.Context) ([]string, error)
+	StreamOp(ctx context.Context, w io.Writer, name, op string) error
 }
 
 // NewStackService 构造栈服务，由注入容器调用。
@@ -229,6 +232,29 @@ func (s *stackService) Op(ctx context.Context, name, op string) (*v1.StackOpResp
 			fmt.Errorf("%w: %s", v1.ErrDockerError, err.Error())
 	}
 	return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)}, nil
+}
+
+// StreamOp 流式执行栈生命周期操作：compose 输出逐行写入 w（进度终端实时流）。
+// 与 Op 互斥同一把栈锁；校验失败在写出任何内容前返回错误。
+func (s *stackService) StreamOp(ctx context.Context, w io.Writer, name, op string) error {
+	if !stackNamePattern.MatchString(name) {
+		return v1.ErrBadRequest
+	}
+	switch op {
+	case "start", "stop", "restart", "down", "update":
+	default:
+		return v1.ErrBadRequest
+	}
+	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+
+	return s.repo.StackOpStream(ctx, name, op, w)
+}
+
+// Networks 返回本机网络名列表（编辑器建议）。
+func (s *stackService) Networks(ctx context.Context) ([]string, error) {
+	return s.repo.DockerNetworkNames(ctx)
 }
 
 // ServiceOp 执行单服务生命周期操作；失败时带回 compose 输出。

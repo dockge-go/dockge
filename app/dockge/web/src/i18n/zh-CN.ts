@@ -73,12 +73,32 @@ const dict = {
   "compose.noContainers": "尚未部署任何容器",
   "compose.terminalTitle": "终端 - {service} ({stack})",
   "compose.switchShell": "切换到 {shell}",
+  "compose.addContainerName": "容器名",
+  "compose.addContainer": "添加容器",
+  "compose.containerExists": "容器名已存在",
+  "compose.deleteContainer": "删除容器",
+  "compose.editConfig": "编辑",
+  "compose.networksHint": "可在服务 environment/networks 中引用这些网络：{list}",
 
   // ---- 容器卡片 ----
   "container.terminal": "终端",
 
   // ---- 终端 ----
   "term.sessionEnded": "会话已结束",
+
+  // ---- 服务配置表单（编辑态） ----
+  "form.image": "镜像",
+  "form.ports": "端口（每行 HOST:CONTAINER）",
+  "form.volumes": "数据卷（每行 HOST:CONTAINER）",
+  "form.restartPolicy": "重启策略",
+  "form.env": "环境变量（每行 KEY=VALUE）",
+  "form.dependsOn": "依赖（每行一个服务）",
+  "form.networks": "网络",
+
+  "policy.always": "总是",
+  "policy.unlessStopped": "除非停止",
+  "policy.onFailure": "失败时",
+  "policy.no": "从不",
 
   // ---- 编辑器（校验闭环沿用） ----
   "editor.checking": "校验中…",

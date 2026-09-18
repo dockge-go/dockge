@@ -125,6 +125,7 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			strictAuthRouter.GET("/me/disableauth", authHandler.GetDisableAuth)
 			strictAuthRouter.POST("/me/disableauth", authHandler.ToggleDisableAuth)
 
+			strictAuthRouter.GET("/stacks/networks", stackHandler.Networks)
 			strictAuthRouter.GET("/stacks", stackHandler.List)
 			strictAuthRouter.POST("/stacks", stackHandler.Create)
 			strictAuthRouter.POST("/stacks/validate", stackHandler.Validate)

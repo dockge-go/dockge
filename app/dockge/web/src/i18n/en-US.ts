@@ -72,9 +72,29 @@ const dict = {
   "compose.noContainers": "No containers deployed",
   "compose.terminalTitle": "Terminal - {service} ({stack})",
   "compose.switchShell": "Switch to {shell}",
+  "compose.addContainerName": "Container name",
+  "compose.addContainer": "Add Container",
+  "compose.containerExists": "Container name already exists",
+  "compose.deleteContainer": "Delete Container",
+  "compose.editConfig": "Edit",
+  "compose.networksHint": "Reference these networks in service environment/networks: {list}",
 
   // ---- container card ----
   "container.terminal": "Terminal",
+
+  // ---- service config form (edit mode) ----
+  "form.image": "Image",
+  "form.ports": "Ports (HOST:CONTAINER per line)",
+  "form.volumes": "Volumes (HOST:CONTAINER per line)",
+  "form.restartPolicy": "Restart Policy",
+  "form.env": "Environment Variables (KEY=VALUE per line)",
+  "form.dependsOn": "Depends On (one service per line)",
+  "form.networks": "Networks",
+
+  "policy.always": "Always",
+  "policy.unlessStopped": "Unless Stopped",
+  "policy.onFailure": "On Failure",
+  "policy.no": "Never",
 
   // ---- terminal ----
   "term.sessionEnded": "Session ended",

@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 
 	v1 "dockge/app/dockge/api/v1"
@@ -94,15 +96,39 @@ func (h *StackHandler) Delete(ctx *gin.Context) {
 	v1.HandleSuccess(ctx, data)
 }
 
-// Op 处理栈生命周期操作（start/stop/restart/down/update）。
+// Op 处理栈生命周期操作（start/stop/restart/down/update）：流式响应，
+// compose 输出逐行实时下发（text/plain），失败信息写入流尾。
 func (h *StackHandler) Op(ctx *gin.Context) {
-	data, err := h.stackService.Op(ctx, ctx.Param("name"), ctx.Param("op"))
+	w := ctx.Writer
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher := flushWriter{w: w, f: w}
+	if err := h.stackService.StreamOp(ctx, flusher, ctx.Param("name"), ctx.Param("op")); err != nil {
+		// 校验类错误（未写出内容）与流中途失败统一以文本收尾，前端进度终端呈现
+		fmt.Fprintf(flusher, "\n[error] %s\n", err.Error())
+	}
+}
+
+// flushWriter 逐行落盘并立即 flush，保证进度终端的实时性。
+type flushWriter struct {
+	w io.Writer
+	f http.Flusher
+}
+
+func (fw flushWriter) Write(p []byte) (int, error) {
+	n, err := fw.w.Write(p)
+	if fl, ok := fw.f.(http.Flusher); ok {
+		fl.Flush()
+	}
+	return n, err
+}
+
+// Networks 返回本机网络名列表（编辑器建议）。
+func (h *StackHandler) Networks(ctx *gin.Context) {
+	data, err := h.stackService.Networks(ctx)
 	if err != nil {
-		// 操作失败也带回 compose 输出，前端可展示失败原因
-		if data != nil {
-			v1.HandleError(ctx, http.StatusInternalServerError, err, data)
-			return
-		}
 		handleServiceError(ctx, err)
 		return
 	}

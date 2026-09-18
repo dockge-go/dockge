@@ -3,7 +3,7 @@
 // 校验闭环：防抖 2s 自动草稿校验 + 诊断注入 + 四态 pill（超越上游的 yamlError）。
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { A, useBeforeLeave, useNavigate, useParams } from "@solidjs/router";
-import { ChevronDown, ExternalLink, Play, RotateCw, Square, Terminal } from "lucide-solid";
+import { ChevronDown, ExternalLink, Play, RotateCw, Square, Terminal, Trash2 } from "lucide-solid";
 
 import { api, type ContainerStat, type StackDetail, type StackOp } from "../api/api";
 import { errText } from "../api/format";
@@ -12,6 +12,16 @@ import { StackEditor } from "../components/StackEditor";
 import { DisplayTerminal, TerminalPane } from "../components/Terminal";
 import { t } from "../i18n";
 import type { ValidationState } from "../lib/validate";
+import {
+  addService,
+  listServices,
+  listTopLevelNetworks,
+  readService,
+  removeService,
+  setTopLevelNetworks,
+  updateService,
+  type ServiceFields,
+} from "../lib/yaml-edit";
 import { draftYaml, refresh, setDraftYaml, toast } from "../store/index";
 
 const STARTER_YAML = `services:
@@ -69,6 +79,9 @@ export function Compose() {
   const [downOpen, setDownOpen] = createSignal(false);
   const [stats, setStats] = createSignal<ContainerStat[]>([]);
   const [hostname, setHostname] = createSignal("");
+  const [networks, setNetworks] = createSignal<string[]>([]);
+  const [newService, setNewService] = createSignal("");
+  const [openConfigs, setOpenConfigs] = createSignal<Set<string>>(new Set());
   const dirty = () => yaml() !== loadedYaml() || env() !== loadedEnv();
 
   // 未保存离开确认（上游 confirmLeaveStack 等价物）
@@ -79,6 +92,7 @@ export function Compose() {
 
   onMount(() => {
     api.primaryHostname().then((r) => setHostname(r.hostname)).catch(() => {});
+    api.stackNetworks().then(setNetworks).catch(() => {});
     if (isNew()) {
       const draft = draftYaml();
       if (draft) {
@@ -184,18 +198,57 @@ export function Compose() {
 
   const runOp = async (op: StackOp) => {
     const stackName = detail()?.name ?? name().trim().toLowerCase();
-    if (!stackName) return;
+    if (!stackName || busy()) return;
+    setBusy(true);
     setOutput(`$ docker compose ${op}\n`);
     try {
-      const result = await api.stackOp(stackName, op);
-      setOutput(result.output || "");
-      toast(t("toast.saved"), "success");
+      await api.stackOpStream(stackName, op, (chunk) => setOutput((prev) => prev + chunk));
       await refresh(false);
       await load(stackName);
     } catch (error) {
-      setOutput(errText(error));
+      setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
       toast(errText(error), "error");
+    } finally {
+      setBusy(false);
     }
+  };
+
+  // ---- 编辑态：服务增删改（经 yaml Document API 写回，注释保留）----
+
+  const editingServices = () => (editing() ? listServices(yaml()) : []);
+
+  const addContainer = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const serviceName = newService().trim();
+    if (!serviceName) return;
+    if (editingServices().includes(serviceName)) {
+      toast(t("compose.containerExists"), "error");
+      return;
+    }
+    setYaml(addService(yaml(), serviceName));
+    setNewService("");
+  };
+
+  const deleteContainer = (serviceName: string) => {
+    setYaml(removeService(yaml(), serviceName));
+    setOpenConfigs((prev) => {
+      const next = new Set(prev);
+      next.delete(serviceName);
+      return next;
+    });
+  };
+
+  const patchService = (serviceName: string, fields: ServiceFields) => {
+    setYaml(updateService(yaml(), serviceName, fields));
+  };
+
+  const toggleConfig = (serviceName: string) => {
+    setOpenConfigs((prev) => {
+      const next = new Set(prev);
+      if (next.has(serviceName)) next.delete(serviceName);
+      else next.add(serviceName);
+      return next;
+    });
   };
 
   const remove = async () => {
@@ -337,10 +390,11 @@ export function Compose() {
 
           <div class="card" style={{ "margin-top": isNew() ? "20px" : "0" }}>
             <h4 class="card-title">{t("compose.containers")}</h4>
-            <Show
-              when={(detail()?.containers ?? []).length > 0}
-              fallback={<p class="settings-desc">{managed() ? t("compose.noContainers") : ""}</p>}
-            >
+            <Show when={editing()} fallback={
+              <Show
+                when={(detail()?.containers ?? []).length > 0}
+                fallback={<p class="settings-desc">{managed() ? t("compose.noContainers") : ""}</p>}
+              >
               <For each={detail()?.containers ?? []}>
                 {(container) => {
                   const [imageName, imageTag] = splitImage(container.image ?? "");
@@ -393,6 +447,45 @@ export function Compose() {
                   );
                 }}
               </For>
+              </Show>
+            }>
+              {/* 编辑态：服务来自 YAML（上游 jsonConfig 等价物），配置表单写回保留注释 */}
+              <form class="add-container" onSubmit={(e) => void addContainer(e)}>
+                <input
+                  class="form-input"
+                  value={newService()}
+                  placeholder={t("compose.addContainerName")}
+                  onInput={(e) => setNewService(e.currentTarget.value)}
+                />
+                <button class="btn btn-secondary" type="submit" disabled={!newService().trim()}>
+                  {t("compose.addContainer")}
+                </button>
+              </form>
+              <For each={editingServices()} fallback={<p class="settings-desc">{t("compose.noContainers")}</p>}>
+                {(serviceName) => (
+                  <div class="container-card">
+                    <div class="container-card-row">
+                      <div class="container-card-main">
+                        <h4>{serviceName}</h4>
+                        <div class="container-meta mono">{readService(yaml(), serviceName).image ?? "-"}</div>
+                      </div>
+                      <div class="container-card-actions">
+                        <button class="btn btn-sm btn-secondary" onClick={() => toggleConfig(serviceName)}>{t("compose.editConfig")}</button>
+                        <button class="btn-icon danger" aria-label={t("compose.deleteContainer")} onClick={() => deleteContainer(serviceName)}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <Show when={openConfigs().has(serviceName)}>
+                      <ServiceConfigForm
+                        networks={networks()}
+                        initial={readService(yaml(), serviceName)}
+                        onSave={(fields) => patchService(serviceName, fields)}
+                      />
+                    </Show>
+                  </div>
+                )}
+              </For>
             </Show>
           </div>
 
@@ -437,6 +530,9 @@ export function Compose() {
               />
             </div>
           </Show>
+          <Show when={editing()}>
+            <TopNetworksCard yaml={yaml()} suggestions={networks()} onChange={setYaml} />
+          </Show>
           <Show when={output()}>
             <div>
               <h4 class="card-title" style={{ "margin-bottom": "8px" }}>{t("compose.progress")}</h4>
@@ -445,6 +541,113 @@ export function Compose() {
           </Show>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 编辑态服务配置表单（上游 Container.vue 编辑表单的等价物）：
+ *  失焦即写回 YAML（Document API，注释保留）。列表字段每行一条。 */
+function ServiceConfigForm(props: {
+  networks: string[];
+  initial: ServiceFields;
+  onSave: (fields: ServiceFields) => void;
+}) {
+  const [image, setImage] = createSignal(props.initial.image ?? "");
+  const [ports, setPorts] = createSignal((props.initial.ports ?? []).join("\n"));
+  const [volumes, setVolumes] = createSignal((props.initial.volumes ?? []).join("\n"));
+  const [restart, setRestart] = createSignal(props.initial.restart ?? "");
+  const [env, setEnv] = createSignal((props.initial.environment ?? []).join("\n"));
+  const [dependsOn, setDependsOn] = createSignal((props.initial.dependsOn ?? []).join("\n"));
+
+  const lines = (value: string) =>
+    value.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  const save = () =>
+    props.onSave({
+      image: image().trim() || undefined,
+      ports: lines(ports()),
+      volumes: lines(volumes()),
+      restart: restart() || undefined,
+      environment: lines(env()),
+      dependsOn: lines(dependsOn()),
+    });
+
+  return (
+    <div class="service-form" onFocusOut={save}>
+      <div>
+        <label class="form-label">{t("form.image")}</label>
+        <input class="form-input mono" value={image()} onInput={(e) => setImage(e.currentTarget.value)} />
+      </div>
+      <div>
+        <label class="form-label">{t("form.restartPolicy")}</label>
+        <select class="form-select" value={restart()} onChange={(e) => { setRestart(e.currentTarget.value); save(); }}>
+          <option value=""></option>
+          <option value="always">{t("policy.always")}</option>
+          <option value="unless-stopped">{t("policy.unlessStopped")}</option>
+          <option value="on-failure">{t("policy.onFailure")}</option>
+          <option value="no">{t("policy.no")}</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">{t("form.ports")}</label>
+        <textarea class="form-input mono" rows="2" placeholder="HOST:CONTAINER" value={ports()} onInput={(e) => setPorts(e.currentTarget.value)} />
+      </div>
+      <div>
+        <label class="form-label">{t("form.volumes")}</label>
+        <textarea class="form-input mono" rows="2" placeholder="HOST:CONTAINER" value={volumes()} onInput={(e) => setVolumes(e.currentTarget.value)} />
+      </div>
+      <div>
+        <label class="form-label">{t("form.env")}</label>
+        <textarea class="form-input mono" rows="2" placeholder="KEY=VALUE" value={env()} onInput={(e) => setEnv(e.currentTarget.value)} />
+      </div>
+      <div>
+        <label class="form-label">{t("form.dependsOn")}</label>
+        <textarea class="form-input mono" rows="2" value={dependsOn()} onInput={(e) => setDependsOn(e.currentTarget.value)} />
+      </div>
+      <Show when={props.networks.length > 0}>
+        <p class="form-help">{t("compose.networksHint", { list: props.networks.join(" · ") })}</p>
+      </Show>
+    </div>
+  );
+}
+
+/** 编辑态顶层网络卡（上游右栏 Networks 卡的等价物）。 */
+function TopNetworksCard(props: { yaml: string; suggestions: string[]; onChange: (text: string) => void }) {
+  const [input, setInput] = createSignal("");
+  const current = () => listTopLevelNetworks(props.yaml);
+
+  const add = (event: SubmitEvent) => {
+    event.preventDefault();
+    const name = input().trim();
+    if (!name || current().includes(name)) return;
+    props.onChange(setTopLevelNetworks(props.yaml, [...current(), name]));
+    setInput("");
+  };
+
+  const remove = (name: string) => {
+    props.onChange(setTopLevelNetworks(props.yaml, current().filter((item) => item !== name)));
+  };
+
+  return (
+    <div class="card">
+      <h4 class="card-title">{t("form.networks")}</h4>
+      <form class="add-container" onSubmit={add}>
+        <input class="form-input mono" list="network-suggestions" value={input()} onInput={(e) => setInput(e.currentTarget.value)} />
+        <datalist id="network-suggestions">
+          <For each={props.suggestions}>{(name) => <option value={name} />}</For>
+        </datalist>
+        <button class="btn btn-secondary" type="submit" disabled={!input().trim()}>{t("common.save")}</button>
+      </form>
+      <For each={current()} fallback={<p class="settings-desc">default</p>}>
+        {(name) => (
+          <div class="network-row">
+            <span class="mono">{name}</span>
+            <button class="btn-icon danger" aria-label={t("compose.delete")} onClick={() => remove(name)}>
+              <Trash2 size={13} />
+            </button>
+          </div>
+        )}
+      </For>
     </div>
   );
 }

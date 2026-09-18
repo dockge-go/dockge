@@ -147,6 +147,25 @@ export const api = {
   deleteStack: (name: string) => request<void>("DELETE", `/stacks/${encodeURIComponent(name)}`),
   stackOp: (name: string, op: StackOp) =>
     request<{ output: string }>("POST", `/stacks/${encodeURIComponent(name)}/${op}`),
+  /** 流式栈操作：compose 输出逐块实时回调（进度终端）。 */
+  stackOpStream: async (name: string, op: StackOp, onChunk: (text: string) => void): Promise<void> => {
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`/v1/stacks/${encodeURIComponent(name)}/${op}`, { method: "POST", headers });
+    if (!res.ok || !res.body) {
+      const payload = (await res.json().catch(() => null)) as { message?: string } | null;
+      throw new ApiError(res.status, payload?.message || `请求失败（HTTP ${res.status}）`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      onChunk(decoder.decode(value, { stream: true }));
+    }
+  },
+  stackNetworks: () => request<string[]>("GET", "/stacks/networks"),
   stackServiceOp: (name: string, service: string, op: "start" | "stop" | "restart") =>
     request<{ output: string }>("POST", `/stacks/${encodeURIComponent(name)}/services/${encodeURIComponent(service)}/${op}`),
   stackStats: (name: string) =>

@@ -240,6 +240,16 @@ code, pre, .mono { font-family: var(--mono); }
 .container-stats { display: flex; gap: 14px; font-size: 12px; color: var(--text-dim); font-family: var(--mono); margin-top: 8px; }
 .port-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); font-size: 12px; margin: 0 4px 4px 0; font-family: var(--mono); }
 
+/* 编辑态：添加容器与服务配置表单 */
+.add-container { display: flex; gap: 8px; margin-bottom: 12px; }
+.service-form {
+  margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px;
+}
+.service-form .form-help { grid-column: 1 / -1; margin: 0; }
+.network-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 4px; }
+.network-row + .network-row { border-top: 1px solid var(--border); }
+
 /* 操作下拉（上游 Down 菜单） */
 .dropdown { position: relative; }
 .dropdown-menu {

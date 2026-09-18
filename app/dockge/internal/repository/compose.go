@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -304,6 +306,69 @@ func (r *Repository) StackStats(ctx context.Context, name string) ([]model.Conta
 		stats = append(stats, stat)
 	}
 	return stats, nil
+}
+
+// DockerNetworkNames 返回本机网络名列表（编辑器 Networks 字段的建议来源）。
+func (r *Repository) DockerNetworkNames(ctx context.Context) ([]string, error) {
+	out, err := runDocker(ctx, composeOpTimeout, "network", "ls", "--format", "{{.Name}}")
+	if err != nil {
+		return nil, fmt.Errorf("docker network ls: %w", err)
+	}
+	return strings.Fields(strings.TrimSpace(out)), nil
+}
+
+// StackOpStream 以流式执行栈生命周期操作：输出逐行写入 w（调用方负责 flush
+// 语义），供前端进度终端实时呈现。op 语义与 StackOp 一致。
+func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Writer) error {
+	stackDir, files, err := r.resolveStackExec(ctx, name)
+	if err != nil {
+		return fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
+	}
+	phases, err := func(op string) ([][]string, error) {
+		switch op {
+		case "start":
+			return [][]string{composeArgs(name, files, "up", "-d", "--remove-orphans")}, nil
+		case "stop":
+			return [][]string{composeArgs(name, files, "stop")}, nil
+		case "restart":
+			return [][]string{composeArgs(name, files, "restart")}, nil
+		case "down":
+			return [][]string{composeArgs(name, files, "down", "--remove-orphans")}, nil
+		case "update":
+			return [][]string{
+				composeArgs(name, files, "pull"),
+				composeArgs(name, files, "up", "-d", "--remove-orphans"),
+			}, nil
+		default:
+			return nil, fmt.Errorf("unknown stack op: %s", op)
+		}
+	}(op)
+	if err != nil {
+		return err
+	}
+	timeout := composeOpTimeout
+	if op == "update" {
+		timeout = composeUpdateTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for _, args := range phases {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		cmd.Dir = stackDir
+		ch, err := streamCmd(ctx, cmd)
+		if err != nil {
+			return err
+		}
+		for line := range ch {
+			if _, err := fmt.Fprint(w, line); err != nil {
+				return err
+			}
+		}
+		if code := cmd.ProcessState.ExitCode(); code != 0 {
+			return fmt.Errorf("compose %s 失败（退出码 %d）", op, code)
+		}
+	}
+	return nil
 }
 
 // StackExecDir 返回栈 compose 操作的工作目录：
