@@ -35,6 +35,7 @@ export function DashboardHome() {
 
   return (
     <div>
+      <h1 style={{ "margin-bottom": "16px" }}>{t("nav.home")}</h1>
       <div class="card">
         <div class="stats-row">
           <div class="stat-cell stat-active">

@@ -23,7 +23,6 @@ var Package = do.Package(
 	do.Lazy(New),
 	do.Lazy(NewAuthService),
 	do.Lazy(NewStackService),
-	do.Lazy(NewDockerService),
 	do.Lazy(NewSettingsService),
 )
 
@@ -39,10 +38,12 @@ func New(i do.Injector) (*Service, error) {
 
 // -------- SettingsService --------
 
-// SettingsService 提供全局环境变量读写用例。
+// SettingsService 提供全局环境变量与通用设置项读写用例。
 type SettingsService interface {
 	GetGlobalEnv(ctx context.Context) (string, error)
 	SetGlobalEnv(ctx context.Context, content string) error
+	GetPrimaryHostname(ctx context.Context) (string, error)
+	SetPrimaryHostname(ctx context.Context, hostname string) error
 }
 
 type settingsService struct {
@@ -72,4 +73,18 @@ func (s *settingsService) GetGlobalEnv(ctx context.Context) (string, error) {
 
 func (s *settingsService) SetGlobalEnv(ctx context.Context, content string) error {
 	return s.repo.SetSetting(ctx, "globalENV", content, "general")
+}
+
+// GetPrimaryHostname 读取主主机名（空 = 前端回退 location.hostname）。
+func (s *settingsService) GetPrimaryHostname(ctx context.Context) (string, error) {
+	data, err := s.repo.GetAllSettingsByType(ctx, "general")
+	if err != nil {
+		return "", err
+	}
+	return data["primaryHostname"], nil
+}
+
+// SetPrimaryHostname 写入主主机名。
+func (s *settingsService) SetPrimaryHostname(ctx context.Context, hostname string) error {
+	return s.repo.SetSetting(ctx, "primaryHostname", hostname, "general")
 }

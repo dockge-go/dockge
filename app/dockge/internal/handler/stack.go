@@ -108,3 +108,27 @@ func (h *StackHandler) Op(ctx *gin.Context) {
 	}
 	v1.HandleSuccess(ctx, data)
 }
+
+// ServiceOp 处理单服务生命周期操作（start/stop/restart）。
+func (h *StackHandler) ServiceOp(ctx *gin.Context) {
+	data, err := h.stackService.ServiceOp(ctx, ctx.Param("name"), ctx.Param("service"), ctx.Param("op"))
+	if err != nil {
+		if data != nil {
+			v1.HandleError(ctx, http.StatusInternalServerError, err, data)
+			return
+		}
+		handleServiceError(ctx, err)
+		return
+	}
+	v1.HandleSuccess(ctx, data)
+}
+
+// Stats 处理栈内容器资源占用查询（5s 轮询）。
+func (h *StackHandler) Stats(ctx *gin.Context) {
+	data, err := h.stackService.Stats(ctx, ctx.Param("name"))
+	if err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+	v1.HandleSuccess(ctx, data)
+}

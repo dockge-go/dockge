@@ -52,6 +52,14 @@ type PortMapping struct {
 	Protocol      string
 }
 
+// ContainerStat 是单个容器的即时资源占用（docker stats --no-stream 的一行，
+// 字段名与 docker stats --format json 输出对齐）。
+type ContainerStat struct {
+	Name     string `json:"Name"`
+	CPUPerc  string `json:"CPUPerc"`
+	MemUsage string `json:"MemUsage"`
+}
+
 // Container 是栈内或全局的一个容器视图。
 type Container struct {
 	ID      string
@@ -62,21 +70,6 @@ type Container struct {
 	Status  string
 	Ports   []PortMapping
 	Stack   string // 所属 compose 项目（来自容器 label，可空）
-}
-
-// DfCategory 是一类 Docker 资源的磁盘占用汇总。
-type DfCategory struct {
-	Type             string
-	Count            int
-	Active           int
-	SizeBytes        int64
-	ReclaimableBytes int64
-}
-
-// Volume 是本地存储的一个数据卷视图。
-type Volume struct {
-	Name   string
-	Driver string
 }
 
 // Network 是本机一个 docker/podman 网络视图。

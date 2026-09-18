@@ -55,6 +55,32 @@ func (h *SettingsHandler) SetGlobalEnv(ctx *gin.Context) {
 	v1.HandleSuccess(ctx, nil)
 }
 
+// GetPrimaryHostname 读取主主机名设置。
+func (h *SettingsHandler) GetPrimaryHostname(ctx *gin.Context) {
+	hostname, err := h.settingsService.GetPrimaryHostname(ctx)
+	if err != nil {
+		v1.HandleError(ctx, http.StatusInternalServerError, err, nil)
+		return
+	}
+	v1.HandleSuccess(ctx, gin.H{"hostname": hostname})
+}
+
+// SetPrimaryHostname 写入主主机名设置。
+func (h *SettingsHandler) SetPrimaryHostname(ctx *gin.Context) {
+	var req struct {
+		Hostname string `json:"hostname"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
+		return
+	}
+	if err := h.settingsService.SetPrimaryHostname(ctx, req.Hostname); err != nil {
+		v1.HandleError(ctx, http.StatusInternalServerError, err, nil)
+		return
+	}
+	v1.HandleSuccess(ctx, nil)
+}
+
 // AuthConfig 返回当前认证模式与可用 OIDC provider 列表，供登录页渲染 SSO 入口。
 func (h *SettingsHandler) AuthConfig(ctx *gin.Context) {
 	mode := security.AuthMode(h.conf)

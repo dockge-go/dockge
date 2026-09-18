@@ -16,7 +16,7 @@ import { toDiagnostics, type ValidationState } from "../lib/validate";
 // 深色控制台岛主题：背景透明（由 .stack-editor-surface 提供），高亮用默认配色。
 const consoleTheme = EditorView.theme(
   {
-    "&": { backgroundColor: "transparent", color: "#e8e8ed", fontSize: "13px", height: "100%" },
+    "&": { backgroundColor: "transparent", color: "#e8e8ed", fontSize: "14px", height: "100%" },
     ".cm-scroller": { fontFamily: '"SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace', lineHeight: "1.65" },
     ".cm-gutters": { backgroundColor: "transparent", color: "#8e8e93", border: "none", opacity: "0.6" },
     ".cm-activeLine": { backgroundColor: "rgba(255,255,255,0.05)" },

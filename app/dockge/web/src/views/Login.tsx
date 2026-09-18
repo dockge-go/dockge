@@ -1,15 +1,10 @@
-// 登录页（上游复刻）：居中卡片、floating labels、Remember me、错误 alert、语言下拉。
+// 登录页（上游复刻）：居中卡片、floating labels、Remember me、错误 alert。
 // OIDC/proxy 认证模式后端仍生效，但按一比一复刻决策不提供 UI 入口。
 import { Show, createSignal } from "solid-js";
 
 import { errText } from "../api/format";
-import { t, setLocale, useLocale, type LocaleKey } from "../i18n";
+import { t } from "../i18n";
 import { login } from "../store/index";
-
-const LANG_OPTIONS: Array<{ value: LocaleKey; label: string }> = [
-  { value: "zh-CN", label: "简体中文" },
-  { value: "en-US", label: "English" },
-];
 
 export function Login() {
   const [username, setUsername] = createSignal("");
@@ -38,13 +33,6 @@ export function Login() {
         <img class="auth-logo" src="/icon.svg" alt="Dockge" />
         <div class="auth-title">Dockge</div>
         <p class="auth-sub">{t("login.title")}</p>
-        <div class="auth-lang">
-          <select value={useLocale()} onChange={(e) => setLocale(e.currentTarget.value as LocaleKey)} aria-label={t("common.language")}>
-            {LANG_OPTIONS.map((opt) => (
-              <option value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
         <Show when={error()}>
           <div class="auth-error" role="alert">{error()}</div>
         </Show>

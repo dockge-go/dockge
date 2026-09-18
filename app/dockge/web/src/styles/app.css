@@ -92,7 +92,7 @@ code, pre, .mono { font-family: var(--mono); }
 .avatar {
   width: 38px; height: 38px; border-radius: var(--radius-pill);
   background: var(--primary-gradient); color: var(--primary-btn-text);
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; gap: 2px;
   font-weight: 700; font-size: 15px; border: none; cursor: pointer;
 }
 .avatar-dropdown {
@@ -235,8 +235,27 @@ code, pre, .mono { font-family: var(--mono); }
 .container-card-main { flex: 1; min-width: 0; }
 .container-card-actions { display: flex; gap: 6px; align-items: center; }
 .container-meta { color: var(--text-dim); font-size: 13px; margin: 3px 0 6px; }
-.container-stats { display: flex; gap: 14px; font-size: 12px; color: var(--text-dim); font-family: var(--mono); margin-top: 6px; }
-.port-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); font-size: 12px; margin-right: 4px; font-family: var(--mono); }
+.container-meta .tag { background: var(--bg-inset); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+.container-ports { margin: 8px 0 0; }
+.container-stats { display: flex; gap: 14px; font-size: 12px; color: var(--text-dim); font-family: var(--mono); margin-top: 8px; }
+.port-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); font-size: 12px; margin: 0 4px 4px 0; font-family: var(--mono); }
+
+/* 操作下拉（上游 Down 菜单） */
+.dropdown { position: relative; }
+.dropdown-menu {
+  position: absolute; right: 0; top: 42px; min-width: 220px; z-index: 150;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 0.5rem; box-shadow: var(--shadow-box); padding: 6px;
+}
+.dropdown-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 8px 12px; background: none; border: none; border-radius: 8px;
+  color: var(--text); cursor: pointer; font-size: 14px;
+}
+.dropdown-menu button:hover { background: var(--hover); }
+
+/* 终端页标题 */
+.terminal-page-title { font-size: 22px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 
 /* ---- 终端（恒暗，不随主题） ---- */
 .terminal-host {
@@ -245,6 +264,8 @@ code, pre, .mono { font-family: var(--mono); }
   font-family: var(--mono);
 }
 .terminal-host .xterm { height: 300px; }
+.terminal-host.progress { min-height: 190px; }
+.terminal-host.progress .xterm { height: 176px; }
 .progress-terminal { margin-top: 16px; }
 .progress-terminal .terminal-host { min-height: 200px; }
 .progress-terminal .terminal-host .xterm { height: 190px; }

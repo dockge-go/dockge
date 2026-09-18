@@ -65,7 +65,7 @@ func main() {
 		func(i do.Injector) {
 			do.Provide(i, func(i do.Injector) (*app.App, error) {
 				return app.New(
-					app.WithServer(do.MustInvoke[*httpx.Server](i), do.MustInvoke[*server.ContainerStatusServer](i)),
+					app.WithServer(do.MustInvoke[*httpx.Server](i)),
 					app.WithLogger(do.MustInvoke[*log.Logger](i)),
 					app.WithName("dockge-server"),
 				), nil

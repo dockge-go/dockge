@@ -1,7 +1,7 @@
 // Package repository 是 dockge 应用的数据访问层：
 // - 用户账号/设置存 bbolt（go.etcd.io/bbolt）
 // - compose 栈存文件系统（stacks 目录）
-// - 容器数据来自 podman / docker CLI
+// - 容器数据经 docker CLI 子进程
 package repository
 
 import (
@@ -41,20 +41,15 @@ type Repository struct {
 	db        *bbolt.DB
 	stacksDir string
 	logger    *log.Logger
-	podman    *PodmanClient
 }
 
 // New 构造仓储基础对象，由注入容器调用。
 func New(i do.Injector) (*Repository, error) {
-	repo := &Repository{
+	return &Repository{
 		db:        do.MustInvoke[*bbolt.DB](i),
 		stacksDir: StacksDirFromConf(do.MustInvoke[*viper.Viper](i)),
 		logger:    do.MustInvoke[*log.Logger](i),
-	}
-	if pc, err := NewPodmanClient(); err == nil {
-		repo.podman = pc
-	}
-	return repo, nil
+	}, nil
 }
 
 // StackPath 返回指定栈的目录路径（已校验名的调用方负责传入合法 name）。

@@ -28,23 +28,3 @@ func TestStackStatusFromString(t *testing.T) {
 		})
 	}
 }
-
-// TestStackFromLabels 校验 compose 项目 label 的提取。
-func TestStackFromLabels(t *testing.T) {
-	tests := []struct {
-		name   string
-		labels string
-		want   string
-	}{
-		{"has project", "com.docker.compose.project=uim,other=1", "uim"},
-		{"no project", "foo=bar", ""},
-		{"empty", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := stackFromLabels(tt.labels); got != tt.want {
-				t.Errorf("stackFromLabels(%q) = %q, want %q", tt.labels, got, tt.want)
-			}
-		})
-	}
-}

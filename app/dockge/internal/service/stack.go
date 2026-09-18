@@ -35,6 +35,8 @@ type StackService interface {
 	Validate(ctx context.Context, req *v1.StackValidateRequest) *v1.StackValidateResponse
 	Delete(ctx context.Context, name string) (*v1.StackOpResponse, error)
 	Op(ctx context.Context, name, op string) (*v1.StackOpResponse, error)
+	ServiceOp(ctx context.Context, name, service, op string) (*v1.StackOpResponse, error)
+	Stats(ctx context.Context, name string) ([]v1.ContainerStat, error)
 }
 
 // NewStackService 构造栈服务，由注入容器调用。
@@ -76,9 +78,16 @@ func (s *stackService) Get(ctx context.Context, name string) (*v1.StackDetailDat
 	}
 	containers := make([]v1.StackContainer, 0, len(stack.Containers))
 	for _, c := range stack.Containers {
+		ports := make([]v1.PortMapping, 0, len(c.Ports))
+		for _, p := range c.Ports {
+			ports = append(ports, v1.PortMapping{
+				HostIP: p.HostIP, HostPort: p.HostPort,
+				ContainerPort: p.ContainerPort, Protocol: p.Protocol,
+			})
+		}
 		containers = append(containers, v1.StackContainer{
 			ID: c.ID, Name: c.Name, Service: c.Service,
-			State: c.State, Status: c.Status,
+			Image: c.Image, State: c.State, Status: c.Status, Ports: ports,
 		})
 	}
 	urls := repository.ParseXDockgeURLs(stack.Yaml, stack.Env)
@@ -220,6 +229,35 @@ func (s *stackService) Op(ctx context.Context, name, op string) (*v1.StackOpResp
 			fmt.Errorf("%w: %s", v1.ErrDockerError, err.Error())
 	}
 	return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)}, nil
+}
+
+// ServiceOp 执行单服务生命周期操作；失败时带回 compose 输出。
+func (s *stackService) ServiceOp(ctx context.Context, name, service, op string) (*v1.StackOpResponse, error) {
+	if !stackNamePattern.MatchString(name) {
+		return nil, v1.ErrBadRequest
+	}
+	output, err := s.repo.ServiceOp(ctx, name, service, op)
+	if err != nil {
+		return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)},
+			fmt.Errorf("%w: %s", v1.ErrDockerError, err.Error())
+	}
+	return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)}, nil
+}
+
+// Stats 返回栈内容器的即时资源占用。
+func (s *stackService) Stats(ctx context.Context, name string) ([]v1.ContainerStat, error) {
+	if !stackNamePattern.MatchString(name) {
+		return nil, v1.ErrBadRequest
+	}
+	stats, err := s.repo.StackStats(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]v1.ContainerStat, 0, len(stats))
+	for _, stat := range stats {
+		result = append(result, v1.ContainerStat{Name: stat.Name, CPUPerc: stat.CPUPerc, MemUsage: stat.MemUsage})
+	}
+	return result, nil
 }
 
 func stackSummary(stack model.Stack) v1.StackSummaryData {

@@ -124,11 +124,20 @@ type StackDetailData struct {
 }
 
 type StackContainer struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Service string `json:"service,omitempty"`
-	State   string `json:"state"`
-	Status  string `json:"status"`
+	ID      string        `json:"id"`
+	Name    string        `json:"name"`
+	Service string        `json:"service,omitempty"`
+	Image   string        `json:"image,omitempty"`
+	State   string        `json:"state"`
+	Status  string        `json:"status"`
+	Ports   []PortMapping `json:"ports,omitempty"`
+}
+
+// ContainerStat 是单个容器的即时资源占用（对齐 docker stats --format json）。
+type ContainerStat struct {
+	Name     string `json:"name"`
+	CPUPerc  string `json:"cpuPerc"`
+	MemUsage string `json:"memUsage"`
 }
 
 type StackOpResponse struct {
@@ -154,89 +163,12 @@ type StackValidateResponse struct {
 
 // -------- docker --------
 
-type DockerVersionData struct {
-	Version    string `json:"version"`
-	APIVersion string `json:"apiVersion"`
-	OS         string `json:"os"`
-	Arch       string `json:"arch"`
-}
-
-type DockerContainersData struct {
-	List []DockerContainerData `json:"list"`
-}
-
-// ContainerStatusFrame 是容器状态长连接的单帧数据。
-// 容器状态、资源计数与镜像列表同帧同源：前端一次性原子写入快照，
-// 徽标计数（imagesTotal/stacksTotal 等）与列表永远一致——要删一起删、要留一起留。
-// 后端任一资源采集失败则本帧整帧不推（下一事件或 30s 兜底重试），前端保持旧值。
-type ContainerStatusFrame struct {
-	Containers []ContainerStatusData `json:"containers"`
-	Counts     *ResourceCounts       `json:"counts,omitempty"`
-	Images     []DockerImageData     `json:"images,omitempty"`
-}
-
-// ResourceCounts 是侧栏徽标与仪表盘卡片的实时计数（由 docker events
-// container+image 事件驱动，与容器状态同帧推送）。
-type ResourceCounts struct {
-	ContainersTotal   int `json:"containersTotal"`
-	ContainersRunning int `json:"containersRunning"`
-	StacksTotal       int `json:"stacksTotal"`
-	StacksRunning     int `json:"stacksRunning"`
-	ImagesTotal       int `json:"imagesTotal"`
-}
-
-// ContainerStatusData 仅携带会实时变化的容器字段。
-type ContainerStatusData struct {
-	ID     string `json:"id"`
-	State  string `json:"state"`
-	Status string `json:"status"`
-}
-
-type DockerContainerData struct {
-	ID     string        `json:"id"`
-	Name   string        `json:"name"`
-	Image  string        `json:"image"`
-	State  string        `json:"state"`
-	Status string        `json:"status"`
-	Ports  []PortMapping `json:"ports"`
-	Stack  string        `json:"stack,omitempty"`
-}
-
 // PortMapping 是一条端口映射（hostIP:hostPort -> containerPort/proto）。
 type PortMapping struct {
 	HostIP        string `json:"hostIP,omitempty"`
 	HostPort      int    `json:"hostPort,omitempty"`
 	ContainerPort int    `json:"containerPort"`
 	Protocol      string `json:"protocol,omitempty"`
-}
-
-type DockerInfoData struct {
-	Version           string `json:"version"`
-	OS                string `json:"os"`
-	Arch              string `json:"arch"`
-	StacksTotal       int    `json:"stacksTotal"`
-	StacksRunning     int    `json:"stacksRunning"`
-	ContainersTotal   int    `json:"containersTotal"`
-	ContainersRunning int    `json:"containersRunning"`
-	ImagesTotal       int    `json:"imagesTotal"`
-}
-
-type DockerStatsData struct {
-	CPUUsage   float64 `json:"cpuUsage"`   // 系统 CPU 使用率（0-100 百分数）
-	MemUsage   float64 `json:"memUsage"`   // 已用内存 MB
-	MemTotalMB float64 `json:"memTotalMB"` // 内存总量 MB
-	MemPercent float64 `json:"memPercent"` // 内存使用率（0-100 百分数）
-	// Error 非空表示本帧为错误帧（码语义，前端映射文案）：
-	// stats_unavailable = 数据源不可用（如非 Linux 平台无 /proc），流保持 2s 重试兼作心跳。
-	Error string `json:"error,omitempty"`
-}
-
-type DockerDfCategory struct {
-	Type             string `json:"type"`
-	Count            int    `json:"count"`
-	Active           int    `json:"active"`
-	SizeBytes        int64  `json:"sizeBytes"`
-	ReclaimableBytes int64  `json:"reclaimableBytes"`
 }
 
 // -------- composerize --------
@@ -258,57 +190,4 @@ type VersionCheckResponse struct {
 
 // -------- 镜像 --------
 
-type DockerImageData struct {
-	ID          string `json:"id"`
-	Repo        string `json:"repo"`
-	Tag         string `json:"tag"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	CreatedUnix int64  `json:"createdAt"` // 构建时间 unix 秒
-}
-
-type DockerVolumeData struct {
-	Name   string `json:"name"`
-	Driver string `json:"driver"`
-}
-
-// DockerNetworkData 是网络列表的一行。
-type DockerNetworkData struct {
-	Name   string `json:"name"`
-	Driver string `json:"driver"`
-}
-
-type PullImageRequest struct {
-	Reference string `json:"reference" binding:"required"`
-}
-
-// NetworkCreateRequest 创建网络的请求体。
-type NetworkCreateRequest struct {
-	Name   string `json:"name" binding:"required"`
-	Driver string `json:"driver"`
-	Subnet string `json:"subnet"`
-}
-
 // -------- 用户管理（admin 专用） --------
-
-type UserRow struct {
-	ID       uint   `json:"id"`
-	Username string `json:"username"`
-	Nickname string `json:"nickname"`
-	Role     string `json:"role"`   // admin / member
-	Active   bool   `json:"active"` // 停用即时失效其全部会话（CheckSession）
-	Source   string `json:"source"` // local / proxy / oidc
-}
-
-type UserCreateRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required,min=6"`
-	Role     string `json:"role"` // 空 = member
-}
-
-type UserRoleRequest struct {
-	Role string `json:"role" binding:"required"`
-}
-
-type UserActiveRequest struct {
-	Active bool `json:"active"`
-}

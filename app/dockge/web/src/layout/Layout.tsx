@@ -3,6 +3,7 @@
 // Gate 承担 boot/认证/Setup 引导；未登录整体替换为 Login。
 import { Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { A, useNavigate, type RouteSectionProps } from "@solidjs/router";
+import { ChevronDown } from "lucide-solid";
 
 import { api } from "../api/api";
 import { errText } from "../api/format";
@@ -11,7 +12,7 @@ import { ConfirmHost } from "../components/Confirm";
 import { Toaster } from "../components/Toaster";
 import { t } from "../i18n";
 import { Login } from "../views/Login";
-import { authed, boot, logout, refresh, sseOn, toast, user } from "../store/index";
+import { authed, boot, logout, refresh, toast, user } from "../store/index";
 
 /** 认证门：启动会话校验；未初始化跳 Setup，未登录渲染 Login。 */
 export function Gate(props: RouteSectionProps) {
@@ -64,11 +65,8 @@ function Layout(props: { children?: JSX.Element }) {
   };
 
   return (
-    <div class="app-main">
-      <Show when={!sseOn()}>
-        <div class="disconnect-banner">{t("common.error")}: disconnected</div>
-      </Show>
-      <header class="topbar">
+      <div class="app-main">
+        <header class="topbar">
           <A class="topbar-brand" href="/">
             <img src="/icon.svg" alt="Dockge" />
             <span>Dockge</span>
@@ -87,6 +85,7 @@ function Layout(props: { children?: JSX.Element }) {
           <div class="avatar-menu">
             <button class="avatar" aria-label={user()?.username} onClick={() => setMenuOpen((v) => !v)}>
               {initial()}
+              <ChevronDown size={13} />
             </button>
             <Show when={menuOpen()}>
               <div class="avatar-dropdown">

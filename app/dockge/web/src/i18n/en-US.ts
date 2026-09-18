@@ -10,7 +10,6 @@ const dict = {
   "common.loading": "Loading…",
   "common.error": "Something went wrong",
   "common.language": "Language",
-  "common.theme": "Theme",
   "theme.light": "Light",
   "theme.dark": "Dark",
   "theme.auto": "Auto",
@@ -47,7 +46,6 @@ const dict = {
   // ---- stack list ----
   "stacklist.searchPlaceholder": "Search…",
   "stacklist.empty": "No stacks yet",
-  "stacklist.addFirst": "Click + Compose to create your first stack",
 
   // ---- compose ----
   "compose.newTitle": "New Stack",
@@ -67,24 +65,18 @@ const dict = {
   "compose.confirmDelete": "Confirm deletion",
   "compose.confirmDeleteDesc": "This will run compose down and delete all files of {name}. This cannot be undone.",
   "compose.containers": "Containers",
-  "compose.addContainer": "Add Container",
   "compose.terminal": "Terminal (combined logs)",
   "compose.progress": "Output",
   "compose.leaveConfirm": "You have unsaved changes. Leave anyway?",
   "compose.discardConfirm": "Discard all unsaved changes?",
-  "compose.networks": "Networks",
-  "compose.externalStack": "External stack (read-only)",
   "compose.noContainers": "No containers deployed",
+  "compose.terminalTitle": "Terminal - {service} ({stack})",
+  "compose.switchShell": "Switch to {shell}",
 
   // ---- container card ----
   "container.terminal": "Terminal",
-  "container.image": "Image",
-  "container.ports": "Ports",
-  "container.cpu": "CPU",
-  "container.mem": "Memory",
 
   // ---- terminal ----
-  "term.pageTitle": "Container Terminal",
   "term.sessionEnded": "Session ended",
 
   // ---- editor ----
@@ -102,7 +94,12 @@ const dict = {
   "settings.security": "Security",
   "settings.globalEnv": "Global Env",
   "settings.about": "About",
-  "settings.stackDir": "Stacks Directory",
+  "settings.primaryHostname": "Primary Hostname",
+  "settings.primaryHostnameHelp": "Hostname used by port links; falls back to the current page host when empty",
+  "settings.autoGet": "Auto Get",
+  "settings.checkUpdate": "Check Update On GitHub",
+  "settings.showUpdateIfAvailable": "Show update if available",
+  "settings.checkBeta": "Also check beta release",
   "settings.theme": "Theme",
   "settings.language": "Language",
   "settings.saved": "Saved",
@@ -115,19 +112,13 @@ const dict = {
   "settings.disableAuthDesc": "Anyone will be able to access this panel. Confirm with your current password.",
   "settings.globalEnvDesc": "Global variables written to .env, applied to variable interpolation of all stacks.",
   "settings.version": "Version",
-  "settings.upstream": "Upstream project",
   "settings.newUpdate": "New Update",
 
   // ---- toast ----
   "toast.refreshed": "Refreshed",
-  "toast.deploying": "Deploying {name}…",
-  "toast.deployDone": "{name} deployed",
   "toast.saved": "Saved",
   "toast.draftSaved": "Draft saved",
   "toast.deleted": "Deleted {name}",
-  "toast.sseRunning": "started",
-  "toast.sseExited": "exited",
-  "toast.ssePaused": "paused",
   "toast.scanDone": "Scan completed",
 };
 

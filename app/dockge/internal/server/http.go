@@ -33,7 +33,6 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 	settingsHandler := do.MustInvoke[*handler.SettingsHandler](i)
 	composerizeHandler := do.MustInvoke[*handler.ComposerizeHandler](i)
 	terminalHandler := do.MustInvoke[*handler.TerminalHandler](i)
-	usersHandler := do.MustInvoke[*handler.UsersHandler](i)
 
 	if do.MustInvoke[*viper.Viper](i).GetString("env") == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -133,45 +132,15 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			strictAuthRouter.PUT("/stacks/:name", stackHandler.Update)
 			strictAuthRouter.DELETE("/stacks/:name", stackHandler.Delete)
 			strictAuthRouter.POST("/stacks/:name/:op", stackHandler.Op)
+			strictAuthRouter.POST("/stacks/:name/services/:service/:op", stackHandler.ServiceOp)
+			strictAuthRouter.GET("/stacks/:name/stats", stackHandler.Stats)
 
-			strictAuthRouter.GET("/docker/version", dockerHandler.Version)
-			strictAuthRouter.GET("/docker/containers", dockerHandler.Containers)
-			strictAuthRouter.GET("/docker/containers/stream", dockerHandler.ContainerStatusStream)
-			strictAuthRouter.GET("/docker/containers/:id/inspect", dockerHandler.ContainerInspect)
-			strictAuthRouter.GET("/docker/info", dockerHandler.Info)
-			strictAuthRouter.GET("/docker/networks", dockerHandler.Networks)
-			strictAuthRouter.GET("/docker/networks/:name", dockerHandler.NetworkInspect)
-			strictAuthRouter.DELETE("/docker/networks/:name", dockerHandler.RemoveNetwork)
-			strictAuthRouter.GET("/docker/images", dockerHandler.DockerImages)
-			strictAuthRouter.DELETE("/docker/images/:id", dockerHandler.RemoveImage)
-			strictAuthRouter.POST("/docker/images/pull", dockerHandler.PullImage)
-			strictAuthRouter.POST("/docker/images/prune", dockerHandler.PruneImages)
-			strictAuthRouter.POST("/docker/networks/create", dockerHandler.NetworkCreate)
-			strictAuthRouter.POST("/docker/containers/prune", dockerHandler.PruneContainers)
-			strictAuthRouter.POST("/docker/networks/prune", dockerHandler.PruneNetworks)
-			strictAuthRouter.POST("/docker/volumes/prune", dockerHandler.PruneVolumes)
-			strictAuthRouter.GET("/docker/volumes", dockerHandler.DockerVolumes)
-			strictAuthRouter.DELETE("/docker/volumes/:name", dockerHandler.RemoveVolume)
-			strictAuthRouter.GET("/docker/stats/stream", dockerHandler.StatsStream)
-			strictAuthRouter.GET("/docker/df", dockerHandler.DockerDf)
-			strictAuthRouter.POST("/docker/containers/:id/stop", dockerHandler.StopContainer)
-			strictAuthRouter.POST("/docker/containers/:id/start", dockerHandler.StartContainer)
-			strictAuthRouter.POST("/docker/containers/:id/restart", dockerHandler.RestartContainer)
-			strictAuthRouter.GET("/docker/containers/:id/logs", dockerHandler.ContainerLogs)
-			strictAuthRouter.DELETE("/docker/containers/:id", dockerHandler.RemoveContainer)
 			strictAuthRouter.GET("/version/check", dockerHandler.VersionCheck)
 
 			strictAuthRouter.GET("/settings/globalenv", settingsHandler.GetGlobalEnv)
 			strictAuthRouter.PUT("/settings/globalenv", settingsHandler.SetGlobalEnv)
-
-			usersAdmin := strictAuthRouter.Group("/users", usersHandler.RequireAdmin)
-			{
-				usersAdmin.GET("", usersHandler.List)
-				usersAdmin.POST("", usersHandler.Create)
-				usersAdmin.PUT("/:id/role", usersHandler.SetRole)
-				usersAdmin.PUT("/:id/active", usersHandler.SetActive)
-				usersAdmin.DELETE("/:id", usersHandler.Delete)
-			}
+			strictAuthRouter.GET("/settings/primaryhostname", settingsHandler.GetPrimaryHostname)
+			strictAuthRouter.PUT("/settings/primaryhostname", settingsHandler.SetPrimaryHostname)
 
 			strictAuthRouter.POST("/composerize", composerizeHandler.Convert)
 

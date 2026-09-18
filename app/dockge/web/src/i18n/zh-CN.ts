@@ -11,7 +11,6 @@ const dict = {
   "common.loading": "加载中…",
   "common.error": "出错了",
   "common.language": "语言",
-  "common.theme": "主题",
   "theme.light": "明亮",
   "theme.dark": "暗黑",
   "theme.auto": "自动",
@@ -48,7 +47,6 @@ const dict = {
   // ---- 栈列表侧栏 ----
   "stacklist.searchPlaceholder": "搜索…",
   "stacklist.empty": "还没有 Stack",
-  "stacklist.addFirst": "点击 + Compose 创建第一个 Stack",
 
   // ---- 栈详情 ----
   "compose.newTitle": "新建 Stack",
@@ -68,24 +66,18 @@ const dict = {
   "compose.confirmDelete": "确认删除",
   "compose.confirmDeleteDesc": "将执行 compose down 并删除 {name} 的全部文件，不可恢复。",
   "compose.containers": "容器",
-  "compose.addContainer": "添加容器",
   "compose.terminal": "终端（合并日志）",
   "compose.progress": "操作输出",
   "compose.leaveConfirm": "有未保存的修改，确定离开？",
   "compose.discardConfirm": "放弃全部未保存的修改？",
-  "compose.networks": "网络",
-  "compose.externalStack": "外部 Stack（只读）",
   "compose.noContainers": "尚未部署任何容器",
+  "compose.terminalTitle": "终端 - {service} ({stack})",
+  "compose.switchShell": "切换到 {shell}",
 
   // ---- 容器卡片 ----
   "container.terminal": "终端",
-  "container.image": "镜像",
-  "container.ports": "端口",
-  "container.cpu": "CPU",
-  "container.mem": "内存",
 
   // ---- 终端 ----
-  "term.pageTitle": "容器终端",
   "term.sessionEnded": "会话已结束",
 
   // ---- 编辑器（校验闭环沿用） ----
@@ -103,7 +95,12 @@ const dict = {
   "settings.security": "安全",
   "settings.globalEnv": "环境变量",
   "settings.about": "关于",
-  "settings.stackDir": "Stacks 目录",
+  "settings.primaryHostname": "主主机名",
+  "settings.primaryHostnameHelp": "端口链接使用的访问地址；留空时使用当前页面主机名",
+  "settings.autoGet": "自动获取",
+  "settings.checkUpdate": "在 GitHub 上检查更新",
+  "settings.showUpdateIfAvailable": "有更新时显示提示",
+  "settings.checkBeta": "同时检查 beta 版本",
   "settings.theme": "主题",
   "settings.language": "语言",
   "settings.saved": "已保存",
@@ -116,19 +113,13 @@ const dict = {
   "settings.disableAuthDesc": "关闭后任何人均可访问本面板，需输入当前密码确认。",
   "settings.globalEnvDesc": "写入 .env 的全局变量，对所有 Stack 的变量插值生效。",
   "settings.version": "版本",
-  "settings.upstream": "上游项目",
   "settings.newUpdate": "有新版本",
 
   // ---- toast ----
   "toast.refreshed": "已刷新",
-  "toast.deploying": "正在部署 {name}…",
-  "toast.deployDone": "{name} 部署完成",
   "toast.saved": "已保存",
   "toast.draftSaved": "草稿已保存",
   "toast.deleted": "已删除 {name}",
-  "toast.sseRunning": "开始运行",
-  "toast.sseExited": "已退出",
-  "toast.ssePaused": "已暂停",
   "toast.scanDone": "扫描完成",
 };
 

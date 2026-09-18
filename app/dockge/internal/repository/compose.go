@@ -34,12 +34,22 @@ type composeLsItem struct {
 
 // composePsItem 映射 `docker compose ps --format json` 的一行（NDJSON）。
 type composePsItem struct {
-	ID       string `json:"ID"`
-	Name     string `json:"Name"`
-	Service  string `json:"Service"`
-	State    string `json:"State"`
-	Health   string `json:"Health"`
-	ExitCode int    `json:"ExitCode"`
+	ID         string `json:"ID"`
+	Name       string `json:"Name"`
+	Service    string `json:"Service"`
+	State      string `json:"State"`
+	Health     string `json:"Health"`
+	ExitCode   int    `json:"ExitCode"`
+	Image      string `json:"Image"`
+	Publishers []composePsPublisher
+}
+
+// composePsPublisher 映射 ps 输出的端口发布条目。
+type composePsPublisher struct {
+	URL           string `json:"URL"`
+	TargetPort    int    `json:"TargetPort"`
+	PublishedPort int    `json:"PublishedPort"`
+	Protocol      string `json:"Protocol"`
 }
 
 // StackStatusFromString 把 `docker compose ls` 的 Status 字符串转换为状态枚举。
@@ -162,12 +172,21 @@ func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Containe
 				status = "running"
 			}
 		}
+		ports := make([]model.PortMapping, 0, len(item.Publishers))
+		for _, p := range item.Publishers {
+			ports = append(ports, model.PortMapping{
+				HostIP: p.URL, HostPort: p.PublishedPort,
+				ContainerPort: p.TargetPort, Protocol: p.Protocol,
+			})
+		}
 		containers = append(containers, model.Container{
 			ID:      shortID(item.ID),
 			Name:    item.Name,
 			Service: item.Service,
+			Image:   item.Image,
 			State:   item.State,
 			Status:  status,
+			Ports:   ports,
 		})
 	}
 	return containers, nil
@@ -234,6 +253,57 @@ func (r *Repository) ValidateCompose(ctx context.Context, yaml, env string) (str
 	}
 	return runDockerIn(ctx, dir, composeValidateTimeout,
 		"compose", "-p", "dockge-validate", "-f", "compose.yaml", "config")
+}
+
+// ServiceOp 对栈内单个服务执行 compose 操作（up/stop/restart <service>），
+// 与上游 dockge 的服务级操作对齐。
+func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (string, error) {
+	stackDir, files, err := r.resolveStackExec(ctx, name)
+	if err != nil {
+		return "", fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
+	}
+	var args []string
+	switch op {
+	case "start":
+		args = []string{"up", "-d", service}
+	case "stop":
+		args = []string{"stop", service}
+	case "restart":
+		args = []string{"restart", service}
+	default:
+		return "", fmt.Errorf("unknown service op: %s", op)
+	}
+	return runDockerIn(ctx, stackDir, composeOpTimeout, composeArgs(name, files, args...)...)
+}
+
+// StackStats 返回栈内容器的即时资源占用（docker stats --no-stream）。
+// 栈未部署（无容器 ID）时返回空切片。
+func (r *Repository) StackStats(ctx context.Context, name string) ([]model.ContainerStat, error) {
+	idsOut, err := runDocker(ctx, composeOpTimeout, "compose", "-p", name, "ps", "--all", "-q")
+	if err != nil {
+		return []model.ContainerStat{}, nil
+	}
+	ids := strings.Fields(idsOut)
+	if len(ids) == 0 {
+		return []model.ContainerStat{}, nil
+	}
+	statsArgs := append([]string{"stats", "--no-stream", "--format", "json"}, ids...)
+	out, err := runDocker(ctx, composeOpTimeout, statsArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("docker stats: %w", err)
+	}
+	stats := make([]model.ContainerStat, 0)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		var stat model.ContainerStat
+		if err := json.Unmarshal([]byte(line), &stat); err != nil {
+			continue // 跳过无法解析的行（容器刚退出等）
+		}
+		stats = append(stats, stat)
+	}
+	return stats, nil
 }
 
 // StackExecDir 返回栈 compose 操作的工作目录：

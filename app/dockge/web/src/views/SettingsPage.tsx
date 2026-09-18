@@ -7,7 +7,7 @@ import { api } from "../api/api";
 import { errText } from "../api/format";
 import { t, setLocale, useLocale, type LocaleKey, type MsgKey } from "../i18n";
 import { setThemePref, useThemePref } from "../lib/theme";
-import { snapshot, toast } from "../store/index";
+import { toast } from "../store/index";
 
 const TABS = ["general", "appearance", "security", "globalEnv", "about"] as const;
 type Tab = (typeof TABS)[number];
@@ -19,7 +19,8 @@ const LANG_OPTIONS: Array<{ value: LocaleKey; label: string }> = [
 
 export function SettingsPage() {
   const params = useParams();
-  const tab = (): Tab => (TABS as readonly string[]).includes(params.tab ?? "") ? (params.tab as Tab) : "general";
+  // 上游 desktop 默认子页为 appearance
+  const tab = (): Tab => (TABS as readonly string[]).includes(params.tab ?? "") ? (params.tab as Tab) : "appearance";
 
   return (
     <div>
@@ -47,24 +48,47 @@ export function SettingsPage() {
 }
 
 function GeneralTab() {
-  const [dockgeVersion, setDockgeVersion] = createSignal("");
+  const [hostname, setHostnameSignal] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+
   onMount(() => {
-    api.versionCheck().then((r) => setDockgeVersion(r.currentVersion)).catch(() => {});
+    api.primaryHostname().then((r) => setHostnameSignal(r.hostname)).catch(() => {});
   });
+
+  const save = async () => {
+    if (busy()) return;
+    setBusy(true);
+    try {
+      await api.setPrimaryHostname(hostname());
+      toast(t("settings.saved"), "success");
+    } catch (error) {
+      toast(errText(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div>
       <h2 class="card-title">{t("settings.general")}</h2>
-      <div class="settings-row">
-        <span class="settings-label">Dockge</span>
-        <span class="mono">{dockgeVersion() || "dev"}</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Docker</span>
-        <span class="mono">{snapshot()?.docker.version ?? "-"}</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Host</span>
-        <span class="mono">{snapshot()?.docker.os ?? "-"} / {snapshot()?.docker.arch ?? "-"}</span>
+      <div style={{ "max-width": "420px" }}>
+        <label class="form-label" for="primary-hostname">{t("settings.primaryHostname")}</label>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            id="primary-hostname"
+            class="form-input"
+            value={hostname()}
+            placeholder={location.hostname}
+            onInput={(e) => setHostnameSignal(e.currentTarget.value)}
+          />
+          <button type="button" class="btn btn-secondary" onClick={() => setHostnameSignal(location.hostname)}>
+            {t("settings.autoGet")}
+          </button>
+        </div>
+        <p class="form-help">{t("settings.primaryHostnameHelp")}</p>
+        <div style={{ "margin-top": "12px" }}>
+          <button class="btn btn-primary" disabled={busy()} onClick={() => void save()}>{t("common.save")}</button>
+        </div>
       </div>
     </div>
   );
@@ -221,19 +245,53 @@ function GlobalEnvTab() {
 
 function AboutTab() {
   const [version, setVersion] = createSignal("");
+  const [checkUpdate, setCheckUpdate] = createSignal(localStorage.getItem("dockge.checkUpdate") !== "0");
+  const [checkBeta, setCheckBeta] = createSignal(localStorage.getItem("dockge.checkBeta") === "1");
+
   onMount(() => {
     api.versionCheck().then((r) => setVersion(r.currentVersion)).catch(() => {});
   });
+
+  const persist = (key: string, value: boolean) => {
+    try {
+      localStorage.setItem(key, value ? "1" : "0");
+    } catch {
+      // 持久化失败不影响本次会话
+    }
+  };
+
   return (
-    <div>
-      <h2 class="card-title">{t("settings.about")}</h2>
-      <div class="settings-row">
-        <span class="settings-label">{t("settings.version")}</span>
-        <span class="mono">{version() || "dev"}</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">{t("settings.upstream")}</span>
-        <a href="https://github.com/louislam/dockge" target="_blank" rel="noreferrer">louislam/dockge</a>
+    <div style={{ "text-align": "center" }}>
+      <img src="/icon.svg" alt="Dockge" style={{ width: "200px", height: "200px", "margin-top": "12px" }} />
+      <div style={{ "font-size": "20px", "font-weight": 700, "margin": "8px 0" }}>Dockge</div>
+      <p class="mono">{t("settings.version")}: {version() || "dev"}</p>
+      <p>
+        <a href="https://github.com/louislam/dockge/releases" target="_blank" rel="noreferrer">{t("settings.checkUpdate")}</a>
+      </p>
+      <div style={{ "margin-top": "20px", "text-align": "left", "max-width": "360px", margin: "20px auto 0" }}>
+        <div class="settings-row">
+          <span class="settings-label">{t("settings.showUpdateIfAvailable")}</span>
+          <input
+            type="checkbox"
+            checked={checkUpdate()}
+            onChange={(e) => {
+              setCheckUpdate(e.currentTarget.checked);
+              persist("dockge.checkUpdate", e.currentTarget.checked);
+            }}
+          />
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">{t("settings.checkBeta")}</span>
+          <input
+            type="checkbox"
+            disabled={!checkUpdate()}
+            checked={checkBeta()}
+            onChange={(e) => {
+              setCheckBeta(e.currentTarget.checked);
+              persist("dockge.checkBeta", e.currentTarget.checked);
+            }}
+          />
+        </div>
       </div>
     </div>
   );

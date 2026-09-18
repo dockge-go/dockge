@@ -53,12 +53,6 @@ type AuthService interface {
 	// AutoLogin 免登录模式下以首个活跃用户自动登录。
 	AutoLogin(ctx context.Context) (*v1.LoginResponseData, error)
 	GetLatestVersion(ctx context.Context) (string, error)
-	// ---- 用户管理（admin 专用；角色守卫在 handler 层，领域不变量在本层）----
-	AdminListUsers(ctx context.Context) ([]model.DockgeUser, error)
-	AdminCreateUser(ctx context.Context, req *v1.UserCreateRequest) (model.DockgeUser, error)
-	AdminSetUserRole(ctx context.Context, actorID, targetID uint, role string) error
-	AdminSetUserActive(ctx context.Context, actorID, targetID uint, active bool) error
-	AdminDeleteUser(ctx context.Context, actorID, targetID uint) error
 }
 
 type authService struct {
