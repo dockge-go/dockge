@@ -24,5 +24,12 @@ func New(p string) (*viper.Viper, error) {
 	if err := conf.ReadInConfig(); err != nil {
 		return nil, err
 	}
+	// AutomaticEnv 只对「文件中不存在」的键生效：显式为每个已知键绑定环境变量，
+	// 保证 APP_* 覆盖配置文件里的值（如 APP_CONTAINER_CLI=podman）。
+	for _, key := range conf.AllKeys() {
+		if err := conf.BindEnv(key); err != nil {
+			return nil, err
+		}
+	}
 	return conf, nil
 }

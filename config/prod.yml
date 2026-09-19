@@ -1,0 +1,27 @@
+env: prod
+http:
+  host: 0.0.0.0
+  port: 5001
+security:
+  jwt:
+    key: change-me-in-production
+container:
+  # 容器运行时 CLI：auto（默认，按 PATH 探测 docker → podman → nerdctl）或显式指定
+  cli: auto
+  # compose 命令：留空 = `<cli> compose`；独立命令（如 podman-compose）可直接填写
+  compose: ""
+dockge:
+  stacks_dir: storage/stacks
+data:
+  db:
+    user:
+      dsn: storage/dockge.db
+log:
+  log_level: info
+  mode: both
+  encoding: json
+  log_file_name: "./storage/logs/dockge.log"
+  max_backups: 30
+  max_age: 28
+  max_size: 1024
+  compress: true

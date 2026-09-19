@@ -9,11 +9,12 @@ dist/
 .playwright-mcp
 .omo
 .superpowers/
-
+.zcode
 # OpenSpec specifications and change artifacts are versioned project documentation.
 !openspec/
 !openspec/**
-
+.playwright-mcp
+.codegraph
 *.db
 *.sqlite
 *.db

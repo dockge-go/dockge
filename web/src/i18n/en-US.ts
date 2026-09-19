@@ -1,0 +1,167 @@
+// en-US 词典：值逐条对齐 louislam/dockge 的 en locale。
+const dict = {
+  "app.title": "Dockge",
+
+  // ---- common ----
+  "common.ok": "OK",
+  "common.cancel": "Cancel",
+  "common.save": "Save",
+  "common.close": "Close",
+  "common.loading": "Loading…",
+  "common.language": "Language",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
+  "theme.auto": "Auto",
+
+  // ---- topbar ----
+  "nav.home": "Home",
+  "nav.settings": "Settings",
+  "nav.logout": "Logout",
+  "nav.scanStacks": "Scan Stacks Folder",
+  "nav.signedInAs": "Signed in as {name}",
+
+  // ---- login / setup ----
+  "login.title": "Login to Dockge",
+  "login.username": "Username",
+  "login.password": "Password",
+  "login.remember": "Remember me",
+  "login.submit": "Login",
+  "setup.title": "Create your admin account",
+  "setup.username": "Username",
+  "setup.password": "Password",
+  "setup.repeat": "Repeat Password",
+  "setup.passwordsNoMatch": "Passwords do not match.",
+  "setup.submit": "Create",
+  "setup.welcome": "Dockge",
+
+  // ---- home ----
+  "home.active": "Active",
+  "home.exited": "Exited",
+  "home.inactive": "Inactive",
+  "home.dockerRunTitle": "Docker Run",
+  "home.convert": "Convert to Compose",
+  "home.convertSuccess": "Converted, please confirm in the editor",
+
+  // ---- stack list ----
+  "stacklist.searchPlaceholder": "Search…",
+  "stacklist.empty": "Compose your first stack!",
+
+  // ---- compose ----
+  "compose.newTitle": "Compose",
+  "compose.name": "Stack Name",
+  "compose.namePlaceholder": "my-app",
+  "compose.nameHelp": "Lowercase only",
+  "compose.noServices": "Add at least one container first",
+  "compose.deploy": "Deploy",
+  "compose.saveDraft": "Save",
+  "compose.discard": "Discard",
+  "compose.edit": "Edit",
+  "compose.start": "Start",
+  "compose.restart": "Restart",
+  "compose.update": "Update",
+  "compose.stop": "Stop",
+  "compose.down": "Stop & Inactive",
+  "compose.delete": "Delete",
+  "compose.confirmDelete": "Delete",
+  "compose.confirmDeleteDesc": "Are you sure you want to delete this stack?",
+  "compose.containers": "Containers",
+    "compose.logs": "Logs",
+  "compose.live": "Live",
+  "compose.ended": "Disconnected",
+  "compose.terminal": "Terminal",
+  "compose.leaveConfirm": "You are currently editing a stack. Are you sure you want to leave?",
+  "compose.unmanaged": "This stack is not managed by Dockge.",
+  "compose.terminalTitle": "Terminal - {service} ({stack})",
+  "compose.switchShell": "Switch to {shell}",
+  "compose.addContainerName": "New Container Name...",
+  "compose.addContainer": "Add Container",
+  "compose.containerExists": "Container name already exists",
+  "compose.containerNameEmpty": "Container name cannot be empty",
+  "compose.deleteContainer": "Delete Container",
+
+  // ---- container card ----
+
+  // ---- terminal ----
+  "term.sessionEnded": "Session ended",
+
+  // ---- service config form (upstream ArrayInput/ArraySelect equivalents) ----
+  "form.image": "Docker Image",
+  "form.ports": "Ports",
+  "form.volumes": "Volumes",
+  "form.restartPolicy": "Restart Policy",
+  "form.env": "Environment Variables",
+  "form.dependsOn": "Depends On",
+  "form.networks": "Networks",
+  "form.addListItem": "Add {name}",
+  "form.selectNetwork": "Select a network...",
+  "form.longSyntax": "Long syntax is not supported here. Please use the YAML editor.",
+  "stats.detail": "Resource details",
+  "stats.cpu": "CPU",
+  "stats.memory": "Memory",
+  "stats.networkIO": "Network I/O",
+  "stats.blockIO": "Block I/O",
+
+  "policy.always": "Always",
+  "policy.unlessStopped": "Unless Stopped",
+  "policy.onFailure": "On Failure",
+  "policy.no": "No",
+
+  // ---- networks card (upstream NetworkInput equivalent) ----
+  "networks.internal": "Internal Networks",
+  "networks.addInternal": "Add Internal Network",
+  "networks.external": "External Networks",
+  "networks.none": "No External Networks",
+  "networks.namePlaceholder": "Network name...",
+
+  // ---- settings ----
+  "settings.general": "General",
+  "settings.appearance": "Appearance",
+  "settings.security": "Security",
+  "settings.globalEnv": "Global .env",
+  "settings.about": "About",
+  "settings.primaryHostname": "Primary Hostname",
+  "settings.primaryHostnameHelp": "Not set: use current hostname",
+  "settings.autoGet": "Auto Get",
+  "settings.theme": "Theme",
+  "settings.language": "Language",
+  "settings.saved": "Saved",
+  "settings.changePassword": "Change Password",
+  "settings.currentPassword": "Current Password",
+  "settings.newPassword": "New Password",
+  "settings.repeatPassword": "Repeat New Password",
+  "settings.updatePassword": "Update Password",
+  "settings.passwordNotMatch": "The repeat password does not match.",
+  "settings.currentUser": "Current User",
+  "settings.advanced": "Advanced",
+  "settings.disableAuthMsg1": "Are you sure want to {action}?",
+  "settings.disableAuthWord": "disable authentication",
+  "settings.disableAuthMsg2": "It is designed for scenarios {scenarios}",
+  "settings.scenarios": "where you intend to implement third-party authentication",
+  "settings.disableAuthCarefully": "Please use this option carefully!",
+  "settings.confirmDisable": "I understand, please disable",
+  "settings.leave": "Leave",
+  "settings.disableAuth": "Disable Auth",
+  "settings.enableAuth": "Enable Auth",
+  "settings.globalEnvDesc": "Global variables written to .env, applied to variable interpolation of all stacks.",
+  "settings.frontendVersion": "Frontend Version",
+  "settings.versionMismatch": "Frontend Version do not match backend version!",
+  "settings.version": "Version",
+
+  // ---- deployment check ----
+  "deploy.title": "Deployment check",
+  "deploy.runtimeOk": "Container runtime available",
+  "deploy.runtimeFail": "Container runtime unavailable: {error}",
+  "deploy.runtimeHint": "Make sure the docker socket is mounted (-v /var/run/docker.sock:/var/run/docker.sock)",
+  "deploy.stacksOk": "Stacks directory mounted: {path}",
+  "deploy.stacksFail": "Stacks directory is not on a host mount: {path} — stacks are lost when the container is recreated",
+  "deploy.stacksHint": "Mount a host directory (-v /opt/stacks:/opt/stacks)",
+  "deploy.cli": "Container CLI",
+
+  // ---- toast ----
+  "toast.refreshed": "Refreshed",
+  "toast.draftSaved": "Draft saved",
+  "toast.deleted": "Deleted {name}",
+  "toast.scanDone": "Scan completed",
+};
+
+export default dict;

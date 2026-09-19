@@ -48,6 +48,10 @@ func (s *Server) Start(ctx context.Context) error {
 	s.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", s.host, s.port),
 		Handler: s,
+		// 防御慢速连接与空闲连接堆积；不设 Read/Write 超时——
+		// 栈操作是长时流式响应、终端是 WebSocket，均需长连接。
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	if s.tlsCert != "" && s.tlsKey != "" {

@@ -1,2 +1,14 @@
 .git
-.idea
+.github
+.omo
+.opencode
+.zcode
+.playwright-mcp
+.codegraph
+bin
+storage
+node_modules
+web/node_modules
+web/dist
+*.md
+.DS_Store

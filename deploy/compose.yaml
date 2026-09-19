@@ -1,0 +1,26 @@
+# Dockge 单机版：docker compose -f deploy/compose.yaml up -d
+# 无需任何环境变量，三处挂载即完整可用。
+services:
+  dockge:
+    image: dockge-go/dockge:latest
+    container_name: dockge
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      # 驱动宿主守护进程（容器内 docker CLI 经它工作）。
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 栈目录：内外同路径，栈在宿主上直接可见可编辑（换路径见下方变量）。
+      - /opt/stacks:/opt/stacks
+      # 数据库与日志。
+      - dockge-data:/app/data
+    # 默认即可用；以下按需开启。端口想换只改上面冒号左侧（如 "15001:5001"）。
+    # environment:
+    #   - TZ=Asia/Shanghai
+    #   - DOCKGE_STACKS_DIR=/srv/stacks                        # 换栈目录时同时改上面的挂载
+    #   - DOCKER_HOST=unix:///run/user/1000/podman/podman.sock # rootless podman
+    #   - APP_CONTAINER_CLI=podman                             # 固定运行时（默认自动探测）
+
+volumes:
+  dockge-data:
+    # 备份：docker run --rm -v dockge-data:/d -v $PWD:/b alpine tar czf /b/dockge-data.tgz -C /d .

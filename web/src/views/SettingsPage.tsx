@@ -1,0 +1,326 @@
+// 设置页（上游复刻五子页）：General / Appearance / Security / Global Env / About。
+// 单用户模型：Security = 改密 + Disable Auth；无用户管理页（一比一决策）。
+import { Show, Switch, Match, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { A, useParams } from "@solidjs/router";
+
+import { api, clearToken } from "../api/api";
+import { errText } from "../api/format";
+import { t, setLocale, useLocale, type LocaleKey, type MsgKey } from "../i18n";
+import { setThemePref, useThemePref } from "../lib/theme";
+import { logout, toast, user } from "../store/index";
+import { DeploymentCheck } from "../components/DeploymentCheck";
+
+const TABS = ["general", "appearance", "security", "globalEnv", "about"] as const;
+type Tab = (typeof TABS)[number];
+
+const LANG_OPTIONS: Array<{ value: LocaleKey; label: string }> = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "en-US", label: "English" },
+];
+
+export function SettingsPage() {
+  const params = useParams();
+  // 上游 desktop 默认子页为 appearance
+  const tab = (): Tab => (TABS as readonly string[]).includes(params.tab ?? "") ? (params.tab as Tab) : "appearance";
+
+  return (
+    <div>
+      <h1 style={{ "margin-bottom": "16px" }}>{t("nav.settings")}</h1>
+      <div class="settings-grid">
+        <nav class="settings-nav">
+          {TABS.map((item) => (
+            <A href={`/settings/${item}`} classList={{ active: tab() === item }}>
+              {t(`settings.${item}` as MsgKey)}
+            </A>
+          ))}
+        </nav>
+        <div class="card">
+          <Switch>
+            <Match when={tab() === "general"}><GeneralTab /></Match>
+            <Match when={tab() === "appearance"}><AppearanceTab /></Match>
+            <Match when={tab() === "security"}><SecurityTab /></Match>
+            <Match when={tab() === "globalEnv"}><GlobalEnvTab /></Match>
+            <Match when={tab() === "about"}><AboutTab /></Match>
+          </Switch>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GeneralTab() {
+  const [hostname, setHostnameSignal] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+
+  onMount(() => {
+    api.primaryHostname().then((r) => setHostnameSignal(r.hostname)).catch(() => {});
+  });
+
+  const save = async () => {
+    if (busy()) return;
+    setBusy(true);
+    try {
+      await api.setPrimaryHostname(hostname());
+      toast(t("settings.saved"), "success");
+    } catch (error) {
+      toast(errText(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2 class="card-title">{t("settings.general")}</h2>
+      <div style={{ "max-width": "420px" }}>
+        <label class="form-label" for="primary-hostname">{t("settings.primaryHostname")}</label>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            id="primary-hostname"
+            class="form-input"
+            value={hostname()}
+            placeholder={location.hostname}
+            onInput={(e) => setHostnameSignal(e.currentTarget.value)}
+          />
+          <button type="button" class="btn btn-secondary" onClick={() => setHostnameSignal(location.hostname)}>
+            {t("settings.autoGet")}
+          </button>
+        </div>
+        <p class="form-help">{t("settings.primaryHostnameHelp")}</p>
+        <div style={{ "margin-top": "12px" }}>
+          <button class="btn btn-primary" disabled={busy()} onClick={() => void save()}>{t("common.save")}</button>
+        </div>
+      </div>
+      <div style={{ "margin-top": "20px" }}>
+        <DeploymentCheck always />
+      </div>
+    </div>
+  );
+}
+
+function AppearanceTab() {
+  return (
+    <div>
+      <h2 class="card-title">{t("settings.appearance")}</h2>
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">{t("settings.theme")}</div>
+        </div>
+        <select class="form-select" style={{ width: "180px" }} value={useThemePref()} onChange={(e) => setThemePref(e.currentTarget.value as "auto" | "light" | "dark")}>
+          <option value="auto">{t("theme.auto")}</option>
+          <option value="light">{t("theme.light")}</option>
+          <option value="dark">{t("theme.dark")}</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">{t("settings.language")}</div>
+        </div>
+        <select class="form-select" style={{ width: "180px" }} value={useLocale()} onChange={(e) => setLocale(e.currentTarget.value as LocaleKey)}>
+          {LANG_OPTIONS.map((opt) => (
+            <option value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function SecurityTab() {
+  const [current, setCurrent] = createSignal("");
+  const [next, setNext] = createSignal("");
+  const [repeat, setRepeat] = createSignal("");
+  const [invalidPassword, setInvalidPassword] = createSignal(false);
+  const [disableEnabled, setDisableEnabled] = createSignal(false);
+  const [disablePassword, setDisablePassword] = createSignal("");
+  const [confirmOpen, setConfirmOpen] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+
+  onMount(() => {
+    api.getDisableAuth().then((r) => setDisableEnabled(r.enabled)).catch(() => {});
+  });
+
+  // Escape 关闭禁用验证弹窗（对齐上游 Bootstrap modal 行为）
+  createEffect(() => {
+    if (!confirmOpen()) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirmOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
+
+  // 上游 savePassword：仅在两次新密码一致时提交；不一致标记 is-invalid 并展示反馈
+  const savePassword = async (event: SubmitEvent) => {
+    event.preventDefault();
+    if (busy()) return;
+    if (next() !== repeat()) {
+      setInvalidPassword(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.changePassword(current(), next());
+      toast(t("settings.saved"), "success");
+      setCurrent(""); setNext(""); setRepeat(""); setInvalidPassword(false);
+    } catch (error) {
+      toast(errText(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disableAuth = async () => {
+    if (busy()) return;
+    setBusy(true);
+    try {
+      await api.toggleDisableAuth(true, disablePassword());
+      setDisableEnabled(true);
+      setDisablePassword("");
+      setConfirmOpen(false);
+    } catch (error) {
+      toast(errText(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 上游 enableAuth：启用认证后旧 token 失效，清 token 并刷新
+  const enableAuth = async () => {
+    if (busy()) return;
+    setBusy(true);
+    try {
+      await api.toggleDisableAuth(false, "");
+      setDisableEnabled(false);
+      clearToken();
+      location.reload();
+    } catch (error) {
+      toast(errText(error), "error");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2 class="card-title">{t("settings.security")}</h2>
+      <Show when={!disableEnabled()}>
+        <p>
+          {t("settings.currentUser")}: <strong>{user()?.username}</strong>
+          <button class="btn btn-danger" style={{ "margin-left": "16px" }} onClick={logout}>{t("nav.logout")}</button>
+        </p>
+        <h5 class="settings-subheading">{t("settings.changePassword")}</h5>
+        <form style={{ "max-width": "360px" }} onSubmit={(e) => void savePassword(e)}>
+          <div class="form-block">
+            <label class="form-label" for="sec-current">{t("settings.currentPassword")}</label>
+            <input id="sec-current" class="form-input" type="password" autocomplete="current-password" required value={current()} onInput={(e) => setCurrent(e.currentTarget.value)} />
+          </div>
+          <div class="form-block">
+            <label class="form-label" for="sec-new">{t("settings.newPassword")}</label>
+            <input id="sec-new" class="form-input" type="password" autocomplete="new-password" required value={next()} onInput={(e) => setNext(e.currentTarget.value)} />
+          </div>
+          <div class="form-block">
+            <label class="form-label" for="sec-repeat">{t("settings.repeatPassword")}</label>
+            <input
+              id="sec-repeat"
+              class="form-input"
+              classList={{ "input-invalid": invalidPassword() }}
+              type="password"
+              autocomplete="new-password"
+              required
+              value={repeat()}
+              onInput={(e) => { setRepeat(e.currentTarget.value); setInvalidPassword(false); }}
+            />
+            <Show when={invalidPassword()}>
+              <div class="form-invalid-feedback">{t("settings.passwordNotMatch")}</div>
+            </Show>
+          </div>
+          <button class="btn btn-primary" type="submit" disabled={busy()}>{t("settings.updatePassword")}</button>
+        </form>
+      </Show>
+
+      <h5 class="settings-subheading">{t("settings.advanced")}</h5>
+      <Show
+        when={disableEnabled()}
+        fallback={<button class="btn btn-primary" disabled={busy()} onClick={() => setConfirmOpen(true)}>{t("settings.disableAuth")}</button>}
+      >
+        <button class="btn btn-secondary" disabled={busy()} onClick={() => void enableAuth()}>{t("settings.enableAuth")}</button>
+      </Show>
+
+      <Show when={confirmOpen()}>
+        <div class="confirm-overlay" onClick={() => setConfirmOpen(false)} />
+        <div class="confirm-modal" role="alertdialog">
+          <div class="confirm-title">{t("settings.disableAuth")}</div>
+          <div class="confirm-desc">
+            <p>{t("settings.disableAuthMsg1", { action: t("settings.disableAuthWord") })}</p>
+            <p>{t("settings.disableAuthMsg2", { scenarios: t("settings.scenarios") })}</p>
+            <p>{t("settings.disableAuthCarefully")}</p>
+          </div>
+          <div class="form-block">
+            <label class="form-label" for="sec-disable">{t("settings.currentPassword")}</label>
+            <input id="sec-disable" class="form-input" type="password" required value={disablePassword()} onInput={(e) => setDisablePassword(e.currentTarget.value)} />
+          </div>
+          <div class="confirm-actions">
+            <button class="btn btn-secondary" onClick={() => setConfirmOpen(false)}>{t("settings.leave")}</button>
+            <button class="btn btn-danger" disabled={busy() || !disablePassword()} onClick={() => void disableAuth()}>{t("settings.confirmDisable")}</button>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function GlobalEnvTab() {
+  const [content, setContent] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+
+  onMount(() => {
+    api.globalEnv().then((r) => setContent(r.globalENV)).catch(() => {});
+  });
+
+  const save = async () => {
+    if (busy()) return;
+    setBusy(true);
+    try {
+      await api.setGlobalEnv(content());
+      toast(t("settings.saved"), "success");
+    } catch (error) {
+      toast(errText(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2 class="card-title">{t("settings.globalEnv")}</h2>
+      <p class="settings-desc">{t("settings.globalEnvDesc")}</p>
+      <textarea class="form-input mono" rows="10" value={content()} onInput={(e) => setContent(e.currentTarget.value)} placeholder={"KEY=value"} aria-label={t("settings.globalEnv")} />
+      <div style={{ "margin-top": "10px" }}>
+        <button class="btn btn-primary" disabled={busy()} onClick={() => void save()}>{t("common.save")}</button>
+      </div>
+    </div>
+  );
+}
+
+function AboutTab() {
+  const [version, setVersion] = createSignal("");
+
+  // 后端版本号走免鉴权的 /v1/health（应用内更新检查已移除，更新由镜像完成）
+  onMount(() => {
+    api.health().then((r) => {
+      setVersion(r.version);
+    }).catch(() => {});
+  });
+
+  return (
+    <div style={{ "text-align": "center" }}>
+      <img src="/icon.svg" alt="Dockge" style={{ width: "200px", height: "200px", "margin-top": "12px" }} />
+      <div style={{ "font-size": "20px", "font-weight": 700, "margin": "8px 0" }}>Dockge</div>
+      <p class="mono">{t("settings.version")}: {version() || "dev"}</p>
+      <p class="mono" style={{ color: "var(--muted)" }}>{t("settings.frontendVersion")}: {FRONTEND_VERSION}</p>
+      <Show when={version() && version() !== FRONTEND_VERSION}>
+        <div class="auth-error" role="alert">{t("settings.versionMismatch")}</div>
+      </Show>
+    </div>
+  );
+}

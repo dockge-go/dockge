@@ -1,0 +1,245 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
+
+	v1 "dockge/api/v1"
+	"dockge/internal/model"
+	"dockge/internal/repository"
+	"dockge/pkg/hash"
+	"dockge/pkg/rate"
+
+	"github.com/samber/do/v2"
+)
+
+// SessionTTL 是本地会话（JWT 与 dockge_token cookie）的有效期。
+const SessionTTL = time.Hour * 24 * 7
+
+// 登录限流：单个「IP+账号」键在窗口期内的最大尝试次数与键容量上限。
+const (
+	loginRateLimit  = 10
+	loginRateWindow = time.Minute
+	loginMaxKeys    = 4096
+)
+
+// AuthService 提供登录、当前用户、改密、外部身份映射与会话校验用例。
+type AuthService interface {
+	Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error)
+	Me(ctx context.Context, uid uint) (*v1.MeUserData, error)
+	ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error
+	Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error)
+	CheckNeedSetup(ctx context.Context) (bool, error)
+	// CheckSession 供 StrictAuth 逐请求校验：用户存在、启用且密码哈希未变
+	// （已接线关闭债务 D12：停用/改密后旧 token 下一次请求即 401）。
+	CheckSession(ctx context.Context, uid uint, h string) error
+	// GetDisableAuth 读取免登录模式开关。
+	GetDisableAuth(ctx context.Context) bool
+	// ToggleDisableAuth 切换免登录模式。
+	ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error
+	// AutoLogin 免登录模式下以首个活跃用户自动登录。
+	AutoLogin(ctx context.Context) (*v1.LoginResponseData, error)
+}
+
+type authService struct {
+	*Service
+	loginLimiter *rate.KeyedLimiter
+}
+
+// NewAuthService 构造认证服务（含按 IP+账号的登录限流器），由注入容器调用。
+func NewAuthService(i do.Injector) (AuthService, error) {
+	return &authService{
+		Service:      do.MustInvoke[*Service](i),
+		loginLimiter: rate.NewKeyed(loginRateLimit, loginRateWindow, loginMaxKeys),
+	}, nil
+}
+
+// loginRateKey 组合限流键：IP 与账号双维度。
+func loginRateKey(clientIP, username string) string {
+	return clientIP + "|" + username
+}
+
+// Login 校验用户名密码；开启 2FA 的账号返回中间令牌并要求提交验证码。
+func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error) {
+	// 失败原因各自成文：都回「登录失效」会让用户把「密码错」「被限流」「账号停用」当成会话过期，
+	// 无法判断该改什么（上游同样区分 authIncorrectCreds / authUserInactiveOrDeleted）。
+	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {
+		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "尝试过于频繁，请稍后再试"}
+	}
+	user, err := s.repo.GetUserByUsername(ctx, req.Username)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "用户名或密码错误"}
+		}
+		return nil, v1.ErrInternalServerError
+	}
+	if !user.Active {
+		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "该账号已被停用"}
+	}
+	if err := hash.BcryptCheck(req.Password, user.Password); err != nil {
+		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "用户名或密码错误"}
+	}
+	return s.session(&user)
+}
+
+// Setup 创建首个管理员账号（仅当无任何用户时），成功即返回登录态。
+func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error) {
+	count, err := s.repo.CountUsers(ctx)
+	if err != nil {
+		return nil, v1.ErrInternalServerError
+	}
+	if count > 0 {
+		return nil, &v1.Error{Code: 409, Message: "Dockge 已完成初始化"}
+	}
+	if !ValidatePasswordStrength(req.Password) {
+		return nil, &v1.Error{Code: 400, Message: "密码至少6位且需包含字母和数字"}
+	}
+	hashed, err := hash.BcryptHash(req.Password)
+	if err != nil {
+		return nil, v1.ErrInternalServerError
+	}
+	user := &model.DockgeUser{
+		Username: req.Username, Nickname: req.Username,
+		Password: hashed, Role: model.RoleAdmin, Active: true, Source: model.SourceLocal,
+	}
+	if err := s.repo.CreateUser(ctx, user); err != nil {
+		return nil, v1.ErrInternalServerError
+	}
+	return s.session(user)
+}
+
+// CheckNeedSetup 判断是否需要首次安装引导（用户数为 0）。
+func (s *authService) CheckNeedSetup(ctx context.Context) (bool, error) {
+	count, err := s.repo.CountUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+// Me 返回当前登录用户信息（含角色与 2FA 状态）。
+func (s *authService) Me(ctx context.Context, uid uint) (*v1.MeUserData, error) {
+	user, err := s.repo.GetUser(ctx, uid)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, v1.ErrNotFound
+		}
+		return nil, v1.ErrInternalServerError
+	}
+	mp := meData(&user)
+	return &mp, nil
+}
+
+// ChangePassword 校验旧密码与强度后更新密码；
+// 旧 token 因 claims 中的密码摘要绑定（CheckSession）自动失效。
+func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error {
+	user, err := s.repo.GetUser(ctx, uid)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return v1.ErrNotFound
+		}
+		return v1.ErrInternalServerError
+	}
+	if err := hash.BcryptCheck(req.OldPassword, user.Password); err != nil {
+		return v1.ErrBadRequest
+	}
+	if !ValidatePasswordStrength(req.NewPassword) {
+		return fmt.Errorf("%w: 密码至少6位且需包含字母和数字", v1.ErrBadRequest)
+	}
+	hashed, err := hash.BcryptHash(req.NewPassword)
+	if err != nil {
+		return v1.ErrInternalServerError
+	}
+	return s.repo.UpdatePassword(ctx, uid, hashed)
+}
+
+// CheckSession 逐请求校验会话有效性：用户存在、启用，且密码哈希摘要与 token 一致。
+func (s *authService) CheckSession(ctx context.Context, uid uint, h string) error {
+	user, err := s.repo.GetUser(ctx, uid)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return v1.ErrUnauthorized
+		}
+		return err
+	}
+	if !user.Active {
+		return v1.ErrUnauthorized
+	}
+	if hash.Shake256(user.Password) != h {
+		return v1.ErrUnauthorized // 密码已修改，旧 token 失效
+	}
+	return nil
+}
+
+// GetDisableAuth 读取免登录模式开关。
+func (s *authService) GetDisableAuth(ctx context.Context) bool {
+	v, err := s.repo.GetSetting(ctx, "disableAuth")
+	if err != nil {
+		return false
+	}
+	return v == "true"
+}
+
+// ToggleDisableAuth 切换免登录模式：切换到关闭认证时须校验当前密码。
+func (s *authService) ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error {
+	if enable {
+		user, err := s.repo.GetUser(ctx, uid)
+		if err != nil {
+			return err
+		}
+		if err := hash.BcryptCheck(currentPassword, user.Password); err != nil {
+			return v1.ErrBadRequest
+		}
+	}
+	return s.repo.SetSetting(ctx, "disableAuth", strconv.FormatBool(enable), "security")
+}
+
+// AutoLogin 免登录模式：仅当 disableAuth=true 时以首个活跃用户自动登录；
+// 否则拒绝（该端点无需认证，必须防止无条件登录）。
+func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, error) {
+	if !s.GetDisableAuth(ctx) {
+		return nil, v1.ErrUnauthorized
+	}
+	users, err := s.repo.ListUsers(ctx)
+	if err != nil {
+		return nil, v1.ErrInternalServerError
+	}
+	for _, u := range users {
+		if u.Active {
+			token, err := s.jwt.GenToken(u.ID, u.Password, time.Now().Add(SessionTTL))
+			if err != nil {
+				return nil, v1.ErrInternalServerError
+			}
+			return &v1.LoginResponseData{
+				AccessToken: token,
+				User:        v1.MeUserData{ID: u.ID, Username: u.Username, Nickname: u.Nickname},
+			}, nil
+		}
+	}
+	return nil, v1.ErrUnauthorized
+}
+
+// session 签发绑定密码哈希的本地 JWT。
+func (s *authService) session(user *model.DockgeUser) (*v1.LoginResponseData, error) {
+	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(SessionTTL))
+	if err != nil {
+		return nil, v1.ErrInternalServerError
+	}
+	return &v1.LoginResponseData{AccessToken: token, User: meData(user)}, nil
+}
+
+// meData 把用户实体转为对外视图（角色为空的历史用户按 admin 展示）。
+func meData(u *model.DockgeUser) v1.MeUserData {
+	role := u.Role
+	if role == "" {
+		role = model.RoleAdmin
+	}
+	return v1.MeUserData{
+		ID: u.ID, Username: u.Username, Nickname: u.Nickname,
+		Role: role,
+	}
+}

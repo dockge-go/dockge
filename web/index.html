@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#5cdd8b" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230071e3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='14' rx='2'/%3E%3Cpath d='M8 21h8M12 17v4'/%3E%3C/svg%3E"
+    />
+    <title>Dockge — Container Management</title>
+    <script>
+      // 主题预置：必须先于样式表执行，首帧前写入 data-theme，避免明暗闪烁（FOUC）
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem("dockge.theme"); } catch (e) {}
+        if (stored !== "dark" && stored !== "light") {
+          stored = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+        document.documentElement.dataset.theme = stored;
+        // 与 lib/theme.ts 的 apply() 保持同值：移动端地址栏跟随明暗
+        document.querySelector('meta[name="theme-color"]').setAttribute(
+          "content",
+          stored === "dark" ? "#0d1117" : "#5cdd8b",
+        );
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>
