@@ -1,16 +1,19 @@
-# 打 tag（v*）即发布：构建带版本号的多平台单二进制并挂到 GitHub Release。
-# release 存在后，应用内「检查更新」（/version/check → releases 列表）即实际可用。
+# 打 tag（v*）：构建多平台单二进制挂到 GitHub Release，并把多架构镜像推到 Docker Hub。
+# 也可在 Actions 页面手动触发（workflow_dispatch）：只推镜像，tag 为 dev。
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  # 仅 tag 触发时才建 Release：手动触发跑在没有 tag 的分支上，创建 Release 会失败。
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +47,11 @@ jobs:
           generate_release_notes: true
 
   # 多架构镜像推 Docker Hub：homelab 大量 arm64（树莓派/NAS），单架构镜像会直接不可用。
-  # 需配置仓库 secrets：DOCKERHUB_USERNAME / DOCKERHUB_TOKEN；
-  # 镜像名可用仓库变量 DOCKERHUB_IMAGE 覆盖（默认 dockge-go/dockge）。
+  # 需在仓库 Settings → Secrets and variables → Actions 配置：
+  #   secrets.DOCKERHUB_USERNAME / secrets.DOCKERHUB_TOKEN（Docker Hub 的 Access Token）
+  #   vars.DOCKERHUB_IMAGE（可选，默认 makeshit/dockge）
   image:
     runs-on: ubuntu-latest
-    needs: release
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -60,10 +63,11 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ vars.DOCKERHUB_IMAGE || 'dockge-go/dockge' }}
+          images: ${{ vars.DOCKERHUB_IMAGE || 'makeshit/dockge' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=dev,enable=${{ github.event_name == 'workflow_dispatch' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -72,6 +76,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
