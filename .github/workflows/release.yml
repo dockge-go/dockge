@@ -24,11 +24,10 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 12
+      # 不配 cache:pnpm——本 job 只跑 audit（读 lockfile，不 install），缓存 post 步会因无法保存而挂
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir ./web audit --audit-level=high
 
   # 仅 tag 触发时才建 Release：手动触发跑在没有 tag 的分支上，创建 Release 会失败。
