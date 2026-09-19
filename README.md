@@ -38,7 +38,7 @@ All three trigger startup warnings and show up in the panel's self-check.
 
 ## Also
 
-- Binaries for linux/darwin, amd64/arm64: [Releases](https://github.com/dockge-go/dockge/releases) — `./dockge-server -conf config/prod.yml`
+- Binaries for linux/darwin, amd64/arm64: [Releases](https://github.com/dockge-go/dockge/releases) — `./dockge-server` (zero config, sensible defaults; optional `-conf`)
 - From source: `make verify`, `make run`
 - Forgot your password: `docker exec -it dockge dockge-server reset-password`
 - Config you'll actually touch: port (`http.host` / `http.port`), stacks dir (`dockge.stacks_dir`), runtime (`container.cli`, `container.compose`)

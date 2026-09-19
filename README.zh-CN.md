@@ -38,7 +38,7 @@ docker run -d --name dockge --restart unless-stopped \
 
 ## 其他
 
-- linux / darwin（amd64 / arm64）二进制：[Releases](https://github.com/dockge-go/dockge/releases)，`./dockge-server -conf config/prod.yml`
+- linux / darwin（amd64 / arm64）二进制：[Releases](https://github.com/dockge-go/dockge/releases)，`./dockge-server`（零配置即跑，可选 `-conf`）
 - 源码构建：`make verify`、`make run`
 - 忘记密码：`docker exec -it dockge dockge-server reset-password`
 - 常改的配置：端口（`http.host` / `http.port`）、栈目录（`dockge.stacks_dir`）、运行时（`container.cli`、`container.compose`）

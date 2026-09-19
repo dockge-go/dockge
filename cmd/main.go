@@ -3,8 +3,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"dockge/internal/handler"
@@ -35,6 +37,33 @@ func mustConfig(path string) *viper.Viper {
 	return conf
 }
 
+// confExplicit 报告 -conf 是否由用户显式传入。
+func confExplicit(fs *flag.FlagSet) bool {
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "conf" {
+			explicit = true
+		}
+	})
+	return explicit
+}
+
+// mustConfigOrDefaults：未显式传 -conf 且默认配置文件不存在时回退到内置默认配置，
+// 裸二进制下载即可运行；显式指定的路径缺失仍然报错——
+// 打错路径若静默落到默认值，用户自定的数据目录/端口会被无声忽略。
+func mustConfigOrDefaults(path string, explicit bool) *viper.Viper {
+	if !explicit {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			conf, err := config.Defaults()
+			if err != nil {
+				panic(err)
+			}
+			return conf
+		}
+	}
+	return mustConfig(path)
+}
+
 func main() {
 	// 启动期 panic（配置缺失、数据卷只读、端口被占用等）转为一行可操作提示：
 	// 容器用户看到的应是原因与修复方向，而不是 Go 栈回溯（do.MustInvoke 会 panic）。
@@ -51,7 +80,7 @@ func main() {
 		sub := flag.NewFlagSet("reset-password", flag.ExitOnError)
 		subConf := sub.String("conf", defaultConf, "config path")
 		_ = sub.Parse(args[1:])
-		runResetPassword(mustConfig(*subConf))
+		runResetPassword(mustConfigOrDefaults(*subConf, confExplicit(sub)))
 		return
 	}
 
@@ -59,10 +88,10 @@ func main() {
 	flag.Parse()
 	// 子命令后置：-conf x reset-password 同样接受。
 	if flag.Arg(0) == "reset-password" {
-		runResetPassword(mustConfig(*envConf))
+		runResetPassword(mustConfigOrDefaults(*envConf, confExplicit(flag.CommandLine)))
 		return
 	}
-	runServer(mustConfig(*envConf))
+	runServer(mustConfigOrDefaults(*envConf, confExplicit(flag.CommandLine)))
 }
 
 // runServer 是 HTTP 服务的组合根：按顺序装配配置、日志、JWT、
