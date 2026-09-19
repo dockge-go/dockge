@@ -3,7 +3,9 @@
 # 构建：docker build -f deploy/Dockerfile -t dockge-go --build-arg VERSION=$(git describe --tags --always) .
 
 # ---- 前端构建 ----
-FROM node:24-alpine AS web
+# --platform=$BUILDPLATFORM：始终在构建机原生架构上跑。前端产物是静态文件，与架构无关；
+# 若在 QEMU 模拟的 arm64 下跑，Node/V8（vite build）会 SIGILL 崩溃（exit 132）。
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 WORKDIR /web
 RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -14,7 +16,8 @@ ENV VERSION=${VERSION}
 RUN pnpm build
 
 # ---- 后端构建 ----
-FROM golang:1.26-alpine AS backend
+# 同上跑原生架构，由 GOARCH 交叉编译到目标架构（CGO_ENABLED=0），避免 QEMU 模拟。
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS backend
 WORKDIR /src
 # GOPROXY 可覆盖（受限网络下用镜像源，例如 --build-arg GOPROXY=https://goproxy.cn,direct）
 ARG GOPROXY=https://proxy.golang.org,direct
@@ -24,8 +27,10 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 COPY --from=web /web/dist ./web/dist
 ARG VERSION=dev
+# TARGETARCH 是 buildkit 内置平台参数，交叉编译的目标架构由此取
+ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath \
+    CGO_ENABLED=0 GOARCH=${TARGETARCH} go build -trimpath \
     -ldflags="-s -w -X dockge/internal/version.Version=${VERSION} -X main.defaultConf=/app/config/dockge.yml" \
     -o /out/dockge-server ./cmd
 
