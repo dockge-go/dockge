@@ -11,8 +11,29 @@ permissions:
   contents: write
 
 jobs:
+  # 安全门禁：每次发布（含手动 dispatch）必过，任一失败即阻断发布。
+  # govulncheck 按调用可达性报 Go 依赖漏洞（误报少）；pnpm audit 审前端依赖，high 及以上才拦。
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm --dir ./web audit --audit-level=high
+
   # 仅 tag 触发时才建 Release：手动触发跑在没有 tag 的分支上，创建 Release 会失败。
   release:
+    needs: security
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -51,6 +72,7 @@ jobs:
   #   secrets.DOCKERHUB_USERNAME / secrets.DOCKERHUB_TOKEN（Docker Hub 的 Access Token）
   #   vars.DOCKERHUB_IMAGE（可选，默认 makeshit/dockge）
   image:
+    needs: security
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
