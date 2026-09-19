@@ -1,6 +1,0 @@
-{
-  "lsp": {
-    "gopls": { "command": ["/Users/tce/go/bin/gopls"], "priority": 100 },
-    "typescript": { "priority": 100 }
-  }
-}
