@@ -10,6 +10,9 @@ dist/
 .omo
 .superpowers/
 .zcode
+.opencode
+
+
 # OpenSpec specifications and change artifacts are versioned project documentation.
 !openspec/
 !openspec/**
