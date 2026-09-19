@@ -7,7 +7,7 @@
 ```yaml
 services:
   dockge:
-    image: dockge-go/dockge:latest
+    image: makeshit/dockge:latest
     container_name: dockge
     restart: unless-stopped
     ports:
@@ -27,7 +27,7 @@ docker run -d --name dockge -p 5001:5001 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt/stacks:/opt/stacks \
   -v dockge-data:/app/data \
-  dockge-go/dockge
+  makeshit/dockge
 ```
 
 访问 `http://<主机>:5001`，首次进入引导创建管理员账号（无默认口令）。
