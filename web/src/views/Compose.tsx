@@ -1,7 +1,7 @@
 // 栈详情/新建页（上游 Compose.vue 复刻）：标题行（状态 pill + 按钮组双态）+
 // URL 徽章 + 进度终端 + 双栏（左：容器卡/合并日志；右：compose/.env 编辑器）。
 // 校验与上游一致：客户端 YAML 解析，错误以纯文本呈现在编辑器下方（首次 3s 防抖）。
-import { For, Show, createEffect, on, onCleanup, onMount, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
 import { A, useBeforeLeave, useNavigate, useParams } from "@solidjs/router";
 import {
   ChevronDown,
@@ -15,6 +15,7 @@ import {
   Square,
   Terminal,
   Trash2,
+  WandSparkles,
   X,
 } from "lucide-solid";
 
@@ -26,17 +27,26 @@ import { ArrayField, ArraySelectField } from "../components/ArrayField";
 import { confirmDialog } from "../components/Confirm";
 import { StackEditor } from "../components/StackEditor";
 import { DisplayTerminal, TerminalPane } from "../components/Terminal";
+import { ImageCombo } from "../components/ImageCombo";
 import { t } from "../i18n";
 import { displayPort, portUrl } from "../lib/ports";
 import {
   addService,
+  ensureTopLevelNetworks,
+  ensureTopLevelVolumes,
+  formatYaml,
   hasLongSyntax,
   listServices,
   listTopLevelNetworkEntries,
   listTopLevelNetworks,
   readService,
   removeService,
+  removeTopLevelNetwork,
+  renameTopLevelNetwork,
   setTopLevelNetworkEntries,
+  undefinedDependsOn,
+  undefinedNetworks,
+  undefinedVolumes,
   updateService,
   type ServiceFields,
 } from "../lib/yaml-edit";
@@ -70,7 +80,8 @@ function splitImage(image: string): [string, string] {
   return [image.slice(0, idx), image.slice(idx + 1) || "latest"];
 }
 
-/** 上游 yamlToJSON 的校验部分：解析失败或 services 非对象时返回错误消息，否则空串。 */
+/** 上游 yamlToJSON 的校验部分：解析失败或 services 非对象时返回错误消息；
+ *  另拦截服务引用未定义网络/具名卷（否则直到 compose 部署才报 invalid compose project）。 */
 function composeYamlError(text: string): string {
   try {
     const doc = parseDocument(text);
@@ -79,6 +90,18 @@ function composeYamlError(text: string): string {
     const services = config.services ?? {};
     if (Array.isArray(services) || typeof services !== "object") {
       throw new Error("Services must be an object");
+    }
+    const missingNets = undefinedNetworks(text);
+    if (missingNets.length > 0) {
+      throw new Error(t("compose.undefinedNetworks", { names: missingNets.join(", ") }));
+    }
+    const missingVols = undefinedVolumes(text);
+    if (missingVols.length > 0) {
+      throw new Error(t("compose.undefinedVolumes", { names: missingVols.join(", ") }));
+    }
+    const missingDeps = undefinedDependsOn(text);
+    if (missingDeps.length > 0) {
+      throw new Error(t("compose.undefinedDependsOn", { names: missingDeps.join(", ") }));
     }
     return "";
   } catch (e) {
@@ -127,6 +150,21 @@ export function Compose() {
   const [stats, setStats] = createSignal<ContainerStat[]>([]);
   const [hostname, setHostname] = createSignal("");
   const [networks, setNetworks] = createSignal<string[]>([]);
+  const [localImages, setLocalImages] = createSignal<string[]>([]);
+  // 本地镜像列表供编辑表单 image 下拉选择（排序后同仓库多 tag 相邻，便于切换版本）；
+  // 编辑表单每次展开下拉时经 refreshImages 重拉（5s 去抖）——镜像页/部署拉取的新镜像立即可见
+  let imagesFetchedAt = 0;
+  const refreshImages = () => {
+    if (Date.now() - imagesFetchedAt < 5_000) return;
+    imagesFetchedAt = Date.now();
+    api.images()
+      .then((r) => setLocalImages(
+        r.list
+          .map((img) => (img.tag === "<none>" ? img.id : `${img.repository}:${img.tag}`))
+          .sort(),
+      ))
+      .catch(() => {});
+  };
   const [newService, setNewService] = createSignal("");
   const [openConfigs, setOpenConfigs] = createSignal<Set<string>>(new Set());
   // 展开统计详情的容器名集合（上游 DockerStat 等价物）
@@ -151,19 +189,29 @@ export function Compose() {
   onMount(() => {
     api.primaryHostname().then((r) => setHostname(r.hostname)).catch(() => {});
     api.stackNetworks().then(setNetworks).catch(() => {});
-    if (isNew()) {
-      const draft = draftYaml();
-      if (draft) {
-        setYaml(draft);
-        setDraftYaml(null);
-      }
-    }
+    refreshImages();
   });
 
-  // 路由参数变化（切换栈 / 新建保存后跳转）→ 加载对应栈
+  // 路由参数变化（切换栈 / 进出新建页）→ 清理上一栈的会话状态再加载。
+  // output（操作进度终端）、展开集合、服务输入若不清理，会原样挂在下一个栈上。
   createEffect(() => {
     const routeName = params.name;
-    if (routeName) void load(decodeURIComponent(routeName));
+    setOutput("");
+    setOpenStats(new Set<string>());
+    setOpenConfigs(new Set<string>());
+    setNewService("");
+    setDownOpen(false);
+    if (routeName) {
+      void load(decodeURIComponent(routeName));
+      return;
+    }
+    // 新建页：重置为初始模板；composerize 草稿在此消费（untrack：草稿变化不重触发本 effect）
+    setDetail(null);
+    setName("");
+    setYaml(untrack(() => draftYaml()) ?? STARTER_YAML);
+    setEnv(STARTER_ENV);
+    setEditMode(true);
+    untrack(() => setDraftYaml(null));
   });
 
   const load = async (stackName: string) => {
@@ -232,6 +280,18 @@ export function Compose() {
     }
   };
 
+  /** compose 执行类操作（部署/启动/更新）的前置校验门：现算校验
+   *  （编辑器下方错误有 3s 防抖，不能作为拦截依据），语法/未定义引用
+   *  在此拦下，避免保存成功后 compose 才报 invalid compose project。
+   *  返回 true = 校验未过，调用方应中止。 */
+  const yamlGate = (): boolean => {
+    const message = composeYamlError(yaml());
+    if (!message) return false;
+    setYamlError(message);
+    toast(message, "error");
+    return true;
+  };
+
   const deploy = async () => {
     if (busy()) return;
     // 上游 deployStack：名称为空时以首个服务名（或其 container_name）命名
@@ -245,6 +305,7 @@ export function Compose() {
       const derived = (first.containerName || services[0]).toLowerCase();
       setName(derived);
     }
+    if (yamlGate()) return;
     setBusy(true);
     try {
       const saved = await save();
@@ -254,18 +315,33 @@ export function Compose() {
     }
   };
 
+  /** 格式化当前 compose（统一缩进/规整流式写法，注释保留）；语法错误提示且不动内容。 */
+  const format = () => {
+    const formatted = formatYaml(yaml());
+    if (formatted === null) {
+      toast(t("compose.formatSyntaxError"), "error");
+      return;
+    }
+    setYaml(formatted);
+  };
+
   const runOp = async (op: StackOp) => {
     // 注意不检查 busy()：deploy 链路在 save 期间保持 busy，
     // 若在此早退会导致「部署只存草稿、从不执行 compose」（按钮自身的
     // disabled=busy 已承担防重入）。
     const stackName = detail()?.name ?? name().trim().toLowerCase();
     if (!stackName) return;
+    // start/update 会创建容器（compose 需完整合法的 project 定义）；
+    // stop/restart/down 只作用于已存在容器，不拦。
+    if ((op === "start" || op === "update") && yamlGate()) return;
     setBusy(true);
     setOutput(`$ docker compose ${op}\n`);
     try {
       await api.stackOpStream(stackName, op, (chunk) => setOutput((prev) => prev + chunk));
       await refresh(false);
-      await load(stackName);
+      // 操作期间用户可能已切到别的栈（busy 只禁按钮，侧栏链接仍可点）：
+      // 仅当路由仍在本栈时才重载，否则闭包里的旧栈名会覆盖当前视图
+      if (decodeURIComponent(params.name ?? "") === stackName) await load(stackName);
     } catch (error) {
       setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
       toast(errText(error), "error");
@@ -303,7 +379,11 @@ export function Compose() {
   };
 
   const patchService = (serviceName: string, fields: Partial<ServiceFields>) => {
-    setYaml(updateService(yaml(), serviceName, fields));
+    let next = updateService(yaml(), serviceName, fields);
+    // 闭环：表单选网络/输具名卷必补顶层定义，否则部署被未定义引用校验拦下
+    if (fields.networks) next = ensureTopLevelNetworks(next, fields.networks, new Set(networks()));
+    if (fields.volumes) next = ensureTopLevelVolumes(next, fields.volumes);
+    setYaml(next);
   };
 
   const toggleConfig = (serviceName: string) => {
@@ -373,12 +453,14 @@ export function Compose() {
   const runServiceOp = async (service: string, op: "start" | "stop" | "restart") => {
     const stackName = detail()?.name;
     if (!stackName || busy()) return;
+    // 单服务 start 即 up（需合法 project 定义），同 runOp 拦截
+    if (op === "start" && yamlGate()) return;
     setBusy(true);
     setOutput(`$ docker compose ${op} ${service}\n`);
     try {
       const result = await api.stackServiceOp(stackName, service, op);
       setOutput(`$ docker compose ${op} ${service}\n` + (result.output || ""));
-      await load(stackName);
+      if (decodeURIComponent(params.name ?? "") === stackName) await load(stackName);
     } catch (error) {
       setOutput(errText(error));
       toast(errText(error), "error");
@@ -602,6 +684,10 @@ export function Compose() {
                       <ServiceConfigForm
                         yaml={yaml()}
                         serviceName={serviceName}
+                        services={editingServices()}
+                        hostNetworks={networks()}
+                        localImages={localImages()}
+                        onImagesOpen={refreshImages}
                         onChange={(fields) => patchService(serviceName, fields)}
                       />
                     </Show>
@@ -615,7 +701,14 @@ export function Compose() {
 
         <div class="compose-editors">
           <div>
-            <h4 class="card-title editor-file-title">{detail()?.composeFileName || "compose.yaml"}</h4>
+            <div class="editor-file-row">
+              <h4 class="card-title editor-file-title">{detail()?.composeFileName || "compose.yaml"}</h4>
+              <Show when={editing()}>
+                <button class="btn btn-sm btn-secondary" onClick={format}>
+                  <WandSparkles size={14} /> {t("compose.format")}
+                </button>
+              </Show>
+            </div>
             <StackEditor
               file="compose"
               yaml={yaml()}
@@ -661,14 +754,24 @@ export function Compose() {
 }
 
 /** 编辑态服务配置表单（上游 Container.vue config 的等价物）：
- *  字段变更即写回 YAML（Document API，注释保留）；列表字段为 ArrayInput 行样式。 */
+ *  字段变更即写回 YAML（Document API，注释保留）；列表字段为 ArrayInput 行样式。
+ *  image 输入框旁：仅当当前镜像在本地有同仓库其它 tag 时出现版本下拉（切换版本）；
+ *  networks 下拉 = compose 顶层 ∪ 本机网络（选择即自动补顶层定义）；
+ *  depends_on 下拉选同栈其他服务。 */
 function ServiceConfigForm(props: {
   yaml: string;
   serviceName: string;
+  services: string[];
+  hostNetworks: string[];
+  localImages: string[];
+  onImagesOpen: () => void;
   onChange: (fields: Partial<ServiceFields>) => void;
 }) {
   const initial = () => readService(props.yaml, props.serviceName);
-  const composeNetworks = () => listTopLevelNetworks(props.yaml);
+  // 网络选项：compose 顶层定义 ∪ 本机 docker 网络（去重，compose 内优先）
+  const networkOptions = () => [...new Set([...listTopLevelNetworks(props.yaml), ...props.hostNetworks])];
+  // 依赖选项：同栈其他服务（排除自身，避免自依赖）
+  const dependOptions = () => props.services.filter((s) => s !== props.serviceName);
   // 长语法（数组项为对象）时上游提示改用 YAML 编辑器
   const long = (key: keyof ServiceFields) => hasLongSyntax(props.yaml, props.serviceName, key) !== undefined;
 
@@ -678,16 +781,13 @@ function ServiceConfigForm(props: {
     <div class="service-form">
       <div class="form-block">
         <label class="form-label" for={`service-image-${props.serviceName}`}>{t("form.image")}</label>
-        <input
+        <ImageCombo
           id={`service-image-${props.serviceName}`}
-          class="form-input mono"
-          list="image-datalist"
           value={initial().image ?? ""}
-          onInput={(e) => patch({ image: e.currentTarget.value })}
+          images={props.localImages}
+          onOpen={() => props.onImagesOpen()}
+          onChange={(image) => patch({ image })}
         />
-        <datalist id="image-datalist">
-          <option value="louislam/uptime-kuma:1" />
-        </datalist>
       </div>
       <div class="form-block">
         <label class="form-label">{t("form.ports")}</label>
@@ -741,7 +841,7 @@ function ServiceConfigForm(props: {
         <Show when={!long("networks")} fallback={<p class="form-help">{t("form.longSyntax")}</p>}>
         <ArraySelectField
           displayName={t("form.networks")}
-          options={composeNetworks()}
+          options={networkOptions()}
           rows={initial().networks}
           onChange={(rows) => patch({ networks: rows ?? [] })}
         />
@@ -750,9 +850,10 @@ function ServiceConfigForm(props: {
       <div class="form-block">
         <label class="form-label">{t("form.dependsOn")}</label>
         <Show when={!long("dependsOn")} fallback={<p class="form-help">{t("form.longSyntax")}</p>}>
-        <ArrayField
+        <ArraySelectField
           displayName={t("form.dependsOn")}
-          placeholder={t("compose.namePlaceholder")}
+          options={dependOptions()}
+          placeholder={t("form.selectService")}
           rows={initial().dependsOn}
           onChange={(rows) => patch({ dependsOn: rows ?? [] })}
         />
@@ -772,16 +873,17 @@ function NetworksCard(props: { yaml: string; externalOptions: string[]; onChange
   const write = (next: Array<{ name: string; external: boolean }>) =>
     props.onChange(setTopLevelNetworkEntries(props.yaml, next));
 
+  // 改名/删除经同步函数：顶层定义与服务级引用一起动，保持一致（否则留下未定义引用）
   const renameInternal = (index: number, name: string) => {
-    const next = [...internal()];
-    next[index] = { ...next[index], name };
-    write([...next, ...external()]);
+    const old = internal()[index];
+    if (!old || !name.trim()) return;
+    props.onChange(renameTopLevelNetwork(props.yaml, old.name, name.trim()));
   };
 
   const removeInternal = (index: number) => {
-    const next = [...internal()];
-    next.splice(index, 1);
-    write([...next, ...external()]);
+    const old = internal()[index];
+    if (!old) return;
+    props.onChange(removeTopLevelNetwork(props.yaml, old.name));
   };
 
   const addInternal = () => write([...internal(), { name: "", external: false }, ...external()]);

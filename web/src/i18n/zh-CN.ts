@@ -20,6 +20,7 @@ const dict = {
   "nav.logout": "登出",
   "nav.scanStacks": "扫描堆栈文件夹",
   "nav.signedInAs": "当前用户： {name}",
+  "nav.images": "镜像",
 
   // ---- 登录 / 初始化 ----
   "login.title": "登录到 Dockge",
@@ -53,6 +54,11 @@ const dict = {
   "compose.namePlaceholder": "my-app",
   "compose.nameHelp": "仅小写字母",
   "compose.noServices": "请先添加至少一个容器",
+  "compose.undefinedNetworks": "以下网络未在顶层 networks 定义：{names}（请补全定义或移除引用）",
+  "compose.undefinedVolumes": "以下具名卷未在顶层 volumes 定义：{names}（请补全 volumes 声明或改用路径挂载）",
+  "compose.undefinedDependsOn": "以下依赖的服务不存在：{names}（服务可能已被删除，请移除对应 depends_on 引用）",
+  "compose.format": "格式化",
+  "compose.formatSyntaxError": "YAML 语法错误，无法格式化（格式化不修复语法）",
   "compose.deploy": "部署",
   "compose.saveDraft": "保存",
   "compose.discard": "放弃",
@@ -95,6 +101,8 @@ const dict = {
   "form.networks": "网络",
   "form.addListItem": "添加 {name}",
   "form.selectNetwork": "选择网络...",
+  "form.selectService": "选择服务...",
+  "form.imageNotLocal": "本地没有匹配的镜像；可保留此名，部署时将自动拉取",
   "form.longSyntax": "此处不支持长语法，请使用 YAML 编辑器。",
   "stats.detail": "资源详情",
   "stats.cpu": "CPU",
@@ -157,6 +165,23 @@ const dict = {
   "deploy.stacksFail": "栈目录未挂载宿主目录：{path}，容器重建会丢失栈",
   "deploy.stacksHint": "请挂载宿主目录（-v /opt/stacks:/opt/stacks）",
   "deploy.cli": "容器 CLI",
+
+  // ---- 镜像 ----
+  "images.title": "镜像",
+  "images.pullPlaceholder": "镜像名，如 nginx:latest",
+  "images.search": "搜索镜像…",
+  "images.pull": "拉取",
+  "images.deleteSelected": "删除所选（{count}）",
+  "images.confirmDelete": "删除镜像",
+  "images.confirmDeleteDesc": "将删除 {count} 个镜像；使用中的会被 Docker 拒绝。确定继续？",
+  "images.name": "镜像",
+  "images.id": "ID",
+  "images.size": "大小",
+  "images.created": "创建于",
+  "images.status": "状态",
+  "images.inUse": "使用中",
+  "images.unused": "未使用",
+  "images.empty": "暂无镜像",
 
   // ---- toast ----
   "toast.refreshed": "已刷新",

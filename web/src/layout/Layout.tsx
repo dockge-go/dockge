@@ -90,6 +90,9 @@ function Layout(props: { children?: JSX.Element }) {
             <A href="/" end class="topbar-pill" activeClass="active">
               {t("nav.home")}
             </A>
+            <A href="/images" class="topbar-pill" activeClass="active">
+              {t("nav.images")}
+            </A>
           </nav>
           <div class="avatar-menu">
             <button class="avatar" aria-label={user()?.username} onClick={() => setMenuOpen((v) => !v)}>

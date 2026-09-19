@@ -65,13 +65,14 @@ type Network struct {
 	Driver string
 }
 
-// Image 是本地存储的一个容器镜像视图。
+// Image 是本地镜像列表的一行（docker images）；Size/CreatedSince 为 docker 的展示串。
 type Image struct {
-	ID          string
-	Repo        string
-	Tag         string
-	SizeBytes   int64
-	CreatedUnix int64 // 镜像构建时间的 unix 秒
+	ID           string
+	Repository   string
+	Tag          string
+	Size         string
+	CreatedSince string
+	InUse        bool // 有容器（含已停止）引用
 }
 
 // ---- 账号 ----

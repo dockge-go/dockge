@@ -25,6 +25,7 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 	authHandler := do.MustInvoke[*handler.AuthHandler](i)
 	authService := do.MustInvoke[service.AuthService](i)
 	stackHandler := do.MustInvoke[*handler.StackHandler](i)
+	imageHandler := do.MustInvoke[*handler.ImageHandler](i)
 	dockerHandler := do.MustInvoke[*handler.DockerHandler](i)
 	settingsHandler := do.MustInvoke[*handler.SettingsHandler](i)
 	composerizeHandler := do.MustInvoke[*handler.ComposerizeHandler](i)
@@ -105,6 +106,10 @@ func NewHTTPServer(i do.Injector) (*httpx.Server, error) {
 			strictAuthRouter.POST("/stacks/:name/:op", stackHandler.Op)
 			strictAuthRouter.POST("/stacks/:name/services/:service/:op", stackHandler.ServiceOp)
 			strictAuthRouter.GET("/stacks/:name/stats", stackHandler.Stats)
+
+			strictAuthRouter.GET("/images", imageHandler.List)
+			strictAuthRouter.POST("/images/pull", imageHandler.Pull)
+			strictAuthRouter.POST("/images/delete", imageHandler.Delete)
 
 			strictAuthRouter.GET("/settings/globalenv", settingsHandler.GetGlobalEnv)
 			strictAuthRouter.PUT("/settings/globalenv", settingsHandler.SetGlobalEnv)

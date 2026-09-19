@@ -9,6 +9,7 @@ import { Setup } from "./views/Setup";
 import { DashboardHome } from "./views/DashboardHome";
 
 const Compose = lazy(() => import("./views/Compose").then((m) => ({ default: m.Compose })));
+const Images = lazy(() => import("./views/Images").then((m) => ({ default: m.Images })));
 const TerminalPage = lazy(() => import("./views/TerminalPage").then((m) => ({ default: m.TerminalPage })));
 const SettingsPage = lazy(() => import("./views/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
@@ -20,6 +21,7 @@ render(
       <Route path="/setup" component={Setup} />
       <Route path="/" component={Gate}>
         <Route path="/" component={DashboardHome} />
+        <Route path="/images" component={Images} />
         <Route path="/compose" component={Compose} />
         <Route path="/compose/:name" component={Compose} />
         <Route path="/terminal/:stack/:service/:type" component={TerminalPage} />

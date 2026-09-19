@@ -385,13 +385,56 @@ code, pre, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular
 .log-state.live::before { background: var(--ok); }
 .log-state.ended::before { background: var(--danger); }
 
-/* 编辑器岛 */
-.stack-editor { min-height: 200px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: var(--console-bg); color: var(--console-fg); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
-.stack-editor-surface { min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--console-bg); }
+/* 编辑器岛：限高内部滚动（有意偏差：上游编辑器随内容无限增长） */
+.stack-editor { min-height: 200px; max-height: 60vh; display: flex; flex-direction: column; background: var(--console-bg); color: var(--console-fg); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
+.stack-editor-surface { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--console-bg); }
 .stack-editor-surface .cm-editor { flex: 1; min-height: 0; }
 .stack-editor-surface .cm-scroller { overflow: auto; }
+/* 滚动条加粗提亮：默认深色滚动条在控制台背景里几乎不可见 */
+.stack-editor-surface .cm-scroller { scrollbar-width: thin; scrollbar-color: #5b6b78 transparent; }
+.stack-editor-surface .cm-scroller::-webkit-scrollbar { width: 12px; height: 12px; }
+.stack-editor-surface .cm-scroller::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.04); }
+.stack-editor-surface .cm-scroller::-webkit-scrollbar-thumb {
+  background: #5b6b78; border-radius: 6px; border: 3px solid var(--console-bg);
+}
+.stack-editor-surface .cm-scroller::-webkit-scrollbar-thumb:hover { background: #7d8f9d; }
+.stack-editor-surface .cm-scroller::-webkit-scrollbar-corner { background: transparent; }
+
+/* 镜像页 */
+.img-toolbar { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.img-toolbar input { max-width: 340px; }
+.img-toolbar .img-search { max-width: 200px; }
+.img-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.img-table th { text-align: left; padding: var(--sp-2) var(--sp-3); color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.img-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
+.img-table .muted { color: var(--muted); }
+
+/* 编辑表单镜像 combobox：单框，既能手输又能下拉选本地镜像 */
+.image-combo { position: relative; }
+.image-combo input { width: 100%; padding-right: 30px; }
+.image-combo-toggle {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.image-combo-toggle:hover { color: var(--text); background: var(--hover); }
+.image-combo-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 100;
+  max-height: 240px; overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.image-combo-option {
+  display: block; width: 100%; text-align: left; padding: 6px 8px;
+  border: none; background: transparent; color: var(--text); font-size: var(--fs-sm);
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.image-combo-option:hover { background: var(--hover); }
+.image-combo-hint { padding: 8px 10px; color: var(--muted); font-size: var(--fs-sm); }
 
 .compose-editors { display: flex; flex-direction: column; gap: var(--sp-5); }
+.editor-file-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .editor-file-title { font-size: var(--fs-micro); font-weight: 600; margin-bottom: var(--sp-2); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 
 /* CodeMirror 控制台配色（默认高亮之外的排布与光标） */

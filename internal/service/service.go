@@ -23,6 +23,7 @@ var Package = do.Package(
 	do.Lazy(New),
 	do.Lazy(NewAuthService),
 	do.Lazy(NewStackService),
+	do.Lazy(NewImageService),
 	do.Lazy(NewSettingsService),
 )
 

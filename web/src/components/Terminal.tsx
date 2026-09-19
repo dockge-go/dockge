@@ -36,10 +36,12 @@ export function TerminalPane(props: {
   onState?: (state: "live" | "ended") => void;
 }) {
   let host!: HTMLDivElement;
+  let term: Terminal;
+  let ws: WebSocket | null = null;
 
   onMount(() => {
     const readOnly = props.type === "compose-logs";
-    const term = createTerm(20, !readOnly);
+    term = createTerm(20, !readOnly);
     if (readOnly) {
       term.options.disableStdin = READ_ONLY_OPTIONS.disableStdin;
       term.options.convertEol = READ_ONLY_OPTIONS.convertEol;
@@ -52,29 +54,8 @@ export function TerminalPane(props: {
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(host);
 
-    let ws: WebSocket | null = null;
     const send = (data: string) => {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
-    };
-
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const tail = props.type === "compose-logs" ? "&tail=200" : "";
-    const base = props.type === "console"
-      ? `${proto}://${location.host}/v1/console/terminal`
-      : `${proto}://${location.host}/v1/terminal/${encodeURIComponent(props.name)}/${props.type}`;
-    ws = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}`);
-    ws.onmessage = (ev) => term.write(String(ev.data));
-    // 一次性守卫：close 事件可能触发多次（如服务端断开+本地 close），只写一次结束消息
-    let ended = false;
-    ws.onclose = () => {
-      if (ended) return;
-      ended = true;
-      props.onState?.("ended");
-      term.write(`\r\n\x1b[33m${t("term.sessionEnded")}\x1b[0m\r\n`);
-    };
-    ws.onopen = () => {
-      props.onState?.("live");
-      send(JSON.stringify({ type: "resize", data: { rows: term.rows, cols: term.cols } }));
     };
     term.onData((d) => {
       if (props.type === "compose-logs") return;
@@ -121,6 +102,39 @@ export function TerminalPane(props: {
     });
   });
 
+  // WebSocket 随 name/type 变化重连（切栈/切容器时终端实例复用、连接与内容刷新）；
+  // 主动切换不写「会话已结束」，仅清屏等待新会话输出。
+  createEffect(() => {
+    const name = props.name;
+    const kind = props.type;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const tail = kind === "compose-logs" ? "&tail=200" : "";
+    const base = kind === "console"
+      ? `${proto}://${location.host}/v1/console/terminal`
+      : `${proto}://${location.host}/v1/terminal/${encodeURIComponent(name)}/${kind}`;
+    const sock = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}`);
+    ws = sock;
+    term.write("\x1b[2J\x1b[H");
+    sock.onmessage = (ev) => term.write(String(ev.data));
+    // 一次性守卫：close 事件可能触发多次（如服务端断开+本地 close），只写一次结束消息
+    let ended = false;
+    sock.onclose = () => {
+      if (ended) return;
+      ended = true;
+      props.onState?.("ended");
+      term.write(`\r\n\x1b[33m${t("term.sessionEnded")}\x1b[0m\r\n`);
+    };
+    sock.onopen = () => {
+      props.onState?.("live");
+      sock.send(JSON.stringify({ type: "resize", data: { rows: term.rows, cols: term.cols } }));
+    };
+    onCleanup(() => {
+      sock.onclose = null;
+      sock.close();
+      if (ws === sock) ws = null;
+    });
+  });
+
   return <div class="terminal-host" ref={(element) => { host = element; }} />;
 }
 
@@ -132,6 +146,9 @@ export function DisplayTerminal(props: { content: string; rows?: number }) {
 
   onMount(() => {
     term = createTerm(rows(), false);
+    // 进度内容经管道输出（仅 LF，无 PTY 补 CR），需 convertEol 回行首，
+    // 否则阶梯状错位（同 READ_ONLY_OPTIONS 的说明）。
+    term.options.convertEol = true;
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);

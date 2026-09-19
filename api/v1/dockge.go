@@ -155,6 +155,33 @@ type PortMapping struct {
 	Protocol      string `json:"protocol,omitempty"`
 }
 
+// -------- images --------
+
+// ImageData 是镜像列表的一行。
+type ImageData struct {
+	ID           string `json:"id"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
+	Size         string `json:"size"`
+	CreatedSince string `json:"createdSince"`
+	InUse        bool   `json:"inUse"`
+}
+
+// ImageListData 是镜像列表响应。
+type ImageListData struct {
+	List []ImageData `json:"list"`
+}
+
+// ImagePullRequest 是手动拉取镜像请求。
+type ImagePullRequest struct {
+	Image string `json:"image" binding:"required"`
+}
+
+// ImageDeleteRequest 是批量删除镜像请求。
+type ImageDeleteRequest struct {
+	Images []string `json:"images" binding:"required"`
+}
+
 // -------- composerize --------
 
 type ComposerizeRequest struct {

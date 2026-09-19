@@ -19,6 +19,7 @@ const dict = {
   "nav.logout": "Logout",
   "nav.scanStacks": "Scan Stacks Folder",
   "nav.signedInAs": "Signed in as {name}",
+  "nav.images": "Images",
 
   // ---- login / setup ----
   "login.title": "Login to Dockge",
@@ -52,6 +53,11 @@ const dict = {
   "compose.namePlaceholder": "my-app",
   "compose.nameHelp": "Lowercase only",
   "compose.noServices": "Add at least one container first",
+  "compose.undefinedNetworks": "Undefined networks: {names} (define them at top level or remove the references)",
+  "compose.undefinedVolumes": "Undefined named volumes: {names} (declare them under top-level volumes or use path mounts)",
+  "compose.undefinedDependsOn": "Depends-on services not found: {names} (service may have been deleted; remove the reference)",
+  "compose.format": "Format",
+  "compose.formatSyntaxError": "YAML syntax error, cannot format (formatting does not fix syntax)",
   "compose.deploy": "Deploy",
   "compose.saveDraft": "Save",
   "compose.discard": "Discard",
@@ -94,6 +100,8 @@ const dict = {
   "form.networks": "Networks",
   "form.addListItem": "Add {name}",
   "form.selectNetwork": "Select a network...",
+  "form.selectService": "Select a service...",
+  "form.imageNotLocal": "No matching local image; keep the name and it will be pulled on deploy",
   "form.longSyntax": "Long syntax is not supported here. Please use the YAML editor.",
   "stats.detail": "Resource details",
   "stats.cpu": "CPU",
@@ -156,6 +164,23 @@ const dict = {
   "deploy.stacksFail": "Stacks directory is not on a host mount: {path} — stacks are lost when the container is recreated",
   "deploy.stacksHint": "Mount a host directory (-v /opt/stacks:/opt/stacks)",
   "deploy.cli": "Container CLI",
+
+  // ---- images ----
+  "images.title": "Images",
+  "images.pullPlaceholder": "Image ref, e.g. nginx:latest",
+  "images.search": "Search images…",
+  "images.pull": "Pull",
+  "images.deleteSelected": "Delete Selected ({count})",
+  "images.confirmDelete": "Delete Images",
+  "images.confirmDeleteDesc": "This will delete {count} image(s); in-use ones will be rejected by Docker. Continue?",
+  "images.name": "Image",
+  "images.id": "ID",
+  "images.size": "Size",
+  "images.created": "Created",
+  "images.status": "Status",
+  "images.inUse": "In Use",
+  "images.unused": "Unused",
+  "images.empty": "No images",
 
   // ---- toast ----
   "toast.refreshed": "Refreshed",

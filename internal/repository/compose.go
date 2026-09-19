@@ -10,13 +10,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"dockge/internal/model"
 )
 
-// composeOpTimeout 是单次 compose 生命周期操作的默认超时（拉镜像的 update 单独放宽）。
+// composeOpTimeout 是单次 compose 生命周期操作的默认超时；
+// 含镜像拉取的操作（update，及首次部署内联拉镜像的 start）用 composeUpdateTimeout 放宽。
 const composeOpTimeout = 3 * time.Minute
 
 // composeUpdateTimeout 是 update（pull + up）的超时，镜像拉取可能较慢。
@@ -200,9 +202,11 @@ func (r *Repository) StackOp(ctx context.Context, name, op string) (string, erro
 	runCompose := func(timeout time.Duration, args ...string) (string, error) {
 		return r.runComposeIn(ctx, stackDir, timeout, composeArgs(name, files, args...)...)
 	}
+	// up -d 在镜像缺失时内联拉取，与 pull 同用放宽的超时
+	upTimeout := composeUpdateTimeout
 	switch op {
 	case "start":
-		return runCompose(composeOpTimeout, "up", "-d", "--remove-orphans")
+		return runCompose(upTimeout, "up", "-d", "--remove-orphans")
 	case "stop":
 		return runCompose(composeOpTimeout, "stop")
 	case "restart":
@@ -292,6 +296,28 @@ func (r *Repository) DockerNetworkNames(ctx context.Context) ([]string, error) {
 	return strings.Fields(strings.TrimSpace(out)), nil
 }
 
+// stackOpPhases 把栈操作映射为依次执行的 compose 参数序列（不含 "compose"
+// 子命令本身），供 StackOpStream 流式执行；与 StackOp 的语义保持一致。
+func stackOpPhases(name string, files []string, op string) ([][]string, error) {
+	switch op {
+	case "start":
+		return [][]string{composeArgs(name, files, "up", "-d", "--remove-orphans")}, nil
+	case "stop":
+		return [][]string{composeArgs(name, files, "stop")}, nil
+	case "restart":
+		return [][]string{composeArgs(name, files, "restart")}, nil
+	case "down":
+		return [][]string{composeArgs(name, files, "down", "--remove-orphans")}, nil
+	case "update":
+		return [][]string{
+			composeArgs(name, files, "pull"),
+			composeArgs(name, files, "up", "-d", "--remove-orphans"),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown stack op: %s", op)
+	}
+}
+
 // StackOpStream 以流式执行栈生命周期操作：输出逐行写入 w（调用方负责 flush
 // 语义），供前端进度终端实时呈现。op 语义与 StackOp 一致。
 func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Writer) error {
@@ -299,34 +325,18 @@ func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Wr
 	if err != nil {
 		return fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
 	}
-	phases, err := func(op string) ([][]string, error) {
-		switch op {
-		case "start":
-			return [][]string{composeArgs(name, files, "up", "-d", "--remove-orphans")}, nil
-		case "stop":
-			return [][]string{composeArgs(name, files, "stop")}, nil
-		case "restart":
-			return [][]string{composeArgs(name, files, "restart")}, nil
-		case "down":
-			return [][]string{composeArgs(name, files, "down", "--remove-orphans")}, nil
-		case "update":
-			return [][]string{
-				composeArgs(name, files, "pull"),
-				composeArgs(name, files, "up", "-d", "--remove-orphans"),
-			}, nil
-		default:
-			return nil, fmt.Errorf("unknown stack op: %s", op)
-		}
-	}(op)
+	phases, err := stackOpPhases(name, files, op)
 	if err != nil {
 		return err
 	}
 	timeout := composeOpTimeout
-	if op == "update" {
+	if op == "start" || op == "update" {
+		// up -d 在镜像缺失时内联拉取，与 pull 同用放宽的超时
 		timeout = composeUpdateTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	filter := &progressFilter{w: w}
 	for _, args := range phases {
 		cmd, cmdErr := r.runtime.ComposeCommand(ctx, args...)
 		if cmdErr != nil {
@@ -338,15 +348,75 @@ func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Wr
 			return err
 		}
 		for line := range ch {
-			if _, err := fmt.Fprint(w, line); err != nil {
+			if err := filter.line(strings.TrimSuffix(line, "\n")); err != nil {
 				return err
 			}
 		}
+		if err := filter.flush(); err != nil {
+			return err
+		}
 		if code := cmd.ProcessState.ExitCode(); code != 0 {
+			if ctx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("compose %s 超时（%s）", op, timeout)
+			}
 			return fmt.Errorf("compose %s 失败（退出码 %d）", op, code)
 		}
 	}
 	return nil
+}
+
+// composeProgressRe 匹配 docker 镜像层进度行（plain 管道输出），兼容两种格式：
+// compose 输出 "3672748066c3 Downloading [=> ] 1MB/2MB"；docker 直连输出 "3672748066c3: Downloading ..."。
+var composeProgressRe = regexp.MustCompile(
+	`^\s*([0-9a-f]{12}):?\s+(Downloading|Extracting|VerifyingChecksum|Download complete|Pull complete|Pulling fs layer|Waiting|Already exists|Retrying)`)
+
+// progressFilter 折叠镜像拉取的进度 tick：管道（非 PTY）下 docker 每个进度
+// tick 输出一整行，同一层同一动作的后续 tick 以 "\r\x1b[2K"（回行首+清行）
+// 覆盖前一个，前端 xterm 重放后等效 PTY 终端的原地刷新，避免刷屏。
+type progressFilter struct {
+	w    io.Writer
+	open string // 当前未换行进度行的 "层ID 动作"，空表示上一行已闭合
+}
+
+func (p *progressFilter) line(s string) error {
+	id := ""
+	if m := composeProgressRe.FindStringSubmatch(s); m != nil {
+		id = m[1] + " " + m[2]
+	}
+	switch {
+	case id != "" && id == p.open:
+		_, err := fmt.Fprintf(p.w, "\r\x1b[2K%s", s)
+		return err
+	case id != "":
+		if err := p.closeOpen(); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(p.w, s)
+		if err == nil {
+			p.open = id
+		}
+		return err
+	default:
+		if err := p.closeOpen(); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(p.w, "%s\n", s)
+		return err
+	}
+}
+
+// flush 结束时闭合悬空的进度行（流终止后该行即为最终状态）。
+func (p *progressFilter) flush() error {
+	return p.closeOpen()
+}
+
+func (p *progressFilter) closeOpen() error {
+	if p.open == "" {
+		return nil
+	}
+	_, err := fmt.Fprint(p.w, "\n")
+	p.open = ""
+	return err
 }
 
 // StackExecDir 返回栈 compose 操作的工作目录：

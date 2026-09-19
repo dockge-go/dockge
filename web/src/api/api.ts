@@ -79,6 +79,16 @@ export interface ContainerStat {
 
 export type StackOp = "start" | "stop" | "restart" | "down" | "update";
 
+/** 镜像列表行（对齐 v1.ImageData）。 */
+export interface ImageItem {
+  id: string;
+  repository: string;
+  tag: string;
+  size: string;
+  createdSince: string;
+  inUse: boolean;
+}
+
 /** 容器运行时自检结果（/v1/health data.runtime，免鉴权）。 */
 export interface HealthRuntimeInfo {
   cli: string;
@@ -95,6 +105,30 @@ interface HealthData {
 }
 
 // ---- 请求核心 ----
+
+/** 流式 POST：响应体逐块回调（进度终端）；非 2xx 按统一错误包解析。 */
+async function postStream(path: string, body: unknown, onChunk: (text: string) => void): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(`/v1${path}`, {
+    method: "POST",
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok || !res.body) {
+    const payload = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new ApiError(res.status, payload?.message || `请求失败（HTTP ${res.status}）`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onChunk(decoder.decode(value, { stream: true }));
+  }
+}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
@@ -149,24 +183,17 @@ export const api = {
   stackOp: (name: string, op: StackOp) =>
     request<{ output: string }>("POST", `/stacks/${encodeURIComponent(name)}/${op}`),
   /** 流式栈操作：compose 输出逐块实时回调（进度终端）。 */
-  stackOpStream: async (name: string, op: StackOp, onChunk: (text: string) => void): Promise<void> => {
-    const headers: Record<string, string> = {};
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`/v1/stacks/${encodeURIComponent(name)}/${op}`, { method: "POST", headers });
-    if (!res.ok || !res.body) {
-      const payload = (await res.json().catch(() => null)) as { message?: string } | null;
-      throw new ApiError(res.status, payload?.message || `请求失败（HTTP ${res.status}）`);
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      onChunk(decoder.decode(value, { stream: true }));
-    }
-  },
+  stackOpStream: (name: string, op: StackOp, onChunk: (text: string) => void): Promise<void> =>
+    postStream(`/stacks/${encodeURIComponent(name)}/${op}`, undefined, onChunk),
   stackNetworks: () => request<string[]>("GET", "/stacks/networks"),
+
+  // 镜像
+  images: () => request<{ list: ImageItem[] }>("GET", "/images"),
+  /** 流式拉取镜像：docker pull 输出逐块实时回调（进度终端）。 */
+  pullImageStream: (ref: string, onChunk: (text: string) => void): Promise<void> =>
+    postStream("/images/pull", { image: ref }, onChunk),
+  deleteImages: (refs: string[]) =>
+    request<{ output: string }>("POST", "/images/delete", { images: refs }),
   stackServiceOp: (name: string, service: string, op: "start" | "stop" | "restart") =>
     request<{ output: string }>("POST", `/stacks/${encodeURIComponent(name)}/services/${encodeURIComponent(service)}/${op}`),
   stackStats: (name: string) =>

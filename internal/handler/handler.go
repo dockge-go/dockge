@@ -25,6 +25,7 @@ var Package = do.Package(
 	do.Lazy(New),
 	do.Lazy(NewAuthHandler),
 	do.Lazy(NewStackHandler),
+	do.Lazy(NewImageHandler),
 	do.Lazy(NewDockerHandler),
 	do.Lazy(NewSettingsHandler),
 	do.Lazy(NewComposerizeHandler),

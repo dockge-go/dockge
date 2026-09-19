@@ -65,10 +65,29 @@ case "$start_out" in
 *Started* | *Running*) echo "  ✓ 启动（流式输出）"; pass=$((pass + 1)) ;;
 *) echo "  ✗ 启动：$start_out"; fail=$((fail + 1)) ;;
 esac
+
+# 栈状态断言：列表里该栈的 status 字段（3=running 4=exited 0/1/2=其他）
+stack_status() {
+	body "$BASE/v1/stacks/$STACK" -H "$AUTH" |
+		python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["status"])' 2>/dev/null || echo err
+}
+
+chk "启动后状态 running" 3 "$(stack_status)"
 chk "资源统计" 200 "$(code "$BASE/v1/stacks/$STACK/stats" -H "$AUTH")"
 chk "网络列表" 200 "$(code "$BASE/v1/stacks/networks" -H "$AUTH")"
 chk "未知操作被拒" 400 "$(code -X POST "$BASE/v1/stacks/$STACK/bogus" -H "$AUTH")"
 chk "不存在的栈" 404 "$(code "$BASE/v1/stacks/no-such-stack-$$" -H "$AUTH")"
+
+chk "重启" 200 "$(code -X POST "$BASE/v1/stacks/$STACK/restart" -H "$AUTH")"
+chk "重启后状态 running" 3 "$(stack_status)"
+chk "更新（pull+up）" 200 "$(code -X POST "$BASE/v1/stacks/$STACK/update" -H "$AUTH")"
+chk "更新后状态 running" 3 "$(stack_status)"
+chk "停止" 200 "$(code -X POST "$BASE/v1/stacks/$STACK/stop" -H "$AUTH")"
+chk "停止后状态 exited" 4 "$(stack_status)"
+# 已停止的栈再启动（up -d）应回到 running
+chk "再次启动" 200 "$(code -X POST "$BASE/v1/stacks/$STACK/start" -H "$AUTH")"
+chk "再启动后状态 running" 3 "$(stack_status)"
+
 chk "停止并移除" 200 "$(code -X POST "$BASE/v1/stacks/$STACK/down" -H "$AUTH")"
 chk "删除栈" 200 "$(code -X DELETE "$BASE/v1/stacks/$STACK" -H "$AUTH")"
 chk "删除后不可见" 404 "$(code "$BASE/v1/stacks/$STACK" -H "$AUTH")"
