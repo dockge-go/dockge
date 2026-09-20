@@ -16,7 +16,7 @@ Dockge：[louislam/dockge](https://github.com/louislam/dockge) 的**一比一复
 
 ```
 api/v1         API 契约（DTO / 错误码）
-cmd/           入口（main.go 服务 + reset-password 子命令）
+cmd/           入口（main.go 服务；单用户，忘密码删 bbolt 重部署）
 deploy/        部署产物（Dockerfile）
 internal/      handler → service → repository 分层 + middleware/model/server/version
 pkg/           可复用基础包（app/config/jwt/log/rate/hash/server）
@@ -39,7 +39,6 @@ make build           # 单二进制 bin/dockge-server
 make test            # go test + 前端测试
 make verify          # build + test
 make smoke           # 发布前冒烟：对运行中实例 + 真实容器运行时跑全链路接口检查
-make reset-password  # 交互式重置指定用户密码（唯一入口 cmd/main.go 的子命令）
 
 # 容器镜像（三阶段构建，仅含 docker CLI + compose 插件 + 二进制）
 docker build -f deploy/Dockerfile -t dockge-go --build-arg VERSION=$(git describe --tags --always) .

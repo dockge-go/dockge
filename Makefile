@@ -1,4 +1,4 @@
-.PHONY: bootstrap run web-build build image test verify reset-password smoke
+.PHONY: bootstrap run web-build build image test verify smoke
 
 # 一键初始化：构建前端（数据库 bucket 由服务启动时幂等创建）
 bootstrap: web-build
@@ -24,9 +24,6 @@ image:
 	docker build -f deploy/Dockerfile --build-arg VERSION=$(VERSION) -t dockge-go .
 
 # 运维脚本：交互式重置指定用户的密码（破坏性，需输入两次确认）
-reset-password:
-	go run ./cmd reset-password
-
 # 发布前冒烟：对运行中的实例 + 真实容器运行时跑全链路接口检查
 smoke:
 	sh scripts/smoke.sh

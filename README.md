@@ -40,7 +40,7 @@ All three trigger startup warnings and show up in the panel's self-check.
 
 - Binaries for linux/darwin, amd64/arm64: [Releases](https://github.com/dockge-go/dockge/releases) — `./dockge-server` (zero config, sensible defaults)
 - From source: `make verify`, `make run`
-- Forgot your password: `docker exec -it dockge dockge-server reset-password`
+- Forgot your password: delete the bbolt file (`/app/data/dockge.db`) and redeploy — it holds only the account and settings; stacks are plain files and stay intact
 - Zero env vars needed: mount `/your/stacks:/opt/stacks` and you're done — container paths are fixed conventions and never change. Bare-metal binaries (no mounts) may use `DOCKGE_*` env vars instead: `DOCKGE_STACKS_DIR`, `DOCKGE_HTTP_PORT`, `DOCKGE_SECURITY_JWT_KEY`, `DOCKGE_CONTAINER_CLI`, `DOCKGE_CONTAINER_COMPOSE`, `DOCKGE_LOG_*`
 
 MIT License.

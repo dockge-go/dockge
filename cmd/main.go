@@ -1,4 +1,5 @@
-// dockge 命令入口：默认启动 HTTP 服务；`reset-password` 子命令用于重置用户密码。
+// dockge 命令入口：启动 HTTP 服务。单用户：首启（bbolt 尚无用户）经 Web 引导创建管理员；
+// 忘记密码只能删除 bbolt 数据文件重新部署（库中仅账号与设置，栈文件无损）。
 // 无配置文件：一切配置来自内置默认值与 DOCKGE_* 环境变量（见 pkg/config）。
 package main
 
@@ -41,10 +42,6 @@ func main() {
 		}
 	}()
 
-	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
-		runResetPassword(mustLoadConfig())
-		return
-	}
 	runServer(mustLoadConfig())
 }
 

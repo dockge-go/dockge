@@ -40,7 +40,7 @@ docker run -d --name dockge --restart unless-stopped \
 
 - linux / darwin（amd64 / arm64）二进制：[Releases](https://github.com/dockge-go/dockge/releases)，`./dockge-server`（零配置即跑）
 - 源码构建：`make verify`、`make run`
-- 忘记密码：`docker exec -it dockge dockge-server reset-password`
+- 忘记密码：删除 bbolt 文件（`/app/data/dockge.db`）重新部署——库里只有账号与设置，栈文件无损
 - 零环境变量：挂载 `/你的栈目录:/opt/stacks` 即用——容器内路径是固定约定，永不改变。裸机二进制（无挂载概念）才用 `DOCKGE_*` 环境变量：`DOCKGE_STACKS_DIR`、`DOCKGE_HTTP_PORT`、`DOCKGE_SECURITY_JWT_KEY`、`DOCKGE_CONTAINER_CLI`、`DOCKGE_CONTAINER_COMPOSE`、`DOCKGE_LOG_*`
 
 MIT License.
