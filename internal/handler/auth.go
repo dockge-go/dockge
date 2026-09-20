@@ -2,9 +2,11 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	v1 "dockge/api/v1"
 	"dockge/internal/service"
+	"dockge/pkg/rate"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
@@ -24,8 +26,16 @@ func NewAuthHandler(i do.Injector) (*AuthHandler, error) {
 	}, nil
 }
 
+// loginLimiter 按 IP 限制登录尝试频率（防在线暴力破解）。
+var loginLimiter = rate.NewKeyed(10, time.Minute, 10_000)
+
 // Login 处理登录请求。
 func (h *AuthHandler) Login(ctx *gin.Context) {
+	if !loginLimiter.Allow(ctx.ClientIP()) {
+		v1.HandleError(ctx, http.StatusTooManyRequests,
+			&v1.Error{Code: http.StatusTooManyRequests, Message: "尝试过于频繁，请一分钟后再试"}, nil)
+		return
+	}
 	var req v1.LoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)

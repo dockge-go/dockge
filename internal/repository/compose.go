@@ -237,8 +237,11 @@ func (r *Repository) StackOp(ctx context.Context, name, op string) (string, erro
 }
 
 // ServiceOp 对栈内单个服务执行 compose 操作（up/stop/restart <service>），
-// 与上游 dockge 的服务级操作对齐。
+// 与上游 dockge 的服务级操作对齐。服务名作 CLI 参数，须校验防 flag 注入。
 func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (string, error) {
+	if !ContainerIDPattern.MatchString(service) {
+		return "", fmt.Errorf("非法服务名: %s", service)
+	}
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
 		return "", fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)

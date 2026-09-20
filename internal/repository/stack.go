@@ -166,17 +166,27 @@ func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) e
 		file = "compose.yaml"
 		stack.ComposeFileName = file
 	}
-	if err := os.WriteFile(filepath.Join(dir, file), []byte(stack.Yaml), 0o644); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, file), []byte(stack.Yaml), 0o644); err != nil {
 		return fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, filepath.Join(dir, file), err)
 	}
 	if stack.Env != "" {
-		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(stack.Env), 0o600); err != nil {
+		if err := writeFileAtomic(filepath.Join(dir, ".env"), []byte(stack.Env), 0o600); err != nil {
 			return fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, filepath.Join(dir, ".env"), err)
 		}
 	} else if err := os.Remove(filepath.Join(dir, ".env")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale .env: %w", err)
 	}
 	return nil
+}
+
+// writeFileAtomic 原子写文件：先写同目录临时文件再 rename 替换，
+// 中途崩溃（断电/被杀）不会留下半截文件——compose.yaml 是栈的唯一真相源。
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".dockge-tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Delete 删除整个栈目录（调用方须先执行 compose down）。

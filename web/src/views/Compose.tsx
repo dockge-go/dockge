@@ -19,8 +19,6 @@ import {
   X,
 } from "lucide-solid";
 
-import { parseDocument } from "yaml";
-
 import { api, type ContainerStat, type StackDetail, type StackOp } from "../api/api";
 import { errText } from "../api/format";
 import { ArrayField, ArraySelectField } from "../components/ArrayField";
@@ -44,9 +42,7 @@ import {
   removeTopLevelNetwork,
   renameTopLevelNetwork,
   setTopLevelNetworkEntries,
-  undefinedDependsOn,
-  undefinedNetworks,
-  undefinedVolumes,
+  composeDefects,
   updateService,
   type ServiceFields,
 } from "../lib/yaml-edit";
@@ -80,33 +76,21 @@ function splitImage(image: string): [string, string] {
   return [image.slice(0, idx), image.slice(idx + 1) || "latest"];
 }
 
-/** 上游 yamlToJSON 的校验部分：解析失败或 services 非对象时返回错误消息；
- *  另拦截服务引用未定义网络/具名卷（否则直到 compose 部署才报 invalid compose project）。 */
+/** 编辑校验 + 部署拦截共用的缺陷检查（单次 YAML 解析）：
+ *  语法 / 未定义网络 / 未定义具名卷 / depends_on 目标不存在。 */
 function composeYamlError(text: string): string {
-  try {
-    const doc = parseDocument(text);
-    if (doc.errors.length > 0) throw doc.errors[0];
-    const config = (doc.toJS() ?? {}) as { services?: unknown };
-    const services = config.services ?? {};
-    if (Array.isArray(services) || typeof services !== "object") {
-      throw new Error("Services must be an object");
-    }
-    const missingNets = undefinedNetworks(text);
-    if (missingNets.length > 0) {
-      throw new Error(t("compose.undefinedNetworks", { names: missingNets.join(", ") }));
-    }
-    const missingVols = undefinedVolumes(text);
-    if (missingVols.length > 0) {
-      throw new Error(t("compose.undefinedVolumes", { names: missingVols.join(", ") }));
-    }
-    const missingDeps = undefinedDependsOn(text);
-    if (missingDeps.length > 0) {
-      throw new Error(t("compose.undefinedDependsOn", { names: missingDeps.join(", ") }));
-    }
-    return "";
-  } catch (e) {
-    return e instanceof Error ? e.message : String(e);
+  const defects = composeDefects(text);
+  if (defects.syntax) return defects.syntax;
+  if (defects.networks.length > 0) {
+    return t("compose.undefinedNetworks", { names: defects.networks.join(", ") });
   }
+  if (defects.volumes.length > 0) {
+    return t("compose.undefinedVolumes", { names: defects.volumes.join(", ") });
+  }
+  if (defects.dependsOn.length > 0) {
+    return t("compose.undefinedDependsOn", { names: defects.dependsOn.join(", ") });
+  }
+  return "";
 }
 
 /** URL 徽章展示形（上游：host + pathname(去尾斜杠) + search，解析失败回退原文）。 */

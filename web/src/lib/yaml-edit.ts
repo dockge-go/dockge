@@ -135,65 +135,75 @@ export function listTopLevelNetworks(text: string): string[] {
   return node.items.map((pair) => String(pair.key));
 }
 
-/** 服务引用了但顶层 networks 未定义的网络名（compose 部署时才报
- *  "refers to undefined network ...: invalid compose project"，保存前提前拦截）。
- *  服务级 networks 兼容列表与字典写法、长语法 name 字段。 */
-export function undefinedNetworks(text: string): string[] {
-  const doc = parse(text);
-  if (!doc) return [];
-  const services = doc.get("services", true);
-  if (!isMap(services)) return [];
-  const defined = new Set(listTopLevelNetworks(text));
-  const missing = new Set<string>();
-  for (const pair of services.items) {
-    const svc = pair.value;
-    if (!isMap(svc)) continue;
-    const refs = svc.get("networks", true);
-    const names = isMap(refs)
-      ? refs.items.map((p) => String(p.key))
-      : isSeq(refs)
-        ? refs.items.map((item) =>
-            isMap(item) ? String(item.get("name") ?? "") : String(item ?? ""),
-          )
-        : null;
-    if (!names) continue;
-    for (const name of names) {
-      if (name && !defined.has(name)) missing.add(name);
-    }
-  }
-  return [...missing];
-}
 
-/** 服务引用了但顶层 volumes 未定义的具名卷（compose 部署时才报
- *  "refers to undefined volume ...: invalid compose project"，保存前提前拦截）。
- *  短语法 "name:/container"（bind 挂载 /path、./path 不需声明）与
- *  长语法 {type: volume, source: name} 均识别；匿名卷（单字段）无需声明。 */
-export function undefinedVolumes(text: string): string[] {
-  const doc = parse(text);
-  if (!doc) return [];
-  const services = doc.get("services", true);
-  const volumes = doc.get("volumes", true);
-  if (!isMap(services)) return [];
-  const defined = new Set(isMap(volumes) ? volumes.items.map((p) => String(p.key)) : []);
-  const missing = new Set<string>();
-  for (const pair of services.items) {
-    const svc = pair.value;
-    if (!isMap(svc)) continue;
-    const refs = svc.get("volumes", true);
-    if (!isSeq(refs)) continue;
-    for (const item of refs.items) {
-      const src = isMap(item)
-        ? (item.get("type") == null || String(item.get("type")) === "volume")
-          ? String(item.get("source") ?? "")
-          : ""
-        : String(item ?? "").split(":")[0];
-      // bind 挂载（/、./、../ 开头）与空源不要求顶层声明
-      if (src && !src.startsWith("/") && !src.startsWith("./") && !src.startsWith("../") && !defined.has(src)) {
-        missing.add(src);
+
+/** compose 结构缺陷检查（编辑校验 + 部署拦截共用）：单次解析完成语法检查，
+ *  并收集 ① 服务引用未定义的网络 ② 具名卷 ③ depends_on 目标——这些错误
+ *  compose 要到部署才报 invalid compose project，提前拦下。服务级 networks/
+ *  volumes/depends_on 兼容列表、字典与长语法写法。
+ *  syntaxLine 为语法错误的 1 起始行号（供编辑器行内标注），无错为 0。 */
+export function composeDefects(text: string): {
+  syntax: string;
+  syntaxLine: number;
+  networks: string[];
+  volumes: string[];
+  dependsOn: string[];
+} {
+  const empty = { syntax: "", syntaxLine: 0, networks: [] as string[], volumes: [] as string[], dependsOn: [] as string[] };
+  try {
+    const parsed = parseDocument(text);
+    if (parsed.errors.length > 0) {
+      const err = parsed.errors[0];
+      const pos = Array.isArray(err.pos) ? err.pos[0] : 0;
+      const line = pos > 0 ? text.slice(0, pos).split("\n").length : 1;
+      return { ...empty, syntax: err.message.split("\n")[0], syntaxLine: line };
+    }
+    const doc = parsed;
+    const services = doc.get("services", true);
+    if (!isMap(services)) return empty;
+    const serviceNames = new Set(services.items.map((p) => String(p.key)));
+    const netsNode = doc.get("networks", true);
+    const volsNode = doc.get("volumes", true);
+    const nets = new Set(isMap(netsNode) ? netsNode.items.map((p) => String(p.key)) : []);
+    const vols = new Set(isMap(volsNode) ? volsNode.items.map((p) => String(p.key)) : []);
+    const missNets = new Set<string>();
+    const missVols = new Set<string>();
+    const missDeps = new Set<string>();
+    const listOf = (node: unknown): string[] => {
+      if (isMap(node)) return node.items.map((p) => String(p.key));
+      if (isSeq(node)) {
+        return node.items.map((item) =>
+          isMap(item) ? String(item.get("name") ?? item.get("service") ?? item.get("source") ?? "") : String(item ?? ""),
+        );
+      }
+      return [];
+    };
+    for (const pair of services.items) {
+      const svc = pair.value;
+      if (!isMap(svc)) continue;
+      for (const n of listOf(svc.get("networks", true))) {
+        if (n && !nets.has(n)) missNets.add(n);
+      }
+      for (const v of listOf(svc.get("volumes", true))) {
+        const src = v.split(":")[0].trim();
+        if (src && !src.startsWith("/") && !src.startsWith("./") && !src.startsWith("../") && !vols.has(src)) {
+          missVols.add(src);
+        }
+      }
+      for (const d of listOf(svc.get("depends_on", true))) {
+        if (d && !serviceNames.has(d)) missDeps.add(d);
       }
     }
+    return {
+      syntax: "",
+      syntaxLine: 0,
+      networks: [...missNets],
+      volumes: [...missVols],
+      dependsOn: [...missDeps],
+    };
+  } catch {
+    return { ...empty, syntax: "YAML 语法错误", syntaxLine: 1 };
   }
-  return [...missing];
 }
 
 /** 格式化 compose YAML：统一缩进/规整流式写法（Document.toString，注释保留）。
@@ -204,34 +214,6 @@ export function formatYaml(text: string): string | null {
   return doc.toString({ indentSeq: false }).trimEnd() + "\n";
 }
 
-/** 服务 depends_on 引用了不存在的服务名（删服务后残留引用时 compose 报
- *  "depends on undefined service"，保存前提前拦截）。
- *  兼容列表写法、字典写法与长语法 {service: name}。 */
-export function undefinedDependsOn(text: string): string[] {
-  const doc = parse(text);
-  if (!doc) return [];
-  const services = doc.get("services", true);
-  if (!isMap(services)) return [];
-  const names = new Set(services.items.map((p) => String(p.key)));
-  const missing = new Set<string>();
-  for (const pair of services.items) {
-    const svc = pair.value;
-    if (!isMap(svc)) continue;
-    const refs = svc.get("depends_on", true);
-    const deps = isMap(refs)
-      ? refs.items.map((p) => String(p.key))
-      : isSeq(refs)
-        ? refs.items.map((item) =>
-            isMap(item) ? String(item.get("service") ?? "") : String(item ?? ""),
-          )
-        : null;
-    if (!deps) continue;
-    for (const dep of deps) {
-      if (dep && !names.has(dep)) missing.add(dep);
-    }
-  }
-  return [...missing];
-}
 
 /** 确保挂载里的具名卷都在顶层 volumes 有定义（编辑表单的闭环写回）：
  *  bind 挂载（/、./、../ 开头）与匿名卷（无源）不需要声明，跳过；已定义不动。 */

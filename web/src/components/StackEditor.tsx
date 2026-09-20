@@ -1,12 +1,68 @@
 // YAML 工作台编辑器（上游 code-mirror 等价物）：CodeMirror 6，
-// 语法高亮、行号、undo、Tab 缩进；深色控制台岛恒暗；compose/env 切换整体换 doc。
-// 校验结果不在此呈现——上游在编辑器下方以纯文本展示（见 Compose.tsx）。
+// 语法高亮、行号、undo、Tab 缩进、键名补全、Ctrl+F 搜索、语法错误行内标注；
+// 深色控制台岛恒暗；compose/env 切换整体换 doc。
+// 引用类错误（未定义网络/卷/依赖）不在此呈现——上游在编辑器下方以纯文本展示（见 Compose.tsx）。
 import { createEffect, onCleanup, onMount } from "solid-js";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { yaml } from "@codemirror/lang-yaml";
 import { bracketMatching, defaultHighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { searchKeymap } from "@codemirror/search";
+import { linter, type Diagnostic } from "@codemirror/lint";
+import { yaml } from "@codemirror/lang-yaml";
+
+import { composeDefects } from "../lib/yaml-edit";
+
+/** compose 键名补全：按当前行缩进区分层级——顶层（services/networks/volumes）
+ *  与服务内键（image/ports/restart 等）；restart 补全常用取值。 */
+const TOP_KEYS = ["services", "networks", "volumes", "name"];
+const SERVICE_KEYS = [
+  "image", "container_name", "restart", "ports", "volumes", "environment",
+  "depends_on", "networks", "healthcheck", "command", "entrypoint", "env_file",
+  "labels", "build", "user", "working_dir", "privileged", "profiles",
+];
+const RESTART_VALUES = ["always", "unless-stopped", "on-failure", "no"];
+
+function composeCompletion(ctx: CompletionContext): CompletionResult | null {
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const before = line.text.slice(0, ctx.pos - line.from);
+  // 仅在行首起的裸键名处补全（值/列表项等场景不触发）
+  if (!/^\s*[\w-]*$/.test(before)) return null;
+  const word = ctx.matchBefore(/[\w-]+/);
+  const indent = before.length - before.trimStart().length;
+  // 层级按 2 空格缩进：0 = 顶层（services/networks/...），4 = 服务内键（image/ports/...）
+  if (indent !== 0 && indent !== 4) return null;
+  const options = (indent === 0 ? TOP_KEYS : SERVICE_KEYS).map((label) => ({
+    label,
+    type: indent === 0 ? "keyword" : "property",
+    detail: indent === 0 ? "顶层键" : "服务配置",
+  }));
+  return { from: word ? word.from : ctx.pos, options, validFor: /^[\w-]*$/ };
+}
+
+function restartValueCompletion(ctx: CompletionContext): CompletionResult | null {
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const m = line.text.slice(0, ctx.pos - line.from).match(/^(\s*restart:\s*)(\w*)$/);
+  if (!m) return null;
+  const from = line.from + m[1].length;
+  return {
+    from,
+    options: RESTART_VALUES.map((label) => ({ label, type: "enum" })),
+    validFor: /^\w*$/,
+  };
+}
+
+/** 语法错误行内标注（引用类缺陷在编辑器下方呈现，不重复标）。 */
+const syntaxLinter = linter(
+  (view): Diagnostic[] => {
+    const d = composeDefects(view.state.doc.toString());
+    if (!d.syntax || d.syntaxLine < 1) return [];
+    const line = view.state.doc.line(Math.min(d.syntaxLine, view.state.doc.lines));
+    return [{ from: line.from, to: line.to, severity: "error", message: d.syntax }];
+  },
+  { delay: 300 },
+);
 
 // 深色控制台岛主题：背景透明（由 .stack-editor-surface 提供），高亮用默认配色。
 const consoleTheme = EditorView.theme(
@@ -50,10 +106,12 @@ export function StackEditor(props: {
           highlightActiveLineGutter(),
           highlightActiveLine(),
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
           indentOnInput(),
           bracketMatching(),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          autocompletion({ override: [composeCompletion, restartValueCompletion] }),
+          syntaxLinter,
           consoleTheme,
           languageConf.of(props.file === "compose" ? yaml() : []),
           readonlyConf.of(EditorState.readOnly.of(props.readonly)),

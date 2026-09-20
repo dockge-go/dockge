@@ -113,86 +113,6 @@ test("顶层网络条目：内部/外部往返（上游 NetworkInput 等价物�
   assert.doesNotMatch(cleared, /networks:/);
 });
 
-test("未定义网络检测：服务引用须在顶层 networks 定义", async () => {
-  const { undefinedNetworks } = await import("../src/lib/yaml-edit.ts");
-
-  // 列表写法引用未定义网络（用户实际踩坑形态）
-  const missing = `services:
-  mongodb:
-    image: mongo:7
-    networks:
-      - backend
-`;
-  assert.deepEqual(undefinedNetworks(missing), ["backend"]);
-
-  // 顶层已定义（含 external）→ 通过
-  const defined = `services:
-  web:
-    image: nginx
-    networks:
-      - edge
-networks:
-  edge:
-    external: true
-`;
-  assert.deepEqual(undefinedNetworks(defined), []);
-
-  // 字典写法与长语法 {name} 均识别
-  const dict = `services:
-  a:
-    image: nginx
-    networks:
-      front: {}
-  b:
-    image: nginx
-    networks:
-      - name: back
-`;
-  assert.deepEqual(undefinedNetworks(dict).sort(), ["back", "front"]);
-
-  // 不写 networks / 非法 YAML → 无报错
-  assert.deepEqual(undefinedNetworks("services:\n  a:\n    image: nginx\n"), []);
-  assert.deepEqual(undefinedNetworks("{{{"), []);
-});
-
-test("未定义具名卷检测：服务引用须在顶层 volumes 声明", async () => {
-  const { undefinedVolumes } = await import("../src/lib/yaml-edit.ts");
-
-  // 用户实际踩坑形态：mongodb_data 未在顶层声明
-  const missing = `services:
-  mongodb:
-    image: mongo:8
-    volumes:
-      - mongodb_data:/data/db
-`;
-  assert.deepEqual(undefinedVolumes(missing), ["mongodb_data"]);
-
-  // 顶层已声明 / bind 挂载 / 匿名卷 → 均不误报
-  const ok = `services:
-  a:
-    volumes:
-      - db_data:/data
-      - /etc/localtime:/etc/localtime:ro
-      - ./site:/usr/share/nginx/html
-      - /data/cache
-volumes:
-  db_data: {}
-`;
-  assert.deepEqual(undefinedVolumes(ok), []);
-
-  // 长语法 {type: volume, source} 与 {type: bind}
-  const long = `services:
-  a:
-    volumes:
-      - type: volume
-        source: cache
-      - type: bind
-        source: ./web
-        target: /srv
-`;
-  assert.deepEqual(undefinedVolumes(long), ["cache"]);
-});
-
 test("格式化：规整缩进与流式写法，语义不变、注释保留", async () => {
   const { formatYaml } = await import("../src/lib/yaml-edit.ts");
 
@@ -237,8 +157,57 @@ test("格式化：规整缩进与流式写法，语义不变、注释保留", as
   assert.equal(formatYaml("services:\n  a: [unclosed"), null);
 });
 
+test("composeDefects：单次解析收集语法/网络/卷/依赖缺陷", async () => {
+  const { composeDefects } = await import("../src/lib/yaml-edit.ts");
+
+  // 用户踩坑形态：未定义网络 + 未定义具名卷 + 残留依赖，一次全查出
+  const bad = `services:
+  mongodb:
+    image: mongo:8
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - backend
+    depends_on:
+      - db
+`;
+  const d = composeDefects(bad);
+  assert.deepEqual(d.networks, ["backend"]);
+  assert.deepEqual(d.volumes, ["mongodb_data"]);
+  assert.deepEqual(d.dependsOn, ["db"]);
+
+  // bind 挂载/匿名卷/已定义引用/字典与长语法写法不误报；语法错误单列
+  const ok = `services:
+  a:
+    image: nginx
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./site:/usr/share/nginx/html
+      - db_data:/data
+    networks:
+      edge: {}
+  b:
+    image: redis
+    depends_on:
+      - service: a
+networks:
+  edge:
+    external: true
+volumes:
+  db_data: {}
+`;
+  const d2 = composeDefects(ok);
+  assert.deepEqual([d2.networks, d2.volumes, d2.dependsOn], [[], [], []]);
+  assert.equal(composeDefects("services: [unclosed").syntax.length > 0, true);
+  assert.deepEqual(composeDefects("services:\n  a:\n    image: nginx\n"), { syntax: "", syntaxLine: 0, networks: [], volumes: [], dependsOn: [] });
+  // 语法错误带行号（供编辑器行内标注）
+  const syn = composeDefects("services:\n  a:\n    image: [unclosed");
+  assert.ok(syn.syntax.length > 0);
+  assert.ok(syn.syntaxLine >= 2);
+});
+
 test("闭环：选网络自动补顶层定义（本机网络标记 external）", async () => {
-  const { ensureTopLevelNetworks, listTopLevelNetworkEntries, undefinedNetworks } =
+  const { ensureTopLevelNetworks, listTopLevelNetworkEntries, composeDefects } =
     await import("../src/lib/yaml-edit.ts");
 
   const doc = `services:\n  web:\n    image: nginx\n    networks:\n      - edge\nnetworks:\n  edge:\n`;
@@ -252,7 +221,7 @@ test("闭环：选网络自动补顶层定义（本机网络标记 external）",
     ["edge", "traefik_proxy:external", "lan"],
   );
   // 闭环出口：补完定义后未定义网络校验必然通过
-  assert.deepEqual(undefinedNetworks(out), []);
+  assert.deepEqual(composeDefects(out).networks, []);
 
   // 全部已定义 → 原样返回（引用相等，不产生多余重排）
   assert.equal(ensureTopLevelNetworks(out, ["edge", "lan"], host), out);
@@ -260,42 +229,6 @@ test("闭环：选网络自动补顶层定义（本机网络标记 external）",
   // 手写的既有定义不被改写（lan 已是非 external，即使在本机集合里也不动）
   const out2 = ensureTopLevelNetworks(out, ["lan"], host);
   assert.equal(out2, out);
-});
-
-test("未定义依赖检测：depends_on 引用的服务必须存在", async () => {
-  const { undefinedDependsOn } = await import("../src/lib/yaml-edit.ts");
-
-  // 删除服务后残留引用（用户实际踩坑形态）
-  const stale = `services:
-  web:
-    image: nginx
-    depends_on:
-      - db
-`;
-  assert.deepEqual(undefinedDependsOn(stale), ["db"]);
-
-  // 字典写法与长语法 {service} 均识别；存在的引用不误报
-  const ok = `services:
-  web:
-    image: nginx
-    depends_on:
-      db:
-        condition: service_healthy
-  db:
-    image: redis
-`;
-  assert.deepEqual(undefinedDependsOn(ok), []);
-  const longSyntax = `services:
-  a:
-    image: nginx
-    depends_on:
-      - service: gone
-        condition: service_started
-`;
-  assert.deepEqual(undefinedDependsOn(longSyntax), ["gone"]);
-
-  assert.deepEqual(undefinedDependsOn("services:\n  a:\n    image: nginx\n"), []);
-  assert.deepEqual(undefinedDependsOn("{{{"), []);
 });
 
 test("闭环：表单输入具名卷自动补顶层 volumes 声明", async () => {
@@ -322,7 +255,7 @@ test("闭环：表单输入具名卷自动补顶层 volumes 声明", async () =>
 });
 
 test("网络卡与表单联动：顶层改名/删除同步服务引用", async () => {
-  const { renameTopLevelNetwork, removeTopLevelNetwork, undefinedNetworks, listTopLevelNetworks } =
+  const { renameTopLevelNetwork, removeTopLevelNetwork, composeDefects, listTopLevelNetworks } =
     await import("../src/lib/yaml-edit.ts");
 
   const doc = `services:
@@ -347,14 +280,14 @@ networks:
   assert.deepEqual(js.services.web.networks, ["backend", "edge"]);
   assert.ok(js.services.db.networks.backend);
   assert.deepEqual(listTopLevelNetworks(renamed), ["backend", "edge"]);
-  assert.deepEqual(undefinedNetworks(renamed), []);
+  assert.deepEqual(composeDefects(renamed).networks, []);
 
   // 删除 backend：全部引用移除，db.networks 清空则删键
   const removed = removeTopLevelNetwork(renamed, "backend");
   const js2 = (await import("yaml")).parseDocument(removed).toJS();
   assert.deepEqual(js2.services.web.networks, ["edge"]);
   assert.equal(js2.services.db.networks, undefined);
-  assert.deepEqual(undefinedNetworks(removed), []);
+  assert.deepEqual(composeDefects(removed).networks, []);
 
   // 空名/不存在：原样返回
   assert.equal(renameTopLevelNetwork(doc, "", "x"), doc);

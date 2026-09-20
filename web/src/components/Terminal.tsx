@@ -1,6 +1,5 @@
-// xterm.js 终端面板：连接 WebSocket 终端流。
-// - /v1/terminal/{name}/{type}（exec 容器 shell / compose-logs 栈日志）
-// - /v1/console/terminal（宿主 shell，type="console"）
+// xterm.js 终端面板：连接 WebSocket 终端流
+// （/v1/terminal/{name}/{type}：exec 容器 shell / compose-logs 栈日志）。
 // resize 以 JSON 控制消息上报；compose-logs 只读不回传输入。
 // DisplayTerminal 为纯展示实例（操作进度输出等，无连接、无输入）。
 import { createEffect, onCleanup, onMount } from "solid-js";
@@ -31,7 +30,7 @@ const READ_ONLY_OPTIONS = { disableStdin: true, cursorBlink: false, convertEol: 
 
 export function TerminalPane(props: {
   name: string;
-  type: "exec" | "compose-logs" | "console";
+  type: "exec" | "compose-logs";
   /** 连接状态回调：live=流已建立，ended=会话结束（供日志卡显示实时指示）。 */
   onState?: (state: "live" | "ended") => void;
 }) {
@@ -109,9 +108,7 @@ export function TerminalPane(props: {
     const kind = props.type;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const tail = kind === "compose-logs" ? "&tail=200" : "";
-    const base = kind === "console"
-      ? `${proto}://${location.host}/v1/console/terminal`
-      : `${proto}://${location.host}/v1/terminal/${encodeURIComponent(name)}/${kind}`;
+    const base = `${proto}://${location.host}/v1/terminal/${encodeURIComponent(name)}/${kind}`;
     const sock = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}`);
     ws = sock;
     term.write("\x1b[2J\x1b[H");
