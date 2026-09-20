@@ -29,3 +29,6 @@ dist/
 .env
 go.work
 go.work.sum
+
+# 开发实例数据（软链/本地库/日志）
+storage/
