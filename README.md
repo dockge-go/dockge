@@ -32,15 +32,15 @@ Three footguns:
 
 1. No docker socket mounted — the panel loads, every stack action fails.
 2. `/opt/stacks` not bind-mounted — stacks die with the container.
-3. The default JWT key is literally `change-me-in-production`. Set `APP_SECURITY_JWT_KEY` before exposing the panel.
+3. (Solved) The JWT key is generated randomly on first start and persisted — nothing to configure.
 
 All three trigger startup warnings and show up in the panel's self-check.
 
 ## Also
 
-- Binaries for linux/darwin, amd64/arm64: [Releases](https://github.com/dockge-go/dockge/releases) — `./dockge-server` (zero config, sensible defaults; optional `-conf`)
+- Binaries for linux/darwin, amd64/arm64: [Releases](https://github.com/dockge-go/dockge/releases) — `./dockge-server` (zero config, sensible defaults)
 - From source: `make verify`, `make run`
 - Forgot your password: `docker exec -it dockge dockge-server reset-password`
-- Config you'll actually touch: port (`http.host` / `http.port`), stacks dir (`dockge.stacks_dir`), runtime (`container.cli`, `container.compose`)
+- Zero env vars needed: mount `/your/stacks:/opt/stacks` and you're done. All knobs exist as `DOCKGE_*` env vars for special cases — `DOCKGE_HTTP_PORT`, `DOCKGE_STACKS_DIR`, `DOCKGE_SECURITY_JWT_KEY`, `DOCKGE_CONTAINER_CLI`, `DOCKGE_CONTAINER_COMPOSE`, `DOCKGE_LOG_*`
 
 MIT License.

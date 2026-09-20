@@ -1,12 +1,10 @@
 // dockge 命令入口：默认启动 HTTP 服务；`reset-password` 子命令用于重置用户密码。
+// 无配置文件：一切配置来自内置默认值与 DOCKGE_* 环境变量（见 pkg/config）。
 package main
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 
 	"dockge/internal/handler"
@@ -24,74 +22,30 @@ import (
 	"github.com/spf13/viper"
 )
 
-// defaultConf 是配置文件默认路径；镜像构建用 -X main.defaultConf=... 覆盖为镜像内路径，
-// 使容器里无需任何参数即可执行子命令（如 docker compose run --rm dockge reset-password）。
-var defaultConf = "config/local.yml"
-
-// mustConfig 读取配置，失败即终止（启动期无可用配置时没有可继续的余地）。
-func mustConfig(path string) *viper.Viper {
-	conf, err := config.New(path)
+// mustLoadConfig 加载配置（默认值 + DOCKGE_* 环境变量），失败即终止。
+func mustLoadConfig() *viper.Viper {
+	conf, err := config.Load()
 	if err != nil {
 		panic(err)
 	}
 	return conf
 }
 
-// confExplicit 报告 -conf 是否由用户显式传入。
-func confExplicit(fs *flag.FlagSet) bool {
-	explicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "conf" {
-			explicit = true
-		}
-	})
-	return explicit
-}
-
-// mustConfigOrDefaults：未显式传 -conf 且默认配置文件不存在时回退到内置默认配置，
-// 裸二进制下载即可运行；显式指定的路径缺失仍然报错——
-// 打错路径若静默落到默认值，用户自定的数据目录/端口会被无声忽略。
-func mustConfigOrDefaults(path string, explicit bool) *viper.Viper {
-	if !explicit {
-		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-			conf, err := config.Defaults()
-			if err != nil {
-				panic(err)
-			}
-			return conf
-		}
-	}
-	return mustConfig(path)
-}
-
 func main() {
-	// 启动期 panic（配置缺失、数据卷只读、端口被占用等）转为一行可操作提示：
+	// 启动期 panic（数据卷只读、端口被占用等）转为一行可操作提示：
 	// 容器用户看到的应是原因与修复方向，而不是 Go 栈回溯（do.MustInvoke 会 panic）。
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "启动失败：%v\n提示：请检查配置文件、数据卷挂载（/app/data 需可写）与端口占用。\n", r)
+			fmt.Fprintf(os.Stderr, "启动失败：%v\n提示：请检查环境变量、数据卷挂载（/app/data 需可写）与端口占用。\n", r)
 			os.Exit(1)
 		}
 	}()
 
-	args := os.Args[1:]
-	// 子命令前置：flag 包遇到首个非 flag 参数即停止解析，故这里自行解析其后的参数。
-	if len(args) > 0 && args[0] == "reset-password" {
-		sub := flag.NewFlagSet("reset-password", flag.ExitOnError)
-		subConf := sub.String("conf", defaultConf, "config path")
-		_ = sub.Parse(args[1:])
-		runResetPassword(mustConfigOrDefaults(*subConf, confExplicit(sub)))
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		runResetPassword(mustLoadConfig())
 		return
 	}
-
-	envConf := flag.String("conf", defaultConf, "config path, eg: -conf ./config/local.yml")
-	flag.Parse()
-	// 子命令后置：-conf x reset-password 同样接受。
-	if flag.Arg(0) == "reset-password" {
-		runResetPassword(mustConfigOrDefaults(*envConf, confExplicit(flag.CommandLine)))
-		return
-	}
-	runServer(mustConfigOrDefaults(*envConf, confExplicit(flag.CommandLine)))
+	runServer(mustLoadConfig())
 }
 
 // runServer 是 HTTP 服务的组合根：按顺序装配配置、日志、JWT、

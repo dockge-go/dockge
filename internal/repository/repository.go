@@ -6,6 +6,8 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -61,12 +63,42 @@ type Repository struct {
 // New 构造仓储基础对象，由注入容器调用。
 func New(i do.Injector) (*Repository, error) {
 	conf := do.MustInvoke[*viper.Viper](i)
-	return &Repository{
+	r := &Repository{
 		db:        do.MustInvoke[*bbolt.DB](i),
 		stacksDir: StacksDirFromConf(conf),
 		logger:    do.MustInvoke[*log.Logger](i),
 		runtime:   DetectRuntime(conf.GetString("container.cli"), conf.GetString("container.compose")),
-	}, nil
+	}
+	// JWT 密钥解析（显式环境变量 > 库中持久值 > 首启随机生成并写库），
+	// 结果写回 viper：后续 jwt.Package 惰性解析时拿到的即最终值。
+	if err := r.ensureJWTKey(context.Background(), conf); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// ensureJWTKey 保证 JWT 密钥可用且跨重启稳定：
+// 显式设置的非弱值直接沿用；否则读库，库中也没有则生成随机值持久化。
+// 用户零配置部署时不再落在众人皆知的默认密钥上。
+func (r *Repository) ensureJWTKey(ctx context.Context, conf *viper.Viper) error {
+	explicit := strings.TrimSpace(conf.GetString("security.jwt.key"))
+	if explicit != "" && explicit != "change-me-in-production" {
+		return nil
+	}
+	if saved, err := r.GetSetting(ctx, "jwtKey"); err == nil && saved != "" {
+		conf.Set("security.jwt.key", saved)
+		return nil
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Errorf("generate jwt key: %w", err)
+	}
+	generated := hex.EncodeToString(raw)
+	if err := r.SetSetting(ctx, "jwtKey", generated, "security"); err != nil {
+		return fmt.Errorf("persist jwt key: %w", err)
+	}
+	conf.Set("security.jwt.key", generated)
+	return nil
 }
 
 // ContainerCommand 构造容器命令（供 handler 层使用，如容器终端）。
@@ -128,14 +160,10 @@ func initBuckets(db *bbolt.DB) error {
 	})
 }
 
-// StacksDirFromConf 解析 stacks 目录，优先级：
-// DOCKGE_STACKS_DIR 环境变量（上游同名，兼容从上游迁移的编排）→
-// 配置/APP_DOCKGE_STACKS_DIR → 缺省 storage/stacks。
+// StacksDirFromConf 解析 stacks 目录：DOCKGE_STACKS_DIR 环境变量
+// （viper 前缀绑定，与上游 dockge 同名，兼容既有编排）→ 缺省 storage/stacks。
 func StacksDirFromConf(conf *viper.Viper) string {
-	if env := strings.TrimSpace(os.Getenv("DOCKGE_STACKS_DIR")); env != "" {
-		return env
-	}
-	dir := conf.GetString("dockge.stacks_dir")
+	dir := strings.TrimSpace(conf.GetString("stacks_dir"))
 	if dir == "" {
 		return "storage/stacks"
 	}

@@ -51,31 +51,13 @@ func newTestServer(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	root := t.TempDir()
-	confPath := filepath.Join(root, "dockge.yml")
-	conf := fmt.Sprintf(`env: local
-http:
-  host: 127.0.0.1
-  port: 0
-security:
-  jwt:
-    key: test-key
-dockge:
-  stacks_dir: %s
-data:
-  db:
-    user:
-      dsn: %s
-container:
-  cli: %s
-log:
-  log_level: error
-  mode: console
-  encoding: console
-`, filepath.Join(root, "stacks"), filepath.Join(root, "dockge.db"), stubCLI(t))
-	if err := os.WriteFile(confPath, []byte(conf), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.New(confPath)
+	stub := stubCLI(t)
+	t.Setenv("DOCKGE_SECURITY_JWT_KEY", "test-key")
+	t.Setenv("DOCKGE_STACKS_DIR", filepath.Join(root, "stacks"))
+	t.Setenv("DOCKGE_DATA_DB_USER_DSN", filepath.Join(root, "dockge.db"))
+	t.Setenv("DOCKGE_CONTAINER_CLI", stub)
+	t.Setenv("DOCKGE_LOG_LEVEL", "error")
+	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

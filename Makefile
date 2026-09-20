@@ -6,7 +6,7 @@ bootstrap: web-build
 # 启动 dockge 服务（端口 5001）；与 build 同样注入版本号，
 # 否则本地 run 后端恒为 dev、与前端注入的 git 版本不一致，About 页误报
 run:
-	go run -ldflags="-X dockge/internal/version.Version=$(VERSION)" ./cmd -conf config/local.yml
+	go run -ldflags="-X dockge/internal/version.Version=$(VERSION)" ./cmd
 
 # 构建前端（tsc 类型检查 + vite，产物内嵌进 Go 二进制）
 web-build:
@@ -25,7 +25,7 @@ image:
 
 # 运维脚本：交互式重置指定用户的密码（破坏性，需输入两次确认）
 reset-password:
-	go run ./cmd reset-password -conf config/local.yml
+	go run ./cmd reset-password
 
 # 发布前冒烟：对运行中的实例 + 真实容器运行时跑全链路接口检查
 smoke:

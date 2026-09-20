@@ -31,7 +31,7 @@ ARG VERSION=dev
 ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOARCH=${TARGETARCH} go build -trimpath \
-    -ldflags="-s -w -X dockge/internal/version.Version=${VERSION} -X main.defaultConf=/app/config/dockge.yml" \
+    -ldflags="-s -w -X dockge/internal/version.Version=${VERSION}" \
     -o /out/dockge-server ./cmd
 
 # ---- 运行镜像 ----
@@ -40,8 +40,13 @@ FROM alpine:3.22
 # tini 作 PID 1：栈操作会启动子进程组，孤儿进程需由 init 回收（否则容器内累积僵尸）。
 RUN apk add --no-cache docker-cli docker-cli-compose ca-certificates tzdata tini
 COPY --from=backend /out/dockge-server /usr/local/bin/dockge-server
-COPY config/docker.yml /app/config/dockge.yml
 WORKDIR /app
+# 零配置文件：容器内路径由 ENV 提供，用户编排经 environment 段覆盖（如 DOCKGE_STACKS_DIR）
+ENV DOCKGE_STACKS_DIR=/opt/stacks \
+    DOCKGE_DATA_DB_USER_DSN=/app/data/dockge.db \
+    DOCKGE_LOG_MODE=both \
+    DOCKGE_LOG_ENCODING=json \
+    DOCKGE_LOG_FILE_NAME=/app/data/logs/dockge.log
 VOLUME /app/data
 EXPOSE 5001
 
@@ -54,10 +59,10 @@ LABEL org.opencontainers.image.title="Dockge" \
       org.opencontainers.image.version="${VERSION}"
 
 # 健康检查：容器内无 curl，用 busybox wget；/v1/health 免鉴权，响应体含运行时自检结果。
+# 端口跟随 DOCKGE_HTTP_PORT（shell 形式 CMD 才能展开变量）。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:5001/v1/health || exit 1
+    CMD wget -q -O /dev/null "http://127.0.0.1:${DOCKGE_HTTP_PORT:-5001}/v1/health" || exit 1
 
 # 挂载宿主 docker socket 与数据卷：
 #   -v /var/run/docker.sock:/var/run/docker.sock -v dockge-data:/app/data
 ENTRYPOINT ["/sbin/tini", "--", "dockge-server"]
-CMD ["-conf", "/app/config/dockge.yml"]

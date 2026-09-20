@@ -51,7 +51,9 @@ func (r *Repository) List(ctx context.Context) ([]model.Stack, error) {
 
 	lsItems, err := r.ComposeLs(ctx)
 	if err != nil {
-		return nil, err
+		// docker 运行时不可用时降级：栈文件是唯一真相源，目录扫描结果照常
+		// 返回（状态停留在"仅有文件"、外部栈缺席），不因引擎故障遮蔽整个列表
+		return stacks, nil
 	}
 	for _, item := range lsItems {
 		if item.Name == "" {

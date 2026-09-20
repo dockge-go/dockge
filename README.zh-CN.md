@@ -32,15 +32,15 @@ docker run -d --name dockge --restart unless-stopped \
 
 1. 不挂 docker socket——面板能开，栈操作全废。
 2. `/opt/stacks` 不挂宿主机——删容器，栈文件跟着没。
-3. 默认 JWT 密钥就是字面上的 `change-me-in-production`，对外部署前用 `APP_SECURITY_JWT_KEY` 换掉。
+3.（已解决）JWT 密钥首次启动随机生成并持久化，无需配置。
 
 三条出问题时启动日志都会告警，面板自检也会标出来。
 
 ## 其他
 
-- linux / darwin（amd64 / arm64）二进制：[Releases](https://github.com/dockge-go/dockge/releases)，`./dockge-server`（零配置即跑，可选 `-conf`）
+- linux / darwin（amd64 / arm64）二进制：[Releases](https://github.com/dockge-go/dockge/releases)，`./dockge-server`（零配置即跑）
 - 源码构建：`make verify`、`make run`
 - 忘记密码：`docker exec -it dockge dockge-server reset-password`
-- 常改的配置：端口（`http.host` / `http.port`）、栈目录（`dockge.stacks_dir`）、运行时（`container.cli`、`container.compose`）
+- 零环境变量：挂载 `/你的栈目录:/opt/stacks` 即用。特殊需要时全部旋钮都是 `DOCKGE_*` 环境变量——`DOCKGE_HTTP_PORT`、`DOCKGE_STACKS_DIR`、`DOCKGE_SECURITY_JWT_KEY`、`DOCKGE_CONTAINER_CLI`、`DOCKGE_CONTAINER_COMPOSE`、`DOCKGE_LOG_*`
 
 MIT License.

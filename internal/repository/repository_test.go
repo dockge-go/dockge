@@ -4,7 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/viper"
+	"dockge/pkg/config"
+
 	"go.etcd.io/bbolt"
 )
 
@@ -48,27 +49,25 @@ func TestInitBucketsCreatesOnlyKnownBuckets(t *testing.T) {
 	}
 }
 
-// TestStacksDirFromConf 守护栈目录优先级：上游同名环境变量 DOCKGE_STACKS_DIR
-// 优先于配置文件（否则按上游编排迁移的用户会静默用错目录、看不到自己的栈）。
+// TestStacksDirFromConf 守护栈目录解析：环境变量 DOCKGE_STACKS_DIR 覆盖默认值
+// （上游同名变量，从上游迁移的编排不改动即可继续工作）。
 func TestStacksDirFromConf(t *testing.T) {
 	cases := []struct {
 		name string
 		env  string
-		conf string
 		want string
 	}{
-		{"缺省", "", "", "storage/stacks"},
-		{"配置文件优先于缺省", "", "/srv/conf-stacks", "/srv/conf-stacks"},
-		{"环境变量优先于配置", "/opt/stacks", "/srv/conf-stacks", "/opt/stacks"},
-		{"环境变量去空白", "  /opt/stacks  ", "", "/opt/stacks"},
-		{"空白环境变量视为未设", "   ", "/srv/conf-stacks", "/srv/conf-stacks"},
+		{"缺省", "", "storage/stacks"},
+		{"环境变量覆盖默认值", "/opt/stacks", "/opt/stacks"},
+		{"环境变量去空白", "  /opt/stacks  ", "/opt/stacks"},
+		{"空白环境变量视为未设", "   ", "storage/stacks"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("DOCKGE_STACKS_DIR", tc.env)
-			conf := viper.New()
-			if tc.conf != "" {
-				conf.Set("dockge.stacks_dir", tc.conf)
+			conf, err := config.Load()
+			if err != nil {
+				t.Fatal(err)
 			}
 			if got := StacksDirFromConf(conf); got != tc.want {
 				t.Errorf("StacksDirFromConf() = %q, want %q", got, tc.want)

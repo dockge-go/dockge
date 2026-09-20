@@ -1,48 +1,18 @@
-// Package config 提供基于 viper 的配置加载：支持文件路径与 APP_CONF
-// 环境变量两种来源，并自动映射 APP_ 前缀的环境变量覆盖。
+// Package config 提供配置加载：无配置文件——一切来自内置默认值与
+// DOCKGE_ 前缀的环境变量（部署侧由该服务自身 compose.yaml 的
+// environment 段定义，键名 = 配置键大写并以 _ 连接，如 DOCKGE_HTTP_PORT）。
 package config
 
 import (
-	"os"
 	"strings"
 
 	"github.com/spf13/viper"
 )
 
-// New loads the app config from the given path, or from the APP_CONF
-// environment variable when set.
-func New(p string) (*viper.Viper, error) {
-	envConf := os.Getenv("APP_CONF")
-	if envConf == "" {
-		envConf = p
-	}
+// Load 返回配置：内置默认值 + DOCKGE_* 环境变量覆盖。
+func Load() (*viper.Viper, error) {
 	conf := viper.New()
-	conf.SetConfigFile(envConf)
-	if err := conf.ReadInConfig(); err != nil {
-		return nil, err
-	}
-	if err := bindEnvKeys(conf); err != nil {
-		return nil, err
-	}
-	return conf, nil
-}
-
-// bindEnvKeys 显式为每个已知键绑定环境变量：AutomaticEnv 只对「未设值」的键生效，
-// 显式绑定才能保证 APP_* 覆盖配置文件里的值（如 APP_CONTAINER_CLI=podman）。
-func bindEnvKeys(conf *viper.Viper) error {
-	for _, key := range conf.AllKeys() {
-		if err := conf.BindEnv(key); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Defaults 返回内置默认配置：配置文件与 APP_CONF 均不存在时兜底，
-// 使裸二进制下载即可运行；内容对齐 prod，仅路径改为可移植的相对路径。
-func Defaults() (*viper.Viper, error) {
-	conf := viper.New()
-	conf.SetEnvPrefix("APP")
+	conf.SetEnvPrefix("DOCKGE")
 	conf.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	conf.AutomaticEnv()
 	conf.SetDefault("env", "prod")
@@ -52,7 +22,7 @@ func Defaults() (*viper.Viper, error) {
 	conf.SetDefault("security.jwt.key", "change-me-in-production")
 	conf.SetDefault("container.cli", "auto")
 	conf.SetDefault("container.compose", "")
-	conf.SetDefault("dockge.stacks_dir", "storage/stacks")
+	conf.SetDefault("stacks_dir", "storage/stacks")
 	conf.SetDefault("data.db.user.dsn", "storage/dockge.db")
 	conf.SetDefault("log.log_level", "info")
 	conf.SetDefault("log.mode", "console")
@@ -62,8 +32,10 @@ func Defaults() (*viper.Viper, error) {
 	conf.SetDefault("log.max_age", 7)
 	conf.SetDefault("log.max_size", 10)
 	conf.SetDefault("log.compress", true)
-	if err := bindEnvKeys(conf); err != nil {
-		return nil, err
+	for _, key := range conf.AllKeys() {
+		if err := conf.BindEnv(key); err != nil {
+			return nil, err
+		}
 	}
 	return conf, nil
 }

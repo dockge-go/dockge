@@ -16,7 +16,6 @@ Dockge：[louislam/dockge](https://github.com/louislam/dockge) 的**一比一复
 ```
 api/v1         API 契约（DTO / 错误码）
 cmd/           入口（main.go 服务 + reset-password 子命令）
-config/        环境配置（local / prod / docker）
 deploy/        部署产物（Dockerfile）
 internal/      handler → service → repository 分层 + middleware/model/server/version
 pkg/           可复用基础包（app/config/jwt/log/rate/hash/server）
