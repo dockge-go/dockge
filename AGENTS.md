@@ -4,6 +4,7 @@ Dockge：[louislam/dockge](https://github.com/louislam/dockge) 的**一比一复
 
 ## 硬约束
 
+- **部署铁律（用户明确要求）**：镜像/服务内部路径是固定约定——`/opt/stacks`、`/app/data`、端口 5001——**用户切换配置不得改变内部路径**。用户换栈目录只能改自己 compose.yaml 挂载的宿主侧（`-v /宿主目录:/opt/stacks`）。文档、示例、开发实例一律只示范挂载模式；`DOCKGE_*` 环境变量仅供裸机部署（无挂载概念）的高级覆盖，**禁止在面向用户的示例或开发演示中用它改路径**。开发实例对齐用户形态：约定位置 + 软链/挂载，不设路径环境变量。
 - **技术栈**：Gin + bbolt + samber/do 后端；SolidJS + Vite 前端；go:embed 单二进制。不引入其他框架。
 - **单机（硬性）**：不做多主机/多实例/Agent（上游「Dockge 代理 beta」联机方案已移除）；全部栈操作经容器 CLI 子进程完成。
 - **运行时无关（硬性）**：不得硬编码 `docker` —— 一律经 `repository.Runtime`（`container.cli` 配置或 PATH 自动探测 docker→podman→nerdctl；`container.compose` 支持独立的 `podman-compose` 等命令）。OCI 低层运行时（youki/crun 等）经 podman/containerd 选用，本层无需感知。

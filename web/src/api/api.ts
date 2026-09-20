@@ -34,7 +34,7 @@ export interface UserData {
   id: number;
   username: string;
   nickname: string;
-  role?: string; // admin / member
+  role?: string; // 单用户软件，恒为 admin（字段为兼容存量数据保留）
 }
 
 interface LoginData {
