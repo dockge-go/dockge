@@ -23,7 +23,7 @@ docker run -d --name dockge --restart unless-stopped \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt/stacks:/opt/stacks \
   -v dockge-data:/app/data \
-  makeshit/dockge:0.1
+  makeshit/dockge:0.2.3
 ```
 
 打开 `http://<主机IP>:5001`，建管理员账号，完事。

@@ -23,7 +23,7 @@ docker run -d --name dockge --restart unless-stopped \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt/stacks:/opt/stacks \
   -v dockge-data:/app/data \
-  makeshit/dockge:0.1
+  makeshit/dockge:0.2.3
 ```
 
 Open `http://<host>:5001`, create the admin account. Done.
