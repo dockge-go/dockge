@@ -1,60 +1,5 @@
-// Package api/v1 定义 dockge 应用的 API 契约。
+// Package v1 定义 dockge 应用的 API 契约（DTO）。
 package v1
-
-import (
-	"errors"
-	"net/http"
-
-	"github.com/gin-gonic/gin"
-)
-
-type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
-}
-
-type Error struct {
-	Code    int
-	Message string
-}
-
-// Error 实现 error 接口，返回业务错误消息。
-func (e *Error) Error() string { return e.Message }
-
-var (
-	ErrSuccess             = newError(0, "ok")
-	ErrBadRequest          = newError(400, "参数错误")
-	ErrUnauthorized        = newError(401, "登录失效，请重新登录~")
-	ErrNotFound            = newError(404, "数据不存在")
-	ErrConflict            = newError(409, "名称已存在")
-	ErrDockerError         = newError(500, "docker 操作失败")
-	ErrInternalServerError = newError(500, "服务器错误~")
-)
-
-func newError(code int, msg string) *Error { return &Error{Code: code, Message: msg} }
-
-// HandleSuccess 以统一响应包（code=0）写出成功结果；data 为 nil 时填充空对象。
-func HandleSuccess(ctx *gin.Context, data interface{}) {
-	if data == nil {
-		data = map[string]interface{}{}
-	}
-	ctx.JSON(http.StatusOK, Response{Code: ErrSuccess.Code, Message: ErrSuccess.Message, Data: data})
-}
-
-// HandleError 以统一响应包写出失败结果；无法归类的错误按未知错误处理。
-func HandleError(ctx *gin.Context, httpCode int, err error, data interface{}) {
-	if data == nil {
-		data = map[string]string{}
-	}
-	var bizErr *Error
-	if !errors.As(err, &bizErr) {
-		bizErr = &Error{Code: http.StatusInternalServerError, Message: "unknown error"}
-	}
-	ctx.JSON(httpCode, Response{Code: bizErr.Code, Message: bizErr.Message, Data: data})
-}
-
-// -------- 认证 --------
 
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
@@ -68,14 +13,16 @@ type MeUserData struct {
 	Role     string `json:"role,omitempty"` // admin / member
 }
 
+// 密码字段只做 required（防缺字段）；长度/强度规则统一由 service.ValidatePasswordStrength
+// 判定——若在 DTO 放 min=6，绑定失败会落到笼统的「参数错误」，具体原因无法到达用户。
 type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword" binding:"required"`
-	NewPassword string `json:"newPassword" binding:"required,min=6"`
+	NewPassword string `json:"newPassword" binding:"required"`
 }
 
 type SetupRequest struct {
 	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required"`
 }
 
 type LoginResponseData struct {

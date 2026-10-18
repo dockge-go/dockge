@@ -10,7 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
 
 	"dockge/pkg/jwt"
@@ -84,13 +83,10 @@ func (f fakeSessions) CheckSession(ctx context.Context, uid uint, h string) erro
 func TestStrictAuthChecksSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// 构造真 JWT（viper 提供 security.jwt.key）
-	injector := do.New()
+	// 构造真 JWT
 	conf := viper.New()
 	conf.Set("security.jwt.key", "unit-test-key")
-	do.ProvideValue(injector, conf)
-	do.Provide(injector, jwt.New)
-	j := do.MustInvoke[*jwt.JWT](injector)
+	j := jwt.NewJWT(conf)
 	token, err := j.GenToken(7, "hash-value", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)

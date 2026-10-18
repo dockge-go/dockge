@@ -63,9 +63,10 @@ function statusClass(status: number): string {
   return "";
 }
 
+// 上游 statusNameShort：created(2) 归入 inactive（非 exited）
 function statusLabel(status: number): string {
   if (status === 3) return t("home.active");
-  if (status === 4 || status === 2) return t("home.exited");
+  if (status === 4) return t("home.exited");
   return t("home.inactive");
 }
 
@@ -160,14 +161,22 @@ export function Compose() {
     if (!window.confirm(t("compose.leaveConfirm"))) e.preventDefault();
   });
 
-  // Escape 关闭「停止并置于非活动状态」下拉（对齐上游 Bootstrap dropdown 行为）
+  // Escape / 点击外部关闭「停止并置于非活动状态」下拉（对齐上游 Bootstrap dropdown 行为）
+  let downHost!: HTMLDivElement;
   createEffect(() => {
     if (!downOpen()) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setDownOpen(false);
     };
+    const onPointer = (e: PointerEvent) => {
+      if (!downHost.contains(e.target as Node)) setDownOpen(false);
+    };
     document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    document.addEventListener("pointerdown", onPointer);
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    });
   });
 
   onMount(() => {
@@ -176,11 +185,19 @@ export function Compose() {
     refreshImages();
   });
 
+  // deploy 成功跳转时携带部署输出（上游进度终端在 push 后仍可见）；
+  // createdName：本会话已创建的栈名，重试部署改走覆盖保存，
+  // 避免首次部署失败后 createStack 撞「已存在」（上游此处死锁在报错，只能绕道侧栏）。
+  let carryOutput: string | null = null;
+  let createdName = "";
+
   // 路由参数变化（切换栈 / 进出新建页）→ 清理上一栈的会话状态再加载。
   // output（操作进度终端）、展开集合、服务输入若不清理，会原样挂在下一个栈上。
   createEffect(() => {
     const routeName = params.name;
-    setOutput("");
+    createdName = "";
+    setOutput(carryOutput ?? "");
+    carryOutput = null;
     setOpenStats(new Set<string>());
     setOpenConfigs(new Set<string>());
     setNewService("");
@@ -234,7 +251,9 @@ export function Compose() {
   );
   onCleanup(() => clearTimeout(yamlErrorTimer));
 
-  const save = async (): Promise<boolean> => {
+  /** 落盘，无导航/模式副作用：新建 → 创建（本会话已创建过的名字改走覆盖保存）；
+   *  已有 → 覆盖保存。错误追加到进度终端并 toast。返回是否成功。 */
+  const persist = async (): Promise<boolean> => {
     if (isNew()) {
       const stackName = name().trim().toLowerCase();
       if (!/^[a-z0-9_-]+$/.test(stackName)) {
@@ -242,12 +261,17 @@ export function Compose() {
         return false;
       }
       try {
-        await api.createStack(stackName, yaml(), env());
+        if (createdName === stackName) {
+          // 首次部署已创建该栈但启动失败（停留编辑态）：覆盖保存后原地重试
+          await api.saveStack(stackName, yaml(), env());
+        } else {
+          await api.createStack(stackName, yaml(), env());
+          createdName = stackName;
+        }
         await refresh(false);
-        navigate(`/compose/${encodeURIComponent(stackName)}`, { replace: true });
         return true;
       } catch (error) {
-        setOutput(errText(error));
+        setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
         toast(errText(error), "error");
         return false;
       }
@@ -258,10 +282,23 @@ export function Compose() {
       await api.saveStack(data.name, yaml(), env());
       return true;
     } catch (error) {
-      setOutput(errText(error));
+      setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
       toast(errText(error), "error");
       return false;
     }
+  };
+
+  /** 保存草稿（上游 saveStackDraft）：成功即退出编辑态；新建栈顺带跳转到该栈页。 */
+  const save = async (): Promise<boolean> => {
+    const wasNew = isNew();
+    if (!(await persist())) return false;
+    if (wasNew) {
+      navigate(`/compose/${encodeURIComponent(name().trim().toLowerCase())}`, { replace: true });
+    } else {
+      setEditMode(false);
+    }
+    toast(t("toast.draftSaved"), "success");
+    return true;
   };
 
   /** compose 执行类操作（部署/启动/更新）的前置校验门：现算校验
@@ -290,10 +327,20 @@ export function Compose() {
       setName(derived);
     }
     if (yamlGate()) return;
+    // 点击瞬间终端即出现（上游 bindTerminal 语义）：先落命令头行，落盘静默进行
+    const op: StackOp = detail()?.status === 3 ? "update" : "start";
+    setOutput(`$ docker compose ${op}\n`);
     setBusy(true);
     try {
-      const saved = await save();
-      if (saved) await runOp(detail() ? (detail()?.status === 3 ? "update" : "start") : "start");
+      // 上游时序：保存→启动期间保持编辑态不变脸；失败停留编辑器（修复闭环）
+      if (!(await persist())) return;
+      await streamOp(name().trim().toLowerCase(), op);
+      // 成功才一次性切换（上游 res.ok → 退出编辑态 + push），并携带部署输出；
+      // 用户若已中途离开本页则不强拉回来
+      if (params.name === undefined) {
+        carryOutput = output();
+        navigate(`/compose/${encodeURIComponent(name().trim().toLowerCase())}`, { replace: true });
+      }
     } finally {
       setBusy(false);
     }
@@ -309,17 +356,9 @@ export function Compose() {
     setYaml(formatted);
   };
 
-  const runOp = async (op: StackOp) => {
-    // 注意不检查 busy()：deploy 链路在 save 期间保持 busy，
-    // 若在此早退会导致「部署只存草稿、从不执行 compose」（按钮自身的
-    // disabled=busy 已承担防重入）。
-    const stackName = detail()?.name ?? name().trim().toLowerCase();
-    if (!stackName) return;
-    // start/update 会创建容器（compose 需完整合法的 project 定义）；
-    // stop/restart/down 只作用于已存在容器，不拦。
-    if ((op === "start" || op === "update") && yamlGate()) return;
-    setBusy(true);
-    setOutput(`$ docker compose ${op}\n`);
+  /** 流式执行栈操作：输出实时追加到进度终端；成功后刷新列表，路由仍在本栈时
+   *  重载详情（退出编辑态）。失败：追加错误并 toast，不抛出（调用方停留编辑态）。 */
+  const streamOp = async (stackName: string, op: StackOp) => {
     try {
       await api.stackOpStream(stackName, op, (chunk) => setOutput((prev) => prev + chunk));
       await refresh(false);
@@ -329,6 +368,19 @@ export function Compose() {
     } catch (error) {
       setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
       toast(errText(error), "error");
+    }
+  };
+
+  const runOp = async (op: StackOp) => {
+    const stackName = detail()?.name ?? name().trim().toLowerCase();
+    if (!stackName) return;
+    // start/update 会创建容器（compose 需完整合法的 project 定义）；
+    // stop/restart/down 只作用于已存在容器，不拦。
+    if ((op === "start" || op === "update") && yamlGate()) return;
+    setBusy(true);
+    setOutput(`$ docker compose ${op}\n`);
+    try {
+      await streamOp(stackName, op);
     } finally {
       setBusy(false);
     }
@@ -399,17 +451,14 @@ export function Compose() {
       toast(t("toast.deleted", { name: stackName }), "success");
       navigate("/", { replace: true });
     } catch (error) {
-      setOutput(errText(error));
+      setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
       toast(errText(error), "error");
     }
   };
 
-  // 上游 discardStack：重载内容并退出编辑态（无确认弹窗）
+  // 上游 discardStack：重载内容并退出编辑态（无确认弹窗；按钮仅已有栈显示）
   const discard = () => {
-    if (isNew()) {
-      setYaml(STARTER_YAML);
-      setEnv(STARTER_ENV);
-    } else if (detail()) {
+    if (detail()) {
       setYaml(detail()!.yaml);
       setEnv(detail()!.env);
     }
@@ -443,10 +492,10 @@ export function Compose() {
     setOutput(`$ docker compose ${op} ${service}\n`);
     try {
       const result = await api.stackServiceOp(stackName, service, op);
-      setOutput(`$ docker compose ${op} ${service}\n` + (result.output || ""));
+      if (result.output) setOutput((prev) => prev + result.output);
       if (decodeURIComponent(params.name ?? "") === stackName) await load(stackName);
     } catch (error) {
-      setOutput(errText(error));
+      setOutput((prev) => prev + `\n[error] ${errText(error)}\n`);
       toast(errText(error), "error");
     } finally {
       setBusy(false);
@@ -485,13 +534,13 @@ export function Compose() {
             }
           >
             <button class="btn btn-primary" disabled={busy()} onClick={() => void deploy()}><Rocket size={14} /> {t("compose.deploy")}</button>
-            <button class="btn btn-secondary" disabled={busy()} onClick={() => void save().then((ok) => ok && toast(t("toast.draftSaved"), "success"))}><Save size={14} /> {t("compose.saveDraft")}</button>
+            <button class="btn btn-secondary" disabled={busy()} onClick={() => void save()}><Save size={14} /> {t("compose.saveDraft")}</button>
             <Show when={!isNew()}>
               <button class="btn btn-secondary" disabled={busy()} onClick={discard}>{t("compose.discard")}</button>
             </Show>
           </Show>
           <Show when={managed()}>
-            <div class="dropdown">
+            <div class="dropdown" ref={downHost}>
               <button class="btn btn-secondary" aria-label={t("compose.down")} onClick={() => setDownOpen((v) => !v)}>
                 <ChevronDown size={14} />
               </button>

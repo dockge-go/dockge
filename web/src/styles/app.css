@@ -471,6 +471,7 @@ code, pre, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular
 .toast {
   padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-sm); font-weight: 500;
   background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-pop);
+  white-space: pre-line; /* docker stderr 常多行，保留换行可读 */
   animation: toast-in var(--dur) var(--ease);
 }
 .toast.success { border-color: var(--ok); border-color: color-mix(in oklab, var(--ok) 45%, transparent); }

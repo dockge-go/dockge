@@ -58,14 +58,22 @@ function Layout(props: { children?: JSX.Element }) {
 
   const initial = createMemo(() => (user()?.username ?? "?").charAt(0).toUpperCase());
 
-  // Escape 关闭头像下拉（对齐上游 Bootstrap dropdown 行为）
+  // Escape / 点击外部关闭头像下拉（对齐上游 Bootstrap dropdown 行为）
+  let avatarHost!: HTMLDivElement;
   createEffect(() => {
     if (!menuOpen()) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
     };
+    const onPointer = (e: PointerEvent) => {
+      if (!avatarHost.contains(e.target as Node)) setMenuOpen(false);
+    };
     document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    document.addEventListener("pointerdown", onPointer);
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    });
   });
 
   const scanStacks = async () => {
@@ -94,7 +102,7 @@ function Layout(props: { children?: JSX.Element }) {
               {t("nav.images")}
             </A>
           </nav>
-          <div class="avatar-menu">
+          <div class="avatar-menu" ref={avatarHost}>
             <button class="avatar" aria-label={user()?.username} onClick={() => setMenuOpen((v) => !v)}>
               {initial()}
               <ChevronDown size={13} />

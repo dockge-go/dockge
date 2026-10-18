@@ -15,7 +15,8 @@ export function DashboardHome() {
 
   const stacks = () => snapshot()?.stacks ?? [];
   const active = () => stacks().filter((s) => s.status === 3).length;
-  const exited = () => stacks().filter((s) => s.status === 4 || s.status === 2).length;
+  // 上游统计：exited 仅计 status=4；created(2)/草稿(1) 均归 inactive
+  const exited = () => stacks().filter((s) => s.status === 4).length;
   const inactive = () => stacks().length - active() - exited();
 
   const convert = async () => {

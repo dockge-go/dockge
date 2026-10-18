@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -25,13 +24,9 @@ type Logger struct {
 	zerolog.Logger
 }
 
-// Package registers the log provider into the injector.
-var Package = do.Package(do.Lazy(New))
-
-// New 按配置构造日志器：级别、输出目标（console/file/both）、
+// NewLogger 按配置构造日志器：级别、输出目标（console/file/both）、
 // 编码与轮转参数；非 prod 环境附带调用位置。
-func New(i do.Injector) (*Logger, error) {
-	conf := do.MustInvoke[*viper.Viper](i)
+func NewLogger(conf *viper.Viper) *Logger {
 	level, err := zerolog.ParseLevel(conf.GetString("log.log_level"))
 	if err != nil {
 		level = zerolog.InfoLevel
@@ -63,7 +58,7 @@ func New(i do.Injector) (*Logger, error) {
 	if conf.GetString("env") != "prod" {
 		logger = logger.With().Caller().Logger()
 	}
-	return &Logger{logger}, nil
+	return &Logger{logger}
 }
 
 // WithContext 返回请求作用域中注入的日志器；无注入时回退到实例自身。

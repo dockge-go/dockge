@@ -1,13 +1,14 @@
 #!/bin/sh
 # 端到端冒烟：对运行中的实例 + 真实容器运行时执行全链路检查（发布前门禁）。
-# 用法：BASE=http://127.0.0.1:5001 DOCKGE_USER=admin DOCKGE_PASS=123456 sh scripts/smoke.sh
+# 用法：BASE=http://127.0.0.1:5001 DOCKGE_USER=admin DOCKGE_PASS=admin123 sh scripts/smoke.sh
+# 密码需满足策略（≥6 位且含字母和数字），默认值 admin123 可直接用于新实例引导
 # 退出码非 0 表示存在失败项。
 set -u
 
 BASE="${BASE:-http://127.0.0.1:5001}"
 # 注意不要用 USER/PASS 作为变量名：USER 是系统环境变量（会取到登录名）
 DOCKGE_USER="${DOCKGE_USER:-admin}"
-DOCKGE_PASS="${DOCKGE_PASS:-123456}"
+DOCKGE_PASS="${DOCKGE_PASS:-admin123}"
 STACK="smoke-$$"
 
 pass=0

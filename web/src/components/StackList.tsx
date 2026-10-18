@@ -14,9 +14,10 @@ function statusClass(status: number): string {
   return "";
 }
 
+// 上游 statusNameShort：created(2) 归入 inactive（非 exited）
 function statusLabel(status: number): string {
   if (status === 3) return t("home.active");
-  if (status === 4 || status === 2) return t("home.exited");
+  if (status === 4) return t("home.exited");
   return t("home.inactive");
 }
 

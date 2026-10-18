@@ -6,22 +6,32 @@ package main
 import (
 	"context"
 	"fmt"
+	stdlog "log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"dockge/internal/handler"
 	"dockge/internal/repository"
 	"dockge/internal/server"
 	"dockge/internal/service"
-	"dockge/pkg/app"
 	"dockge/pkg/config"
 	"dockge/pkg/jwt"
 	"dockge/pkg/log"
-	httpx "dockge/pkg/server/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
 )
+
+// basePackage 注册基础设施（配置/日志/JWT），其余各层自带 Package。
+func basePackage(conf *viper.Viper) func(do.Injector) {
+	return do.Package(
+		do.Lazy(func(i do.Injector) (*viper.Viper, error) { return conf, nil }),
+		do.Lazy(func(i do.Injector) (*log.Logger, error) { return log.NewLogger(conf), nil }),
+		do.Lazy(func(i do.Injector) (*jwt.JWT, error) { return jwt.NewJWT(conf), nil }),
+	)
+}
 
 // mustLoadConfig 加载配置（默认值 + DOCKGE_* 环境变量），失败即终止。
 func mustLoadConfig() *viper.Viper {
@@ -42,51 +52,26 @@ func main() {
 		}
 	}()
 
-	runServer(mustLoadConfig())
-}
-
-// runServer 是 HTTP 服务的组合根：按顺序装配配置、日志、JWT、
-// 各业务层与服务器，随后启动并阻塞直至收到退出信号。
-func runServer(conf *viper.Viper) {
-	injector := do.New(
-		func(i do.Injector) { do.ProvideValue(i, conf) },
-		log.Package,
-		jwt.Package,
-		func(i do.Injector) {
-			do.Provide(i, func(i do.Injector) (*gin.Engine, error) {
-				if conf.GetString("env") == "prod" {
-					gin.SetMode(gin.ReleaseMode)
-				}
-				return gin.New(), nil
-			})
-		},
+	conf := mustLoadConfig()
+	container := do.New(
+		basePackage(conf),
 		repository.Package,
 		service.Package,
 		handler.Package,
 		server.Package,
-		func(i do.Injector) {
-			do.Provide(i, func(i do.Injector) (*app.App, error) {
-				return app.New(
-					app.WithServer(do.MustInvoke[*httpx.Server](i)),
-					app.WithLogger(do.MustInvoke[*log.Logger](i)),
-					app.WithName("dockge-server"),
-				), nil
-			})
-		},
 	)
-	defer func() {
-		_ = injector.Shutdown()
-	}()
 
-	// 启动前确保 stacks 目录存在（全新部署无需额外初始化步骤）
-	repo := do.MustInvoke[*repository.Repository](injector)
+	// 启动前确保 stacks 目录存在（全新部署无需额外初始化步骤）。
+	// 顺带触发 repository 构造：JWT 密钥（显式环境变量 > 库中持久值 > 首启随机生成）
+	// 在此写回 viper，后续 jwt 惰性解析时拿到的即最终值。
+	repo := do.MustInvoke[*repository.Repository](container)
 	if err := repo.EnsureStacksDir(); err != nil {
 		panic(err)
 	}
 
-	application := do.MustInvoke[*app.App](injector)
+	httpSrv := do.MustInvoke[*server.HTTPServer](container)
+	logger := do.MustInvoke[*log.Logger](container)
 
-	logger := do.MustInvoke[*log.Logger](injector)
 	// 运行时自检：容器运行时不可用（最常见是漏挂 docker socket）时栈操作会全失败，
 	// 启动即告警，免得用户面对「面板正常、功能全废」无从排查。
 	status := repo.Preflight(context.Background())
@@ -102,17 +87,36 @@ func runServer(conf *viper.Viper) {
 			Str("stacks", status.Stacks.Path).
 			Msg("栈目录未挂载宿主目录：栈只存在于容器内，重建容器会丢失，请挂载宿主目录（-v /opt/stacks:/opt/stacks）")
 	}
-	srv := do.MustInvoke[*httpx.Server](injector)
 	// 启动日志带上栈目录：用户据此确认宿主挂载是否生效
 	start := logger.Info().
-		Str("host", fmt.Sprintf("http://%s:%d", conf.GetString("http.host"), conf.GetInt("http.port"))).
+		Str("http", fmt.Sprintf("http://%s:%d", conf.GetString("http.host"), conf.GetInt("http.port"))).
 		Str("stacks", repo.StacksDir())
-	if srv.TLSCert() != "" {
+	if httpSrv.TLSEnabled() {
 		start.Msg("dockge server start (HTTPS)")
 	} else {
 		start.Msg("dockge server start")
 	}
-	if err := application.Run(context.Background()); err != nil {
-		panic(err)
+
+	go func() {
+		if err := httpSrv.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "启动失败：%v\n提示：请检查端口占用与 TLS 证书配置。\n", err)
+			os.Exit(1)
+		}
+	}()
+	logger.Info().Str("http", httpSrv.Addr).Msg("server started")
+
+	// 等待退出信号（SIGINT/SIGTERM）。不能给等待用的 ctx 设超时：
+	// samber/do 的 ShutdownOnSignalsWithContext 在 ctx 到期时同样触发关闭，
+	// 预设 10s 超时会让服务无信号定时自杀。
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-sigCtx.Done()
+
+	// 关闭限时 10s：容器停止时逐项停服务（HTTP 优雅退出等）
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	report := container.ShutdownWithContext(shutdownCtx)
+	if !report.Succeed {
+		stdlog.Printf("shutdown report: %v", report)
 	}
 }

@@ -17,7 +17,6 @@ import (
 	"dockge/pkg/config"
 	"dockge/pkg/jwt"
 	"dockge/pkg/log"
-	httpx "dockge/pkg/server/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
@@ -64,10 +63,11 @@ func newTestServer(t *testing.T) *gin.Engine {
 
 	injector := do.New(
 		func(i do.Injector) { do.ProvideValue(i, cfg) },
-		log.Package,
-		jwt.Package,
 		func(i do.Injector) {
-			do.Provide(i, func(i do.Injector) (*gin.Engine, error) { return gin.New(), nil })
+			do.Provide(i, func(i do.Injector) (*log.Logger, error) { return log.NewLogger(cfg), nil })
+		},
+		func(i do.Injector) {
+			do.Provide(i, func(i do.Injector) (*jwt.JWT, error) { return jwt.NewJWT(cfg), nil })
 		},
 		repository.Package,
 		service.Package,
@@ -75,8 +75,8 @@ func newTestServer(t *testing.T) *gin.Engine {
 		Package,
 	)
 	t.Cleanup(func() { _ = injector.Shutdown() })
-	srv := do.MustInvoke[*httpx.Server](injector)
-	return srv.Engine
+	srv := do.MustInvoke[*HTTPServer](injector)
+	return srv.engine
 }
 
 // call 发起一次请求并返回状态码与解析后的响应包。

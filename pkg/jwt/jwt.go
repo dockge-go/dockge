@@ -9,7 +9,6 @@ import (
 	"dockge/pkg/hash"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
 )
 
@@ -26,11 +25,9 @@ type JWT struct {
 	key []byte
 }
 
-var Package = do.Package(do.Lazy(New))
-
-func New(i do.Injector) (*JWT, error) {
-	conf := do.MustInvoke[*viper.Viper](i)
-	return &JWT{key: []byte(conf.GetString("security.jwt.key"))}, nil
+// NewJWT 从配置构造 JWT 工具。
+func NewJWT(conf *viper.Viper) *JWT {
+	return &JWT{key: []byte(conf.GetString("security.jwt.key"))}
 }
 
 // GenToken 签发 JWT，携带 shake256 密码绑定。

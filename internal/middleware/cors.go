@@ -1,0 +1,24 @@
+package middleware
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// CORS 回显请求 Origin 并放行跨域；OPTIONS 预检直接短路。
+func CORS() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		c.Header("Access-Control-Allow-Origin", c.GetHeader("Origin"))
+		c.Header("Access-Control-Allow-Credentials", "true")
+		if method == "OPTIONS" {
+			c.Header("Access-Control-Allow-Methods", c.GetHeader("Access-Control-Request-Method"))
+			c.Header("Access-Control-Allow-Headers", c.GetHeader("Access-Control-Request-Headers"))
+			c.Header("Access-Control-Max-Age", "7200")
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"dockge/internal/repository"
+	"dockge/pkg/log"
 
 	"github.com/creack/pty"
 	"github.com/gin-gonic/gin"
@@ -26,16 +27,13 @@ var upgrader = websocket.Upgrader{
 // TerminalHandler 承载终端 WebSocket 与日志流端点。
 // 每个连接独占一个 PTY 子进程，连接关闭即回收，无跨连接共享状态。
 type TerminalHandler struct {
-	*Handler
-	repo *repository.Repository
+	Logger     *log.Logger            `do:""`
+	Repository *repository.Repository `do:""`
 }
 
 // NewTerminalHandler 构造终端处理器，由注入容器调用。
 func NewTerminalHandler(i do.Injector) (*TerminalHandler, error) {
-	return &TerminalHandler{
-		Handler: do.MustInvoke[*Handler](i),
-		repo:    do.MustInvoke[*repository.Repository](i),
-	}, nil
+	return do.MustInvokeStruct[*TerminalHandler](i), nil
 }
 
 // wsControlMessage 客户端发送的 JSON 控制消息（如 resize）。
@@ -58,7 +56,7 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 	}
 	ws, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("websocket upgrade")
+		h.Logger.Error().Err(err).Msg("websocket upgrade")
 		return
 	}
 
@@ -72,7 +70,7 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 		}
 		// busybox sh 在 exec 目标缺失时会直接退出而非走 || 回退，
 		// 因此先探测 bash 存在再 exec（nginx:alpine 等镜像只有 sh）
-		cmd, err = h.repo.ContainerCommand(ctx.Request.Context(), "exec", "-it", name,
+		cmd, err = h.Repository.ContainerCommand(ctx.Request.Context(), "exec", "-it", name,
 			"/bin/sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
 		if err != nil {
 			h.writeJSON(ctx, http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -84,13 +82,13 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 		if _, err := strconv.Atoi(tail); err != nil {
 			tail = "200"
 		}
-		dir, dirErr := h.repo.StackExecDir(ctx.Request.Context(), name)
+		dir, dirErr := h.Repository.StackExecDir(ctx.Request.Context(), name)
 		if dirErr != nil {
 			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m找不到栈 "+name+" 的 compose 文件，无法展示日志\x1b[0m\r\n"))
 			_ = ws.Close()
 			return
 		}
-		cmd, err = h.repo.ComposeCommand(ctx.Request.Context(),
+		cmd, err = h.Repository.ComposeCommand(ctx.Request.Context(),
 			"-p", name, "logs", "-f", "--tail", tail, "--no-color")
 		if err != nil {
 			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m"+err.Error()+"\x1b[0m\r\n"))
@@ -117,7 +115,7 @@ func (h *TerminalHandler) serveSession(ws *websocket.Conn, cmd *exec.Cmd, readOn
 	if usePTY {
 		master, err := pty.Start(cmd) // 内部完成 setsid/setctty 与 stdio 绑定
 		if err != nil {
-			h.logger.Error().Err(err).Msg("pty start")
+			h.Logger.Error().Err(err).Msg("pty start")
 			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m无法打开终端: "+err.Error()+"\x1b[0m\r\n"))
 			_ = ws.Close()
 			return
