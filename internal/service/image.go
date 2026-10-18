@@ -21,11 +21,11 @@ type ImageService interface {
 
 // NewImageService 构造镜像服务，由注入容器调用。
 func NewImageService(i do.Injector) (ImageService, error) {
-	return &imageService{Service: do.MustInvoke[*Service](i)}, nil
+	return &imageService{repo: do.MustInvoke[*repository.Repository](i)}, nil
 }
 
 type imageService struct {
-	*Service
+	repo *repository.Repository
 }
 
 // List 返回本机镜像列表（含使用中标记）。
@@ -47,7 +47,7 @@ func (s *imageService) List(ctx context.Context) ([]v1.ImageData, error) {
 // PullStream 流式拉取镜像，compose 输出逐行写入 w。
 func (s *imageService) PullStream(ctx context.Context, w io.Writer, ref string) error {
 	if !repository.ImageRefPattern.MatchString(ref) {
-		return fmt.Errorf("%w: 非法镜像引用", v1.ErrBadRequest)
+		return fmt.Errorf("%w: 非法镜像引用 %q（应形如 nginx:1.27 或 registry/repo:tag）", v1.ErrBadRequest, ref)
 	}
 	return s.repo.PullImageStream(ctx, w, ref)
 }
@@ -55,7 +55,7 @@ func (s *imageService) PullStream(ctx context.Context, w io.Writer, ref string) 
 // Delete 批量删除镜像，失败时带回 docker 输出。
 func (s *imageService) Delete(ctx context.Context, refs []string) (*v1.StackOpResponse, error) {
 	if len(refs) == 0 {
-		return nil, v1.ErrBadRequest
+		return nil, fmt.Errorf("%w: 未选择要删除的镜像", v1.ErrBadRequest)
 	}
 	for _, ref := range refs {
 		if !repository.ImageRefPattern.MatchString(ref) {

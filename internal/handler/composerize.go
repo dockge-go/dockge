@@ -11,20 +11,18 @@ import (
 )
 
 // ComposerizeHandler 承载 composerize（docker run → compose）接口。
-type ComposerizeHandler struct {
-	*Handler
-}
+type ComposerizeHandler struct{}
 
 // NewComposerizeHandler 构造 composerize 处理器，由注入容器调用。
 func NewComposerizeHandler(i do.Injector) (*ComposerizeHandler, error) {
-	return &ComposerizeHandler{Handler: do.MustInvoke[*Handler](i)}, nil
+	return &ComposerizeHandler{}, nil
 }
 
 // Convert 处理 docker run 命令到 compose.yaml 的转换请求。
 func (h *ComposerizeHandler) Convert(ctx *gin.Context) {
 	var req v1.ComposerizeRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		v1.HandleError(ctx, http.StatusBadRequest, v1.ErrBadRequest, nil)
+	if err := bindJSON(ctx, &req); err != nil {
+		v1.HandleError(ctx, http.StatusBadRequest, err, nil)
 		return
 	}
 	template, err := composerize.Convert(req.DockerRunCommand)

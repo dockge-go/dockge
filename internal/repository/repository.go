@@ -32,7 +32,7 @@ const (
 )
 
 // ErrNotFound 是"目标记录不存在"的哨兵错误。
-var ErrNotFound = errors.New("record not found")
+var ErrNotFound = errors.New("记录不存在")
 
 // ErrStacksNotWritable 表示栈目录写入失败（只读挂载或权限不足）：
 // 该错误必须带上真实原因与路径，否则用户只看到「服务器错误~」，无从知道是挂载问题。
@@ -40,7 +40,7 @@ var ErrStacksNotWritable = errors.New("栈目录不可写")
 
 // ErrConflict 是"目标已存在"的哨兵错误。
 
-var ErrConflict = errors.New("record already exists")
+var ErrConflict = errors.New("记录已存在")
 
 // Package registers all repository-layer providers into the injector.
 var Package = do.Package(

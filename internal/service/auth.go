@@ -12,6 +12,7 @@ import (
 	"dockge/internal/model"
 	"dockge/internal/repository"
 	"dockge/pkg/hash"
+	"dockge/pkg/jwt"
 	"dockge/pkg/rate"
 
 	"github.com/samber/do/v2"
@@ -46,14 +47,16 @@ type AuthService interface {
 }
 
 type authService struct {
-	*Service
+	repo         *repository.Repository
+	jwt          *jwt.JWT
 	loginLimiter *rate.KeyedLimiter
 }
 
 // NewAuthService 构造认证服务（含按 IP+账号的登录限流器），由注入容器调用。
 func NewAuthService(i do.Injector) (AuthService, error) {
 	return &authService{
-		Service:      do.MustInvoke[*Service](i),
+		repo:         do.MustInvoke[*repository.Repository](i),
+		jwt:          do.MustInvoke[*jwt.JWT](i),
 		loginLimiter: rate.NewKeyed(loginRateLimit, loginRateWindow, loginMaxKeys),
 	}, nil
 }
@@ -75,7 +78,7 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP 
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "用户名或密码错误"}
 		}
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
 	}
 	if !user.Active {
 		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "该账号已被停用"}
@@ -90,7 +93,7 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP 
 func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error) {
 	count, err := s.repo.CountUsers(ctx)
 	if err != nil {
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 检查初始化状态失败：%v", v1.ErrInternalServerError, err)
 	}
 	if count > 0 {
 		return nil, &v1.Error{Code: 409, Message: "Dockge 已完成初始化"}
@@ -100,14 +103,14 @@ func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.Logi
 	}
 	hashed, err := hash.BcryptHash(req.Password)
 	if err != nil {
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 密码加密失败：%v", v1.ErrInternalServerError, err)
 	}
 	user := &model.DockgeUser{
 		Username: req.Username, Nickname: req.Username,
 		Password: hashed, Role: model.RoleAdmin, Active: true, Source: model.SourceLocal,
 	}
 	if err := s.repo.CreateUser(ctx, user); err != nil {
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 创建管理员账号失败：%v", v1.ErrInternalServerError, err)
 	}
 	return s.session(user)
 }
@@ -126,9 +129,9 @@ func (s *authService) Me(ctx context.Context, uid uint) (*v1.MeUserData, error) 
 	user, err := s.repo.GetUser(ctx, uid)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, v1.ErrNotFound
+			return nil, fmt.Errorf("%w: 用户不存在", v1.ErrNotFound)
 		}
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
 	}
 	mp := meData(&user)
 	return &mp, nil
@@ -140,19 +143,20 @@ func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.Chan
 	user, err := s.repo.GetUser(ctx, uid)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return v1.ErrNotFound
+			return fmt.Errorf("%w: 用户不存在", v1.ErrNotFound)
 		}
-		return v1.ErrInternalServerError
+		return fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
 	}
 	if err := hash.BcryptCheck(req.OldPassword, user.Password); err != nil {
-		return v1.ErrBadRequest
+		// 上游此处有明确文案，不能落回笼统的「参数错误」
+		return &v1.Error{Code: http.StatusBadRequest, Message: "当前密码不正确"}
 	}
 	if !ValidatePasswordStrength(req.NewPassword) {
-		return fmt.Errorf("%w: 密码至少6位且需包含字母和数字", v1.ErrBadRequest)
+		return &v1.Error{Code: http.StatusBadRequest, Message: "新密码至少6位且需包含字母和数字"}
 	}
 	hashed, err := hash.BcryptHash(req.NewPassword)
 	if err != nil {
-		return v1.ErrInternalServerError
+		return fmt.Errorf("%w: 密码加密失败：%v", v1.ErrInternalServerError, err)
 	}
 	return s.repo.UpdatePassword(ctx, uid, hashed)
 }
@@ -192,7 +196,7 @@ func (s *authService) ToggleDisableAuth(ctx context.Context, uid uint, enable bo
 			return err
 		}
 		if err := hash.BcryptCheck(currentPassword, user.Password); err != nil {
-			return v1.ErrBadRequest
+			return &v1.Error{Code: http.StatusBadRequest, Message: "当前密码不正确"}
 		}
 	}
 	return s.repo.SetSetting(ctx, "disableAuth", strconv.FormatBool(enable), "security")
@@ -206,13 +210,13 @@ func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, err
 	}
 	users, err := s.repo.ListUsers(ctx)
 	if err != nil {
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 读取用户列表失败：%v", v1.ErrInternalServerError, err)
 	}
 	for _, u := range users {
 		if u.Active {
 			token, err := s.jwt.GenToken(u.ID, u.Password, time.Now().Add(SessionTTL))
 			if err != nil {
-				return nil, v1.ErrInternalServerError
+				return nil, fmt.Errorf("%w: 签发会话令牌失败：%v", v1.ErrInternalServerError, err)
 			}
 			return &v1.LoginResponseData{
 				AccessToken: token,
@@ -227,7 +231,7 @@ func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, err
 func (s *authService) session(user *model.DockgeUser) (*v1.LoginResponseData, error) {
 	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(SessionTTL))
 	if err != nil {
-		return nil, v1.ErrInternalServerError
+		return nil, fmt.Errorf("%w: 签发会话令牌失败：%v", v1.ErrInternalServerError, err)
 	}
 	return &v1.LoginResponseData{AccessToken: token, User: meData(user)}, nil
 }

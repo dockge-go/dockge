@@ -12,6 +12,7 @@ import (
 	v1 "dockge/api/v1"
 	"dockge/internal/model"
 	"dockge/internal/repository"
+	"dockge/pkg/log"
 
 	"github.com/samber/do/v2"
 	"gopkg.in/yaml.v3"
@@ -34,11 +35,15 @@ type StackService interface {
 
 // NewStackService 构造栈服务，由注入容器调用。
 func NewStackService(i do.Injector) (StackService, error) {
-	return &stackService{Service: do.MustInvoke[*Service](i)}, nil
+	return &stackService{
+		repo:   do.MustInvoke[*repository.Repository](i),
+		logger: do.MustInvoke[*log.Logger](i),
+	}, nil
 }
 
 type stackService struct {
-	*Service
+	repo   *repository.Repository
+	logger *log.Logger
 }
 
 // List 返回栈列表（filter 非空时按名称子串过滤，忽略大小写）。
@@ -60,7 +65,7 @@ func (s *stackService) List(ctx context.Context, filter string) (*v1.StackListDa
 // Get 返回栈详情：文件内容、状态、容器列表与 x-dockge.urls。
 func (s *stackService) Get(ctx context.Context, name string) (*v1.StackDetailData, error) {
 	if !StackNamePattern.MatchString(name) {
-		return nil, v1.ErrBadRequest
+		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
 	stack, err := s.repo.Get(ctx, name)
 	if err != nil {
@@ -121,7 +126,7 @@ func (s *stackService) Save(ctx context.Context, req *v1.StackSaveRequest, isAdd
 // Delete 先执行 compose down 再删除栈目录；删除后仍注册于 compose 则报错。
 func (s *stackService) Delete(ctx context.Context, name string) (*v1.StackOpResponse, error) {
 	if !StackNamePattern.MatchString(name) {
-		return nil, v1.ErrBadRequest
+		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
 	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
@@ -152,12 +157,12 @@ func (s *stackService) Delete(ctx context.Context, name string) (*v1.StackOpResp
 // 与 Op 互斥同一把栈锁；校验失败在写出任何内容前返回错误。
 func (s *stackService) StreamOp(ctx context.Context, w io.Writer, name, op string) error {
 	if !StackNamePattern.MatchString(name) {
-		return v1.ErrBadRequest
+		return fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
 	switch op {
 	case "start", "stop", "restart", "down", "update":
 	default:
-		return v1.ErrBadRequest
+		return fmt.Errorf("%w: 不支持的操作 %q（可选 start/stop/restart/down/update）", v1.ErrBadRequest, op)
 	}
 	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
@@ -174,7 +179,7 @@ func (s *stackService) Networks(ctx context.Context) ([]string, error) {
 // ServiceOp 执行单服务生命周期操作；失败时带回 compose 输出。
 func (s *stackService) ServiceOp(ctx context.Context, name, service, op string) (*v1.StackOpResponse, error) {
 	if !StackNamePattern.MatchString(name) {
-		return nil, v1.ErrBadRequest
+		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
 	output, err := s.repo.ServiceOp(ctx, name, service, op)
 	if err != nil {
@@ -187,7 +192,7 @@ func (s *stackService) ServiceOp(ctx context.Context, name, service, op string) 
 // Stats 返回栈内容器的即时资源占用。
 func (s *stackService) Stats(ctx context.Context, name string) ([]v1.ContainerStat, error) {
 	if !StackNamePattern.MatchString(name) {
-		return nil, v1.ErrBadRequest
+		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
 	stats, err := s.repo.StackStats(ctx, name)
 	if err != nil {
