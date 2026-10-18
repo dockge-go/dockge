@@ -21,6 +21,7 @@ const dict = {
   "nav.scanStacks": "扫描堆栈文件夹",
   "nav.signedInAs": "当前用户： {name}",
   "nav.images": "镜像",
+  "nav.lostConnection": "与服务端连接中断，正在重试…",
 
   // ---- 登录 / 初始化 ----
   "login.title": "登录到 Dockge",

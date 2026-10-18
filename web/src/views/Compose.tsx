@@ -468,12 +468,19 @@ export function Compose() {
   // 浏览态每 5s 轮询单容器资源占用（上游 dockerStats 等价物）。
   // docker stats 每次约 1s（采样窗口固有开销），页面不可见时暂停轮询以免空耗。
   createEffect(() => {
-    const data = detail();
-    if (!data || editMode()) return;
+    const name = params.name ?? "";
+    if (!name || editMode()) return;
     const poll = async () => {
       if (document.hidden) return;
       try {
-        setStats(await api.stackStats(data.name));
+        setStats(await api.stackStats(name));
+        // 上游对齐：serviceStatusList 每 5s 轮询——容器/栈状态同步刷新，
+        // 外部 stop/崩溃在浏览态即时反映（不依赖 detail 信号，避免本 effect 因刷新重跑）
+        try {
+          setDetail(await api.stack(name));
+        } catch {
+          // 栈刚被删除等：下一轮或导航自愈
+        }
       } catch {
         // 静默：下一轮自愈
       }
@@ -667,7 +674,7 @@ export function Compose() {
                         </div>
                         <div class="container-card-actions">
                           <Show when={!editing() && running()}>
-                            <A class="btn btn-sm btn-secondary" href={`/terminal/${encodeURIComponent(params.name ?? "")}/${encodeURIComponent(container.id)}/bash`}>
+                            <A class="btn btn-sm btn-secondary" href={`/terminal/${encodeURIComponent(params.name ?? "")}/${encodeURIComponent(container.service || container.id)}/bash`}>
                               <Terminal size={14} /> Bash
                             </A>
                           </Show>

@@ -9,15 +9,20 @@ import (
 	"strconv"
 
 	"dockge/internal/repository"
+	"dockge/internal/service"
 	"dockge/pkg/log"
 
 	"github.com/creack/pty"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/samber/do/v2"
+	"regexp"
 )
 
 // upgrader 把 HTTP 连接升级为 WebSocket；站点自带 JWT 认证，放行全部来源。
+// compose 服务名规则（compose spec：字母数字开头，允许 _.-），用于 exec 注入防线
+var serviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  8192,
 	WriteBufferSize: 8192,
@@ -44,7 +49,7 @@ type wsControlMessage struct {
 
 // WebSocket 终端端点：
 //   - /v1/terminal/<stack>/compose-logs 栈组合日志（docker compose logs -f）
-//   - /v1/terminal/<container>/exec 容器内交互 shell（docker exec -it）
+//   - /v1/terminal/<service>/exec?stack=&shell= 容器内交互 shell（compose exec 服务名）
 //
 // 浏览器 WebSocket API 无法自定义请求头，认证依赖 StrictAuth 对 ?token= 的支持。
 func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
@@ -64,23 +69,47 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 	readOnly := false
 	switch typ {
 	case "exec":
-		if !repository.ContainerIDPattern.MatchString(name) {
-			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "非法容器 ID: " + name})
+		// 上游对齐：docker compose exec <服务名> <shell>（而非 docker exec 容器 ID），
+		// 栈名与 shell 经 query 下发（?stack=&shell=sh|bash）
+		stack := ctx.Query("stack")
+		shell := ctx.DefaultQuery("shell", "bash")
+		if stack == "" || !service.StackNamePattern.MatchString(stack) {
+			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "非法栈名: " + stack})
+			return
+		}
+		if shell != "bash" && shell != "sh" {
+			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "不支持的 shell: " + shell})
+			return
+		}
+		if !serviceNamePattern.MatchString(name) {
+			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "非法服务名: " + name})
+			return
+		}
+		dir, dirErr := h.Repository.StackExecDir(ctx.Request.Context(), stack)
+		if dirErr != nil {
+			h.writeJSON(ctx, http.StatusBadGateway, gin.H{"error": "找不到栈 " + stack + " 的 compose 文件，无法进入终端"})
+			_ = ws.Close()
 			return
 		}
 		// busybox sh 在 exec 目标缺失时会直接退出而非走 || 回退，
-		// 因此先探测 bash 存在再 exec（nginx:alpine 等镜像只有 sh）
-		cmd, err = h.Repository.ContainerCommand(ctx.Request.Context(), "exec", "-it", name,
-			"/bin/sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+		// 因此 bash 时先探测存在再 exec（nginx:alpine 等镜像只有 sh）；显式 sh 直连
+		args := []string{"-p", stack, "exec", name}
+		if shell == "bash" {
+			args = append(args, "/bin/sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+		} else {
+			args = append(args, "sh")
+		}
+		cmd, err = h.Repository.ComposeCommand(ctx.Request.Context(), args...)
 		if err != nil {
 			h.writeJSON(ctx, http.StatusBadGateway, gin.H{"error": err.Error()})
 			_ = ws.Close()
 			return
 		}
+		cmd.Dir = dir
 	default:
-		tail := ctx.DefaultQuery("tail", "200")
+		tail := ctx.DefaultQuery("tail", "100")
 		if _, err := strconv.Atoi(tail); err != nil {
-			tail = "200"
+			tail = "100"
 		}
 		dir, dirErr := h.Repository.StackExecDir(ctx.Request.Context(), name)
 		if dirErr != nil {

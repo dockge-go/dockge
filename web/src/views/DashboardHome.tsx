@@ -15,9 +15,9 @@ export function DashboardHome() {
 
   const stacks = () => snapshot()?.stacks ?? [];
   const active = () => stacks().filter((s) => s.status === 3).length;
-  // 上游统计：exited 仅计 status=4；created(2)/草稿(1) 均归 inactive
+  // 上游统计：exited 仅计 4；inactive 仅计 created(2)/草稿(1)，unknown(0) 不入任何格
   const exited = () => stacks().filter((s) => s.status === 4).length;
-  const inactive = () => stacks().length - active() - exited();
+  const inactive = () => stacks().filter((s) => s.status === 1 || s.status === 2).length;
 
   const convert = async () => {
     if (!runCommand().trim() || busy()) return;
@@ -25,7 +25,6 @@ export function DashboardHome() {
     try {
       const result = await api.composerize(runCommand().trim());
       setDraftYaml(result.composeTemplate);
-      toast(t("home.convertSuccess"), "success");
       navigate("/compose");
     } catch (error) {
       toast(errText(error), "error");

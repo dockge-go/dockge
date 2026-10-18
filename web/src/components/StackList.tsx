@@ -18,6 +18,7 @@ function statusClass(status: number): string {
 function statusLabel(status: number): string {
   if (status === 3) return t("home.active");
   if (status === 4) return t("home.exited");
+  if (status === 0) return "?";
   return t("home.inactive");
 }
 
@@ -26,7 +27,8 @@ function statusRank(status: number): number {
   if (status === 3) return 0;
   if (status === 4) return 1;
   if (status === 2) return 2;
-  return 3;
+  if (status === 1) return 3;
+  return 4;
 }
 
 export function StackList() {
@@ -67,7 +69,7 @@ export function StackList() {
       </div>
       <div class="stacklist-items">
         <Show
-          when={visible().length > 0}
+          when={visible().length > 0 || query().trim() !== ""}
           fallback={
             <A class="stacklist-empty" href="/compose">
               {t("stacklist.empty")}

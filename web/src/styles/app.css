@@ -467,7 +467,7 @@ code, pre, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular
 
 /* ---- 杂项 ---- */
 .empty-hint { color: var(--muted); text-align: center; padding: 40px var(--sp-4); font-family: var(--mono); font-size: var(--fs-sm); }
-.toast-container { position: fixed; right: var(--sp-4); top: 56px; z-index: 500; display: flex; flex-direction: column; gap: var(--sp-2); }
+.toast-container { position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 500; display: flex; flex-direction: column; gap: var(--sp-2); }
 .toast {
   padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-sm); font-weight: 500;
   background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-pop);
@@ -546,3 +546,8 @@ code, pre, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* 断连提示条（上游 lost-connection 复刻） */
+.lost-connection { background: #dc3545; color: #fff; text-align: center; padding: var(--sp-2) var(--sp-3); font-weight: 600; }
+/* 头像下拉分隔线 */
+.avatar-dropdown .dd-divider { height: 1px; margin: var(--sp-1) 0; background: var(--border); }

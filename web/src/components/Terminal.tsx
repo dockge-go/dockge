@@ -31,6 +31,9 @@ const READ_ONLY_OPTIONS = { disableStdin: true, cursorBlink: false, convertEol: 
 export function TerminalPane(props: {
   name: string;
   type: "exec" | "compose-logs";
+  /** exec 模式：所属栈名（compose exec -p 用）与目标 shell。 */
+  stack?: string;
+  shell?: "bash" | "sh";
   /** 连接状态回调：live=流已建立，ended=会话结束（供日志卡显示实时指示）。 */
   onState?: (state: "live" | "ended") => void;
 }) {
@@ -106,10 +109,14 @@ export function TerminalPane(props: {
   createEffect(() => {
     const name = props.name;
     const kind = props.type;
+    const stk = props.stack;
+    const shell = props.shell;
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const tail = kind === "compose-logs" ? "&tail=200" : "";
+    const tail = kind === "compose-logs" ? "&tail=100" : "";
+    // exec：栈名与 shell 经 query 下发（compose exec 服务名 + 显式 shell，对齐上游）
+    const query = kind === "exec" && stk ? `&stack=${encodeURIComponent(stk)}&shell=${shell ?? "bash"}` : "";
     const base = `${proto}://${location.host}/v1/terminal/${encodeURIComponent(name)}/${kind}`;
-    const sock = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}`);
+    const sock = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}${query}`);
     ws = sock;
     term.write("\x1b[2J\x1b[H");
     sock.onmessage = (ev) => term.write(String(ev.data));

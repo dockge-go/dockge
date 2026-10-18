@@ -12,7 +12,7 @@ import { ConfirmHost } from "../components/Confirm";
 import { Toaster } from "../components/Toaster";
 import { t } from "../i18n";
 import { Login } from "../views/Login";
-import { authed, boot, logout, refresh, toast, user } from "../store/index";
+import { authed, boot, logout, offline, refresh, toast, user } from "../store/index";
 
 /** 认证门：启动会话校验；未初始化跳 Setup，未登录渲染 Login。 */
 export function Gate(props: RouteSectionProps) {
@@ -56,7 +56,7 @@ function Layout(props: { children?: JSX.Element }) {
     onCleanup(() => clearInterval(timer));
   });
 
-  const initial = createMemo(() => (user()?.username ?? "?").charAt(0).toUpperCase());
+  const initial = createMemo(() => (user()?.username ? user()!.username.charAt(0).toUpperCase() : "🐬"));
 
   // Escape / 点击外部关闭头像下拉（对齐上游 Bootstrap dropdown 行为）
   let avatarHost!: HTMLDivElement;
@@ -95,7 +95,7 @@ function Layout(props: { children?: JSX.Element }) {
           </A>
           <span class="topbar-spacer" />
           <nav class="topbar-pills">
-            <A href="/" end class="topbar-pill" activeClass="active">
+            <A href="/" class="topbar-pill" activeClass="active">
               {t("nav.home")}
             </A>
             <A href="/images" class="topbar-pill" activeClass="active">
@@ -110,6 +110,7 @@ function Layout(props: { children?: JSX.Element }) {
             <Show when={menuOpen()}>
               <div class="avatar-dropdown">
                 <div class="dd-user">{t("nav.signedInAs", { name: user()?.username ?? "" })}</div>
+                <div class="dd-divider" />
                 <button onClick={() => void scanStacks()}>{t("nav.scanStacks")}</button>
                 <button onClick={() => { setMenuOpen(false); navigate("/settings/general"); }}>{t("nav.settings")}</button>
                 <button onClick={() => { logout(); setMenuOpen(false); }}>{t("nav.logout")}</button>
@@ -117,6 +118,9 @@ function Layout(props: { children?: JSX.Element }) {
             </Show>
           </div>
         </header>
+        <Show when={offline()}>
+          <div class="lost-connection" role="alert">{t("nav.lostConnection")}</div>
+        </Show>
         <div class="dashboard-grid">
           <aside class="stacklist-col">
             <A class="btn btn-primary" href="/compose" style={{ "justify-content": "center" }}>

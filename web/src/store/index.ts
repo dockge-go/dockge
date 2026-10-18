@@ -23,16 +23,14 @@ interface ToastItem {
 const [toasts, setToasts] = createSignal<ToastItem[]>([]);
 let toastSeq = 0;
 
-// 上游对齐：错误 toast 持久显示（点击关闭），成功/信息 20s 自动消失
+// 上游对齐：所有类型 toast 5 秒自动消失（vue-toastification 默认 5s）
 export function toast(message: string, type: ToastItem["type"] = "info") {
   const id = ++toastSeq;
   setToasts((ts) => [...ts, { id, message, type }]);
-  if (type !== "error") {
-    setTimeout(() => dismissToast(id), 20_000);
-  }
+  setTimeout(() => dismissToast(id), 5_000);
 }
 
-/** 点击关闭（持久错误 toast 的唯一退出途径）。 */
+/** 手动关闭（X 按钮）。 */
 export function dismissToast(id: number) {
   setToasts((ts) => ts.filter((item) => item.id !== id));
 }
@@ -104,13 +102,26 @@ const [snapshot, setSnapshot] = createSignal<{ stacks: StackSummary[] } | null>(
 
 export { snapshot };
 
+// ---- 连接状态 ----
+
+// 后端不可达提示（上游 lost-connection 横幅的轮询版）：连续 2 次拉取失败置 offline，
+// 恢复即清除；不 toast（持久横幅已足够，避免每 10s 刷一条错误）。
+const [offline, setOffline] = createSignal(false);
+let failureStreak = 0;
+
+export { offline };
+
 /** 手动刷新：拉取栈清单（toast 控制是否提示）。 */
 export async function refresh(withToast = true) {
   try {
     const stacks = await api.stacks();
     setSnapshot({ stacks: stacks.list });
+    failureStreak = 0;
+    setOffline(false);
     if (withToast) toast(t("toast.refreshed"), "info");
   } catch (e) {
+    failureStreak++;
+    if (failureStreak >= 2) setOffline(true);
     if (withToast) toast(errText(e), "error");
   }
 }

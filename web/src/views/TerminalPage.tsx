@@ -24,7 +24,7 @@ export function TerminalPage() {
         {t("compose.switchShell", { shell: switchTo() })}
       </A>
       <div class="terminal-page">
-        <TerminalPane name={container()} type="exec" />
+        <TerminalPane name={container()} type="exec" stack={stack()} shell={shell()} />
       </div>
     </div>
   );

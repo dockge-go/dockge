@@ -29,13 +29,13 @@ export function ConfirmHost() {
           <AlertDialog.Title class="confirm-title">{req()?.title}</AlertDialog.Title>
           <AlertDialog.Description class="confirm-desc">{req()?.desc}</AlertDialog.Description>
           <div class="confirm-actions">
-            <AlertDialog.CloseButton class="btn btn-secondary">{t("common.cancel")}</AlertDialog.CloseButton>
             <button
               class={`btn ${req()?.danger ? "btn-danger" : "btn-primary"}`}
               onClick={() => close(true)}
             >
               {t("common.ok")}
             </button>
+            <AlertDialog.CloseButton class="btn btn-secondary">{t("common.cancel")}</AlertDialog.CloseButton>
           </div>
         </AlertDialog.Content>
       </AlertDialog.Portal>

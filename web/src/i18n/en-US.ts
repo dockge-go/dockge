@@ -20,6 +20,7 @@ const dict = {
   "nav.scanStacks": "Scan Stacks Folder",
   "nav.signedInAs": "Signed in as {name}",
   "nav.images": "Images",
+  "nav.lostConnection": "Lost connection to the server. Retrying…",
 
   // ---- login / setup ----
   "login.title": "Login to Dockge",
