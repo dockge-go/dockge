@@ -290,13 +290,24 @@ func (r *Repository) StackStats(ctx context.Context, name string) ([]model.Conta
 	return stats, nil
 }
 
+// docker 预设网络：services.networks 引用它们无意义（宿主网络等要走 network_mode），
+// 出现在编辑器建议列表只会误导，过滤掉。
+var builtinNetworks = map[string]struct{}{"bridge": {}, "host": {}, "none": {}}
+
 // DockerNetworkNames 返回本机网络名列表（编辑器 Networks 字段的建议来源）。
 func (r *Repository) DockerNetworkNames(ctx context.Context) ([]string, error) {
 	out, err := r.runDocker(ctx, composeOpTimeout, "network", "ls", "--format", "{{.Name}}")
 	if err != nil {
 		return nil, fmt.Errorf("docker network ls: %w", err)
 	}
-	return strings.Fields(strings.TrimSpace(out)), nil
+	names := make([]string, 0)
+	for _, name := range strings.Fields(strings.TrimSpace(out)) {
+		if _, builtin := builtinNetworks[name]; builtin {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 // stackOpPhases 把栈操作映射为依次执行的 compose 参数序列（不含 "compose"

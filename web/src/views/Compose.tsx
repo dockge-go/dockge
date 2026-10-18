@@ -38,6 +38,9 @@ import {
   listTopLevelNetworkEntries,
   listTopLevelNetworks,
   readService,
+  readXDockgeUrls,
+  hasXDockgeUrlsLongSyntax,
+  setXDockgeUrls,
   removeService,
   removeTopLevelNetwork,
   renameTopLevelNetwork,
@@ -135,6 +138,9 @@ export function Compose() {
   const [stats, setStats] = createSignal<ContainerStat[]>([]);
   const [hostname, setHostname] = createSignal("");
   const [networks, setNetworks] = createSignal<string[]>([]);
+  // 本机网络建议（服务表单/外部网络卡共用）：剔除本栈 compose 自建网络
+  // （栈名_ 前缀——选它等于 external 自引用，compose 部署时报网络已存在）
+  const hostNetworkOptions = () => networks().filter((n) => !n.startsWith(`${params.name ?? ""}_`));
   const [localImages, setLocalImages] = createSignal<string[]>([]);
   // 本地镜像列表供编辑表单 image 下拉选择（排序后同仓库多 tag 相邻，便于切换版本）；
   // 编辑表单每次展开下拉时经 refreshImages 重拉（5s 去抖）——镜像页/部署拉取的新镜像立即可见
@@ -725,7 +731,7 @@ export function Compose() {
                         yaml={yaml()}
                         serviceName={serviceName}
                         services={editingServices()}
-                        hostNetworks={networks()}
+                        hostNetworks={hostNetworkOptions()}
                         localImages={localImages()}
                         onImagesOpen={refreshImages}
                         onChange={(fields) => patchService(serviceName, fields)}
@@ -734,6 +740,20 @@ export function Compose() {
                   </div>
                 )}
               </For>
+              <div class="card">
+                <h4 class="card-title">{t("compose.extra")}</h4>
+                <div class="form-block">
+                  <label class="form-label">{t("compose.urls")}</label>
+                  <Show when={!hasXDockgeUrlsLongSyntax(yaml())} fallback={<p class="form-help">{t("form.longSyntax")}</p>}>
+                    <ArrayField
+                      displayName={t("compose.url")}
+                      placeholder="https://"
+                      rows={readXDockgeUrls(yaml())}
+                      onChange={(rows) => setYaml(setXDockgeUrls(yaml(), rows ?? []))}
+                    />
+                  </Show>
+                </div>
+              </div>
             </Show>
           </div>
 
@@ -775,14 +795,14 @@ export function Compose() {
             </div>
           </Show>
           <Show when={editing()}>
-            <NetworksCard yaml={yaml()} externalOptions={networks()} onChange={setYaml} />
+            <NetworksCard yaml={yaml()} externalOptions={hostNetworkOptions()} onChange={setYaml} />
           </Show>
         </div>
 
         <Show when={!editing() && !isNew() && detail()}>
           <div class="card compose-log-terminal">
             <h4 class="card-title">
-              {t("compose.logs")}
+              {t("compose.terminal")}
               <span class={`log-state ${logState()}`}>{logState() === "live" ? t("compose.live") : t("compose.ended")}</span>
             </h4>
             <TerminalPane name={detail()!.name} type="compose-logs" onState={setLogState} />

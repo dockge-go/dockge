@@ -72,7 +72,9 @@ const dict = {
   "compose.confirmDelete": "Delete",
   "compose.confirmDeleteDesc": "Are you sure you want to delete this stack?",
   "compose.containers": "Containers",
-    "compose.logs": "Logs",
+    "compose.extra": "Extra",
+    "compose.urls": "URLs",
+    "compose.url": "URL",
   "compose.live": "Live",
   "compose.ended": "Disconnected",
   "compose.terminal": "Terminal",
@@ -90,6 +92,7 @@ const dict = {
 
   // ---- terminal ----
   "term.sessionEnded": "Session ended",
+  "term.reconnecting": "Connection lost, reconnecting…",
 
   // ---- service config form (upstream ArrayInput/ArraySelect equivalents) ----
   "form.image": "Docker Image",

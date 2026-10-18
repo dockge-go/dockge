@@ -116,26 +116,47 @@ export function TerminalPane(props: {
     // exec：栈名与 shell 经 query 下发（compose exec 服务名 + 显式 shell，对齐上游）
     const query = kind === "exec" && stk ? `&stack=${encodeURIComponent(stk)}&shell=${shell ?? "bash"}` : "";
     const base = `${proto}://${location.host}/v1/terminal/${encodeURIComponent(name)}/${kind}`;
-    const sock = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}${query}`);
-    ws = sock;
+
+    // 建立一条连接；compose-logs 断开后 3s 自动重连（上游经 socket.io 断线自动重连，
+    // 等价补齐）。重连由服务端重放最近日志，清屏避免重复段落。exec 是一次性会话，
+    // 断开即结束，不重连。
+    const connect = (): WebSocket => {
+      const sock = new WebSocket(`${base}?token=${encodeURIComponent(getToken())}${tail}${query}`);
+      ws = sock;
+      sock.onmessage = (ev) => term.write(String(ev.data));
+      // 一次性守卫：close 事件可能触发多次（如服务端断开+本地 close），只写一次结束消息
+      let ended = false;
+      sock.onclose = () => {
+        if (ended) return;
+        ended = true;
+        props.onState?.("ended");
+        if (kind === "compose-logs") {
+          term.write(`\r\n\x1b[33m${t("term.reconnecting")}\x1b[0m\r\n`);
+          setTimeout(() => {
+            if (ws !== sock) return; // 已卸载或已被新连接替换
+            term.write("\x1b[2J\x1b[H");
+            connect();
+          }, 3000);
+        } else {
+          term.write(`\r\n\x1b[33m${t("term.sessionEnded")}\x1b[0m\r\n`);
+        }
+      };
+      sock.onopen = () => {
+        props.onState?.("live");
+        sock.send(JSON.stringify({ type: "resize", data: { rows: term.rows, cols: term.cols } }));
+      };
+      return sock;
+    };
+
     term.write("\x1b[2J\x1b[H");
-    sock.onmessage = (ev) => term.write(String(ev.data));
-    // 一次性守卫：close 事件可能触发多次（如服务端断开+本地 close），只写一次结束消息
-    let ended = false;
-    sock.onclose = () => {
-      if (ended) return;
-      ended = true;
-      props.onState?.("ended");
-      term.write(`\r\n\x1b[33m${t("term.sessionEnded")}\x1b[0m\r\n`);
-    };
-    sock.onopen = () => {
-      props.onState?.("live");
-      sock.send(JSON.stringify({ type: "resize", data: { rows: term.rows, cols: term.cols } }));
-    };
+    connect();
     onCleanup(() => {
-      sock.onclose = null;
-      sock.close();
-      if (ws === sock) ws = null;
+      const cur = ws;
+      if (cur) {
+        cur.onclose = null;
+        cur.close();
+        ws = null;
+      }
     });
   });
 

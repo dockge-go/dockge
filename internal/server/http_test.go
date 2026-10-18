@@ -35,7 +35,7 @@ func stubCLI(t *testing.T) string {
 	script := `#!/bin/sh
 case "$*" in
   "compose ls --all --format json") echo '[]' ;;
-  "network ls --format {{.Name}}") echo "bridge host none" ;;
+  "network ls --format {{.Name}}") echo "bridge host none mynet" ;;
   *) exit 0 ;;
 esac
 `
@@ -194,8 +194,8 @@ func TestAPI(t *testing.T) {
 	if code, _ := call(t, engine, "GET", "/v1/stacks/demo/stats", token, nil); code != 200 {
 		t.Fatal("资源统计应 200")
 	}
-	if code, payload := call(t, engine, "GET", "/v1/stacks/networks", token, nil); code != 200 || !strings.Contains(fmt.Sprint(payload["data"]), "bridge") {
-		t.Fatalf("网络列表应含 bridge，实际 %d %v", code, payload)
+	if code, payload := call(t, engine, "GET", "/v1/stacks/networks", token, nil); code != 200 || !strings.Contains(fmt.Sprint(payload["data"]), "mynet") || strings.Contains(fmt.Sprint(payload["data"]), "bridge") {
+		t.Fatalf("网络列表应含 mynet 且滤除内置 bridge/host/none，实际 %d %v", code, payload)
 	}
 	if code, _ := call(t, engine, "POST", "/v1/stacks/demo/start", token, nil); code != 200 {
 		t.Fatal("启动（流式）应 200")

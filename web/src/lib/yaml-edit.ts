@@ -1,7 +1,7 @@
 // compose.yaml 结构化编辑：基于 yaml Document API 的服务/网络增删改。
 // 走 Document 节点树而非 parse→stringify，注释在往返中原生保留
 // （优于上游 copyYAMLComments 的行匹配恢复）。所有操作对非法 YAML 返回原文本。
-import { isMap, isSeq, parseDocument, YAMLMap, type Document } from "yaml";
+import { isMap, isSeq, parseDocument, YAMLMap, type Document, type Scalar } from "yaml";
 
 /** 服务可编辑字段（与上游容器配置表单一一对应）。 */
 export interface ServiceFields {
@@ -349,5 +349,41 @@ function mapNetworkRefs(text: string, fn: (name: string) => string | null): stri
     }
   }
   return changed ? doc.toString({ lineWidth: 0 }) : text;
+}
+
+/** 读顶层 x-dockge.urls（上游 Extra/ArrayInput 的数据源，浏览态渲染为徽章链接）。
+ *  不存在 → undefined：编辑卡未初始化时只显示添加按钮（与上游 isArrayInited
+ *  防空数组落盘一致）。 */
+export function readXDockgeUrls(text: string): string[] | undefined {
+  const doc = parse(text);
+  const node = doc && doc.get("x-dockge", true);
+  const urls = isMap(node) ? node.get("urls", true) : undefined;
+  if (!isSeq(urls)) return undefined;
+  return urls.items.map((item) => String((item as Scalar).value ?? ""));
+}
+
+/** urls 存在但数组项含非字符串（上游 LongSyntaxNotSupported 同款判定）→ 编辑卡退位。 */
+export function hasXDockgeUrlsLongSyntax(text: string): boolean {
+  const doc = parse(text);
+  const node = doc && doc.get("x-dockge", true);
+  const urls = isMap(node) ? node.get("urls", true) : undefined;
+  return isSeq(urls) && urls.items.some((item) => typeof (item as Scalar).value !== "string");
+}
+
+/** 覆写 x-dockge.urls；空数组删除字段，x-dockge 空对象时整键删除（不留脏 YAML）。 */
+export function setXDockgeUrls(text: string, urls: string[]): string {
+  const doc = parse(text);
+  if (!doc) return text;
+  const node = doc.get("x-dockge", true);
+  if (urls.length === 0) {
+    if (!isMap(node)) return text;
+    node.delete("urls");
+    if (node.items.length === 0) doc.delete("x-dockge");
+  } else {
+    const map = isMap(node) ? node : new YAMLMap();
+    if (map !== node) doc.set("x-dockge", map);
+    map.set("urls", doc.createNode([...urls]));
+  }
+  return doc.toString({ lineWidth: 0 });
 }
 

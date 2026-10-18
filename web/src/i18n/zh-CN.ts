@@ -73,7 +73,9 @@ const dict = {
   "compose.confirmDelete": "删除",
   "compose.confirmDeleteDesc": "你确定要删除这个堆栈吗?",
   "compose.containers": "容器",
-    "compose.logs": "日志",
+    "compose.extra": "额外",
+    "compose.urls": "网址",
+    "compose.url": "网址",
   "compose.live": "实时",
   "compose.ended": "已断开",
   "compose.terminal": "终端",
@@ -91,6 +93,7 @@ const dict = {
 
   // ---- 终端 ----
   "term.sessionEnded": "会话已结束",
+  "term.reconnecting": "连接已断开，正在重连…",
 
   // ---- 服务配置表单（编辑态，上游 ArrayInput/ArraySelect 等价物） ----
   "form.image": "镜像",

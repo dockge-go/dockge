@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { addService, listServices, readService, removeService, updateService } from "../src/lib/yaml-edit.ts";
+import {
+  addService,
+  hasXDockgeUrlsLongSyntax,
+  listServices,
+  readService,
+  readXDockgeUrls,
+  removeService,
+  setXDockgeUrls,
+  updateService,
+} from "../src/lib/yaml-edit.ts";
 
 const DOC = `# 顶部注释
 services:
@@ -324,4 +333,53 @@ test("字典写法保护：environment/depends_on/networks 的 dict 形态表单
 
   // 列表短语法不受影响（表单正常编辑）
   assert.equal(hasLongSyntax("services:\n  a:\n    image: nginx\n    environment:\n      - K=V\n", "a", "environment"), undefined);
+});
+
+test("x-dockge.urls 读写：创建/覆写/删空清键，与上游 Extra ArrayInput 行为一致", () => {
+  const DOC = `services:
+  web:
+    image: nginx:latest
+`;
+
+  // 无 x-dockge → undefined（未初始化，编辑卡只显示添加按钮）
+  assert.equal(readXDockgeUrls(DOC), undefined);
+  assert.equal(hasXDockgeUrlsLongSyntax(DOC), false);
+
+  // 添加：创建 x-dockge.urls
+  const added = setXDockgeUrls(DOC, ["https://example.com"]);
+  assert.deepEqual(readXDockgeUrls(added), ["https://example.com"]);
+  assert.match(added, /x-dockge:/);
+  assert.match(added, /nginx:latest/);
+
+  // 追加/覆写
+  const updated = setXDockgeUrls(added, ["https://example.com", "https://docs.example.com/api"]);
+  assert.deepEqual(readXDockgeUrls(updated), ["https://example.com", "https://docs.example.com/api"]);
+
+  // 删光：urls 字段与空 x-dockge 对象整键删除（不留脏 YAML）
+  const cleared = setXDockgeUrls(updated, []);
+  assert.equal(readXDockgeUrls(cleared), undefined);
+  assert.doesNotMatch(cleared, /x-dockge:/);
+
+  // x-dockge 下有其它字段时保留对象
+  const shared = `services:
+  web:
+    image: nginx
+x-dockge:
+  version: 2
+  urls:
+    - https://example.com
+`;
+  const sharedOut = setXDockgeUrls(shared, []);
+  assert.doesNotMatch(sharedOut, /urls:/);
+  assert.match(sharedOut, /version: 2/);
+});
+
+test("x-dockge.urls 长语法：数组项非字符串 → 编辑卡退位", () => {
+  const longDoc = `x-dockge:
+  urls:
+    - url: https://example.com
+      name: home
+`;
+  assert.equal(hasXDockgeUrlsLongSyntax(longDoc), true);
+  assert.equal(hasXDockgeUrlsLongSyntax("x-dockge:\n  urls:\n    - https://a.com\n"), false);
 });
