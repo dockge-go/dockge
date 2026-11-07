@@ -184,6 +184,7 @@ export const zh: Record<string, string> = {
   'sysinfo.rootPartition': '服务器根分区 /',
   'sysinfo.warming': '采样中',
   'sysinfo.live': '每 2 秒更新 · {time}',
+  'sysinfo.kernelSource': 'Linux 内核实测 · 栈目录文件系统',
   'sysinfo.hostMount': '宿主只读挂载',
   'sysinfo.localSource': '本机 Linux',
   'sysinfo.stale': '数据已过期，正在重新连接；不展示旧值',

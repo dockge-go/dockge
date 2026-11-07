@@ -33,9 +33,18 @@ func (r *Repository) HostSystem(ctx context.Context) *v1.HostSystem {
 	if err != nil {
 		q.Errors["source"] = err.Error()
 		r.systemPrevious = nil
+		if r.stacksDir != "" {
+			q.Disk, err = hostDisk(r.stacksDir)
+			if err != nil {
+				q.Errors["disk"] = err.Error()
+			}
+		}
 	} else {
 		var current *cpuCounters
 		q, current = sampleHost(src, now)
+		if src.name == "kernel-proc" {
+			r.runtimeHostIdentity(ctx, q, now)
+		}
 		if current != nil {
 			if r.systemPrevious != nil {
 				q.CPUPercent, err = cpuUsage(*r.systemPrevious, *current)
@@ -112,20 +121,28 @@ func sampleHost(src hostSource, now time.Time) (*v1.HostSystem, *cpuCounters) {
 			}
 		}
 	}
-	// 只读取两个固定系统信息文件，不挂载/遍历宿主根目录。
-	q.Hostname = read("hostname", filepath.Join(src.etc, "hostname"))
-	if src.name == "local" {
-		if name, err := os.Hostname(); err == nil {
-			q.Hostname = name
-			delete(q.Errors, "hostname")
+	// 容器的 /etc 属于镜像和 UTS 命名空间，不能用它冒充宿主身份。
+	if src.etc != "" {
+		q.Hostname = read("hostname", filepath.Join(src.etc, "hostname"))
+		if src.name == "local" {
+			if name, err := os.Hostname(); err == nil {
+				q.Hostname = name
+				delete(q.Errors, "hostname")
+			}
+		}
+		if s := read("os", filepath.Join(src.etc, "os-release")); s != "" {
+			for _, line := range strings.Split(s, "\n") {
+				if value, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+					q.OS = strings.Trim(value, "\"'")
+					break
+				}
+			}
 		}
 	}
-	if s := read("os", filepath.Join(src.etc, "os-release")); s != "" {
-		for _, line := range strings.Split(s, "\n") {
-			if value, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
-				q.OS = strings.Trim(value, "\"'")
-				break
-			}
+	if src.name == "kernel-proc" {
+		if err := checkTimeNamespace(); err != nil {
+			q.Uptime = nil
+			q.Errors["uptime"] = err.Error()
 		}
 	}
 	if src.disk == "" {

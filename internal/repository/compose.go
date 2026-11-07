@@ -83,49 +83,29 @@ func (r *Repository) ComposeLs(ctx context.Context) ([]composeLsItem, error) {
 	return items, nil
 }
 
-// resolveStackExec 解析栈的执行上下文：
-// 托管栈（stacks 目录存在）返回其目录；外部栈从 compose ls 的 ConfigFiles
-// 反查 compose 文件路径（已不存在的文件被过滤）。返回空 files 时
-// down 仍可按项目名 label 执行，其余操作将由 compose 报缺文件错误。
+// resolveStackExec 只接受 stacks 中有真实配置文件的目录，不反查或操作外部项目。
 func (r *Repository) resolveStackExec(ctx context.Context, name string) (dir string, files []string, err error) {
-	stackDir := r.StackPath(name)
-	if info, statErr := os.Lstat(stackDir); statErr == nil {
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return "", nil, fmt.Errorf("栈目录 %s 必须是真实目录而非符号链接", stackDir)
-		}
-		if file, ok := r.findComposeFile(name); ok {
-			return stackDir, []string{filepath.Join(stackDir, file)}, nil
-		}
-		return stackDir, nil, nil
-	}
-	items, err := r.ComposeLs(ctx)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
-	for _, item := range items {
-		if item.Name != name || item.ConfigFiles == "" {
-			continue
-		}
-		for _, f := range strings.Split(item.ConfigFiles, ",") {
-			if f = strings.TrimSpace(f); f != "" && fileExists(f) {
-				files = append(files, f)
-			}
-		}
-		if len(files) > 0 {
-			return filepath.Dir(files[0]), files, nil
-		}
+	if name == "" || filepath.Base(name) != name || strings.HasPrefix(name, ".") {
+		return "", nil, fmt.Errorf("%w：栈名 %q 不属于可管理的 stacks 子目录", ErrNotFound, name)
 	}
-	return r.stacksDir, nil, nil
+	if info, err := os.Lstat(r.StackPath(name)); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", nil, fmt.Errorf("栈目录 %s 必须是真实目录而非符号链接", r.StackPath(name))
+		}
+	} else if !os.IsNotExist(err) {
+		return "", nil, fmt.Errorf("读取栈 %q 目录: %w", name, err)
+	}
+	if file, ok := r.findComposeFile(name); ok {
+		dir := r.StackPath(name)
+		return dir, []string{filepath.Join(dir, file)}, nil
+	}
+	return "", nil, fmt.Errorf("%w：栈 %q 必须位于 %s 的真实子目录且包含 compose 配置文件", ErrNotFound, name, r.stacksDir)
 }
 
-// fileExists 判断常规文件是否存在。
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-// composeArgs 组装栈操作的 compose 参数：托管栈仅 -p；外部栈附带 -f 指向真实配置文件。
-// 不含 "compose" 子命令本身——由 Runtime.ComposeCommand 按运行时补全。
+// composeArgs 显式指定托管栈的项目名与配置文件，不加载当前目录的其他配置。
 func composeArgs(name string, files []string, extra ...string) []string {
 	args := []string{"-p", name}
 	if len(files) > 0 {
@@ -138,7 +118,7 @@ func composeArgs(name string, files []string, extra ...string) []string {
 
 // StackPs 返回指定栈的容器列表（docker compose ps）。
 // 栈从未部署时 compose ps 返回空输出，视为无容器；
-// 外部栈按 compose ls 反查的配置文件执行，工作目录不存在也不受影响。
+// 配置只来自托管目录，不允许按项目名反查外部配置。
 func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Container, error) {
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
@@ -202,7 +182,7 @@ func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Containe
 func (r *Repository) StackOp(ctx context.Context, name, op string) (string, error) {
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
-		return "", fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
+		return "", fmt.Errorf("栈 %q 无法执行 %s: %w", name, op, err)
 	}
 	runCompose := func(timeout time.Duration, args ...string) (string, error) {
 		return r.runComposeIn(ctx, stackDir, timeout, composeArgs(name, files, args...)...)
@@ -217,18 +197,7 @@ func (r *Repository) StackOp(ctx context.Context, name, op string) (string, erro
 	case "restart":
 		return runCompose(composeOpTimeout, "restart")
 	case "down":
-		out, err := runCompose(composeOpTimeout, "down", "--remove-orphans")
-		if err == nil {
-			return out, nil
-		}
-		// 回退：不加载 compose 文件、不做变量插值，按项目名 label 匹配清理容器。
-		// 覆盖两类场景：compose 文件已被删除；文件要求的环境变量在当前进程缺失。
-		fallback, fbErr := r.runComposeIn(ctx, r.stacksDir, composeOpTimeout,
-			"-p", name, "down", "--remove-orphans")
-		if fbErr != nil {
-			return out + "\n" + fallback, fmt.Errorf("stack down: %w", err)
-		}
-		return out + "\n" + fallback + "\n（compose 文件不可用，已按项目名清理容器与网络）", nil
+		return runCompose(composeOpTimeout, "down", "--remove-orphans")
 	case "update":
 		pullOut, err := runCompose(composeUpdateTimeout, "pull")
 		if err != nil {
@@ -249,7 +218,7 @@ func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (s
 	}
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
-		return "", fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
+		return "", fmt.Errorf("栈 %q 无法执行 %s: %w", name, op, err)
 	}
 	var args []string
 	switch op {
@@ -346,7 +315,7 @@ func stackOpPhases(name string, files []string, op string) ([][]string, error) {
 func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Writer) error {
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
-		return fmt.Errorf("找不到栈 %s 的 compose 文件，无法执行 %s", name, op)
+		return fmt.Errorf("栈 %q 无法执行 %s: %w", name, op, err)
 	}
 	phases, err := stackOpPhases(name, files, op)
 	if err != nil {
@@ -443,7 +412,7 @@ func (p *progressFilter) closeOpen() error {
 }
 
 // StackExecDir 返回栈 compose 操作的工作目录：
-// 托管栈为栈目录，外部栈为 compose 配置文件所在目录。
+// 目录外项目没有执行上下文。
 func (r *Repository) StackExecDir(ctx context.Context, name string) (string, error) {
 	dir, _, err := r.resolveStackExec(ctx, name)
 	return dir, err

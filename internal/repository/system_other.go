@@ -15,3 +15,5 @@ func hostArch() string { return runtime.GOARCH }
 func hostDisk(path string) (*v1.HostDisk, error) {
 	return nil, fmt.Errorf("%s 上不支持 Linux 根分区采样 (%s)", runtime.GOOS, path)
 }
+
+func checkTimeNamespace() error { return nil }

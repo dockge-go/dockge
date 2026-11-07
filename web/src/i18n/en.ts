@@ -181,6 +181,7 @@ export const en: Record<string, string> = {
   'sysinfo.rootPartition': 'Server root filesystem /',
   'sysinfo.warming': 'Sampling',
   'sysinfo.live': 'Updates every 2s · {time}',
+  'sysinfo.kernelSource': 'Linux kernel counters · stack filesystem',
   'sysinfo.hostMount': 'Read-only host mounts',
   'sysinfo.localSource': 'Local Linux',
   'sysinfo.stale': 'Data is stale. Reconnecting; old values are hidden',

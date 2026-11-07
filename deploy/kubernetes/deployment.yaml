@@ -22,7 +22,8 @@ spec:
         dockge-runtime: "true"
       containers:
         - name: dockge
-          image: ghcr.io/dockge-go/dockge:0.2.5
+          image: makeshit/dockge:0.2.6
+          # 固定支持两挂载布局的发布版本；升级时核对新版本或镜像摘要。
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -35,35 +36,8 @@ spec:
           volumeMounts:
             - name: stacks
               mountPath: /opt/stacks
-            - name: data
-              mountPath: /app/data
             - name: runtime
               mountPath: /var/run/docker.sock
-            # 仅只读挂载固定统计文件，不暴露节点 procfs 或根目录。
-            - name: host-metric-0
-              mountPath: /host/proc/stat
-              readOnly: true
-            - name: host-metric-1
-              mountPath: /host/proc/meminfo
-              readOnly: true
-            - name: host-metric-2
-              mountPath: /host/proc/cpuinfo
-              readOnly: true
-            - name: host-metric-3
-              mountPath: /host/proc/loadavg
-              readOnly: true
-            - name: host-metric-4
-              mountPath: /host/proc/uptime
-              readOnly: true
-            - name: host-metric-5
-              mountPath: /host/proc/sys/kernel/osrelease
-              readOnly: true
-            - name: host-metric-6
-              mountPath: /host/etc/os-release
-              readOnly: true
-            - name: host-metric-7
-              mountPath: /host/etc/hostname
-              readOnly: true
           readinessProbe:
             httpGet:
               path: /v1/health
@@ -75,45 +49,9 @@ spec:
               port: http
             initialDelaySeconds: 15
       volumes:
-        - name: host-metric-0
-          hostPath:
-            path: /proc/stat
-            type: File
-        - name: host-metric-1
-          hostPath:
-            path: /proc/meminfo
-            type: File
-        - name: host-metric-2
-          hostPath:
-            path: /proc/cpuinfo
-            type: File
-        - name: host-metric-3
-          hostPath:
-            path: /proc/loadavg
-            type: File
-        - name: host-metric-4
-          hostPath:
-            path: /proc/uptime
-            type: File
-        - name: host-metric-5
-          hostPath:
-            path: /proc/sys/kernel/osrelease
-            type: File
-        - name: host-metric-6
-          hostPath:
-            path: /etc/os-release
-            type: File
-        - name: host-metric-7
-          hostPath:
-            path: /etc/hostname
-            type: File
         - name: stacks
           hostPath:
             path: /opt/stacks
-            type: DirectoryOrCreate
-        - name: data
-          hostPath:
-            path: /var/lib/dockge
             type: DirectoryOrCreate
         - name: runtime
           hostPath:

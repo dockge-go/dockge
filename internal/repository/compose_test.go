@@ -64,14 +64,14 @@ func TestStackOpPhases(t *testing.T) {
 		})
 	}
 
-	// 外部栈：附带 -f 指向反查到的配置文件
-	got, err := stackOpPhases("ext", []string{"/opt/x/compose.yaml"}, "stop")
+	// 托管栈：显式 -f 指向目录内的配置文件
+	got, err := stackOpPhases("demo", []string{"/opt/stacks/demo/compose.yaml"}, "stop")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"-p", "ext", "-f", "/opt/x/compose.yaml", "stop"}}
+	want := [][]string{{"-p", "demo", "-f", "/opt/stacks/demo/compose.yaml", "stop"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("external stack phases = %v, want %v", got, want)
+		t.Errorf("managed stack phases = %v, want %v", got, want)
 	}
 }
 

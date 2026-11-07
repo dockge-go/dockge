@@ -70,10 +70,7 @@ func (s *stackService) Get(ctx context.Context, name string) (*v1.StackDetailDat
 	}
 	stack, err := s.repo.Get(ctx, name)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, v1.ErrNotFound
-		}
-		return nil, err
+		return nil, stackError(err)
 	}
 	containers := make([]v1.StackContainer, 0, len(stack.Containers))
 	for _, c := range stack.Containers {
@@ -119,10 +116,7 @@ func (s *stackService) Save(ctx context.Context, req *v1.StackSaveRequest, isAdd
 		if errors.Is(err, repository.ErrConflict) {
 			return fmt.Errorf("%w: 栈 %s 已存在", v1.ErrConflict, name)
 		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return v1.ErrNotFound
-		}
-		return err
+		return stackError(err)
 	}
 	return nil
 }
@@ -137,7 +131,7 @@ func (s *stackService) Delete(ctx context.Context, name string) (*v1.StackOpResp
 	defer mu.(*sync.Mutex).Unlock()
 	output, err := s.repo.CleanStackResources(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, stackError(err)
 	}
 	if err = s.repo.Delete(ctx, name); err != nil {
 		return nil, fmt.Errorf("运行时已清理，但栈目录删除失败: %w", err)
@@ -150,7 +144,8 @@ func (s *stackService) DeletePlan(ctx context.Context, name string) (*v1.StackDe
 	if !StackNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("%w: 非法栈名 %q", v1.ErrBadRequest, name)
 	}
-	return s.repo.PlanStackDelete(ctx, name)
+	plan, err := s.repo.PlanStackDelete(ctx, name)
+	return plan, stackError(err)
 }
 
 // StreamOp 流式执行栈生命周期操作：compose 输出逐行写入 w（进度终端实时流）。
@@ -182,6 +177,9 @@ func (s *stackService) ServiceOp(ctx context.Context, name, service, op string) 
 		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
 	output, err := s.repo.ServiceOp(ctx, name, service, op)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, stackError(err)
+	}
 	if err != nil {
 		return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)},
 			fmt.Errorf("%w: %s", v1.ErrDockerError, err.Error())
@@ -196,7 +194,7 @@ func (s *stackService) Stats(ctx context.Context, name string) ([]v1.ContainerSt
 	}
 	stats, err := s.repo.StackStats(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, stackError(err)
 	}
 	result := make([]v1.ContainerStat, 0, len(stats))
 	for _, stat := range stats {
@@ -213,4 +211,12 @@ func stackSummary(stack model.Stack) v1.StackSummaryData {
 		Name: stack.Name, Status: int(stack.Status),
 		Managed: stack.Managed, ComposeFileName: stack.ComposeFileName, ConfigFiles: stack.ConfigFiles, RuntimeError: stack.RuntimeError,
 	}
+}
+
+// stackError 保留仓储层栈名、路径与原因，同时让 HTTP 正确区分范围外栈和运行时故障。
+func stackError(err error) error {
+	if errors.Is(err, repository.ErrNotFound) {
+		return fmt.Errorf("%w: %w", v1.ErrNotFound, err)
+	}
+	return err
 }

@@ -47,7 +47,7 @@ ENV DOCKGE_STACKS_DIR=/opt/stacks \
     DOCKGE_LOG_MODE=both \
     DOCKGE_LOG_ENCODING=json \
     DOCKGE_LOG_FILE_NAME=/app/data/logs/dockge.log
-VOLUME /app/data
+COPY --chmod=755 deploy/entrypoint.sh /usr/local/bin/dockge-entrypoint
 EXPOSE 5001
 
 # OCI 元数据：Docker Hub 页面据此关联源码仓库与版本。
@@ -63,6 +63,5 @@ LABEL org.opencontainers.image.title="Dockge" \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q -O /dev/null "http://127.0.0.1:5001/v1/health" || exit 1
 
-# 挂载宿主 docker socket 与数据卷：
-#   -v /var/run/docker.sock:/var/run/docker.sock -v dockge-data:/app/data
-ENTRYPOINT ["/sbin/tini", "--", "dockge-server"]
+# 默认仅挂载运行时 socket 与 /opt/stacks；/app/data 自动连接隐藏持久目录。
+ENTRYPOINT ["/sbin/tini", "--", "dockge-entrypoint"]

@@ -69,57 +69,67 @@ services: {}
 	}
 }
 
-// TestGetExternalStackCallsComposeLsOnce 用 PATH 桩替身 docker CLI，
-// 锁定外部栈 Get 的行为：状态来自 compose ls 且整个 Get 期间
-// 「状态查询」只发一次 compose ls（外部分支 + StackPs 各一次），
-// 防止回归成同函数内重复查询。
-func TestGetExternalStackCallsComposeLsOnce(t *testing.T) {
+// TestStacksOnlyComeFromDirectory 防止面板自身和目录外项目混入列表或通过直接调用被操作。
+func TestStacksOnlyComeFromDirectory(t *testing.T) {
 	dir := t.TempDir()
-	counter := filepath.Join(dir, "ls.count")
-
-	// 桩 docker：compose ls 输出一个外部栈并对调用计数；其余 compose 子命令返回空列表。
-	binDir := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
+	counter := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "runtime")
+	script := "#!/bin/sh\nprintf x >> '" + counter + "'\n" +
+		"echo '[{\"Name\":\"managed\",\"Status\":\"running(1)\",\"ConfigFiles\":\"/host/stacks/managed/compose.yaml\"},{\"Name\":\"dockge\",\"Status\":\"running(1)\"},{\"Name\":\"external\",\"Status\":\"running(2)\"}]'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = compose ] && [ \"$2\" = ls ]; then\n" +
-		"printf x >> \"$DOCKER_LS_COUNTER\"\n" +
-		"echo '[{\"Name\":\"ext-stack\",\"Status\":\"running(2)\",\"ConfigFiles\":\"/nonexistent/compose.yaml\"}]'\n" +
-		"exit 0\n" +
-		"fi\n" +
-		"if [ \"$1\" = compose ]; then echo '[]'; exit 0; fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte(script), 0o755); err != nil {
+	r := &Repository{stacksDir: filepath.Join(dir, "stacks"), runtime: DetectRuntime(bin, "")}
+	if err := r.Save(context.Background(), &model.Stack{Name: "managed", Yaml: "services: {}\n"}, true); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("DOCKER_LS_COUNTER", counter)
-
-	stacksDir := filepath.Join(dir, "stacks")
-	if err := os.MkdirAll(stacksDir, 0o755); err != nil {
+	for _, name := range []string{".dockge-data", "empty"} {
+		if err := os.Mkdir(filepath.Join(r.stacksDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(r.stacksDir, ".dockge-data", "compose.yaml"), []byte("services: {}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	repo := &Repository{stacksDir: stacksDir}
-
-	st, err := repo.Get(context.Background(), "ext-stack")
-	if err != nil {
-		t.Fatalf("Get(ext-stack) error: %v", err)
+	if err := os.Symlink(r.StackPath("managed"), r.StackPath("linked")); err != nil {
+		t.Fatal(err)
 	}
-	if st.Managed {
-		t.Error("external stack should not be managed")
+	rows, err := r.List(context.Background())
+	if err != nil || len(rows) != 1 || rows[0].Name != "managed" || !rows[0].Managed || rows[0].Status != model.StatusRunning {
+		t.Fatalf("列表必须只包含目录内配置: %+v, %v", rows, err)
 	}
-	if st.Status != model.StatusRunning {
-		t.Errorf("status = %d, want %d (running)", st.Status, model.StatusRunning)
+	if rows[0].ConfigFiles != filepath.Join(r.stacksDir, "managed", "compose.yaml") {
+		t.Fatal("运行时外部路径不得覆盖托管文件路径")
 	}
-
+	for _, name := range []string{"dockge", "external", ".dockge-data", "empty", "../outside"} {
+		ctx := context.Background()
+		if _, err := r.Get(ctx, name); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Get(%q): %v", name, err)
+		}
+		for _, op := range []string{"start", "stop", "restart", "down", "update"} {
+			if _, err := r.StackOp(ctx, name, op); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("%s(%q): %v", op, name, err)
+			}
+		}
+		if _, err := r.StackPs(ctx, name); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if _, err := r.StackStats(ctx, name); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if _, err := r.StackComposeCommand(ctx, name, "logs"); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if _, err := r.PlanStackDelete(ctx, name); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.Get(context.Background(), "linked"); err == nil {
+		t.Fatal("符号链接不能成为栈")
+	}
 	data, err := os.ReadFile(counter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 外部栈分支 1 次 + StackPs 的 resolveStackExec 1 次 = 2；重复查询回归会变成 3。
-	if n := len(data); n != 2 {
-		t.Errorf("compose ls called %d times, want 2 (no duplicate status query)", n)
+	if err != nil || len(data) != 1 {
+		t.Fatalf("外部项目拒绝前不得执行 CLI: %q, %v", data, err)
 	}
 }
 

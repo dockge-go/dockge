@@ -61,10 +61,13 @@ type Repository struct {
 	preflightAt     time.Time
 	preflightStatus RuntimeStatus
 	// system* 串行差分采样并短时缓存，多个浏览器不会产生互相污染的 CPU 区间。
-	systemMu       sync.Mutex
-	systemAt       time.Time
-	systemPrevious *cpuCounters
-	systemSnapshot *v1.HostSystem
+	systemMu            sync.Mutex
+	systemAt            time.Time
+	systemPrevious      *cpuCounters
+	systemSnapshot      *v1.HostSystem
+	systemIdentityAt    time.Time
+	systemIdentity      hostIdentity
+	systemIdentityError error
 }
 
 // New 构造仓储基础对象，由注入容器调用。

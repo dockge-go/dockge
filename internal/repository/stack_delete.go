@@ -72,6 +72,9 @@ func outsideDir(dir, source string) bool {
 
 // PlanStackDelete 在清理前重新核对实际与未部署栈的引用，无法确认归属时禁止破坏数据。
 func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.StackDeletePlan, error) {
+	if _, _, err := r.resolveStackExec(ctx, name); err != nil {
+		return nil, err
+	}
 	plan := &v1.StackDeletePlan{Containers: []string{}, Volumes: []string{}, Networks: []string{}, Images: []string{}, Retained: []string{}, Blockers: []string{}, Directory: r.StackPath(name)}
 	if info, err := os.Lstat(plan.Directory); err != nil {
 		return nil, fmt.Errorf("不能完整删除栈 %q：托管目录 %s 无法读取: %w", name, plan.Directory, err)

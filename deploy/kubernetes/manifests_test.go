@@ -2,7 +2,6 @@ package kubernetes
 
 import (
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -24,8 +23,9 @@ func TestDeploymentContract(t *testing.T) {
 					Automount  bool              `yaml:"automountServiceAccountToken"`
 					Selector   map[string]string `yaml:"nodeSelector"`
 					Containers []struct {
-						Image     string
-						Readiness struct {
+						Image      string
+						PullPolicy string `yaml:"imagePullPolicy"`
+						Readiness  struct {
 							HTTPGet struct {
 								Path string
 								Port string
@@ -65,8 +65,8 @@ func TestDeploymentContract(t *testing.T) {
 		t.Fatalf("expected one panel container, got %d", len(spec.Containers))
 	}
 	c := spec.Containers[0]
-	if !regexp.MustCompile(`^ghcr\.io/dockge-go/dockge:\d+\.\d+\.\d+$`).MatchString(c.Image) {
-		t.Fatalf("expected a pinned GHCR release image, got %q", c.Image)
+	if c.Image != "makeshit/dockge:0.2.6" || c.PullPolicy != "IfNotPresent" {
+		t.Fatalf("两挂载部署必须固定兼容的发布镜像并允许拉取: image=%q, policy=%q", c.Image, c.PullPolicy)
 	}
 	for name, probe := range map[string]struct{ Path, Port string }{
 		"readiness": c.Readiness.HTTPGet, "liveness": c.Liveness.HTTPGet,
@@ -85,7 +85,10 @@ func TestDeploymentContract(t *testing.T) {
 			t.Fatalf("host metrics mount %s must be read-only", m.MountPath)
 		}
 	}
-	for _, path := range []string{"/opt/stacks", "/app/data", "/var/run/docker.sock", "/host/proc/stat", "/host/proc/meminfo", "/host/proc/cpuinfo", "/host/proc/loadavg", "/host/proc/uptime", "/host/proc/sys/kernel/osrelease", "/host/etc/os-release", "/host/etc/hostname"} {
+	if len(paths) != 2 {
+		t.Fatalf("默认仅允许两个挂载: %v", paths)
+	}
+	for _, path := range []string{"/opt/stacks", "/var/run/docker.sock"} {
 		if !paths[path] {
 			t.Fatalf("missing fixed mount %s", path)
 		}

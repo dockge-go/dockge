@@ -1,5 +1,4 @@
-# Dockge 单机版：docker compose -f deploy/compose.yaml up -d
-# 无需路径环境变量；宿主指标经固定路径只读挂载采集。
+# Dockge 单机版：docker compose -f deploy/compose.yaml up -d --build
 services:
   dockge:
     image: dockge-go:local
@@ -11,22 +10,5 @@ services:
     ports:
       - "5001:5001"
     volumes:
-      # 驱动宿主守护进程（容器内 docker CLI 经它工作）。
       - /var/run/docker.sock:/var/run/docker.sock
-      # 栈目录：宿主侧可更换，容器内部始终为 /opt/stacks。
       - ../stacks:/opt/stacks
-      # 数据库与日志。
-      - dockge-data:/app/data
-      # 真实服务器指标（Linux）：仅挂载固定统计文件，不暴露整个 /proc 或根目录。
-      - /proc/stat:/host/proc/stat:ro
-      - /proc/meminfo:/host/proc/meminfo:ro
-      - /proc/cpuinfo:/host/proc/cpuinfo:ro
-      - /proc/loadavg:/host/proc/loadavg:ro
-      - /proc/uptime:/host/proc/uptime:ro
-      - /proc/sys/kernel/osrelease:/host/proc/sys/kernel/osrelease:ro
-      - /etc/os-release:/host/etc/os-release:ro
-      - /etc/hostname:/host/etc/hostname:ro
-
-volumes:
-  dockge-data:
-    # 卷名可能包含 Compose 项目前缀；备份前通过 inspect 确认实际名称。

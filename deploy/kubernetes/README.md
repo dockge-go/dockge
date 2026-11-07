@@ -7,7 +7,7 @@
 1. 选定**一个**节点，宿主上必须已有可访问的 Docker Engine socket。此示例镜像使用 `deploy/Dockerfile` 中的 Docker CLI 与 Compose 插件。只有 Kubernetes/containerd 并不等于已安装 Docker Engine；没有 Docker socket 时该示例不能运行核心功能。使用其他运行时时，需自行提供对应 CLI、Compose 实现及连接挂载，服务端通过 `repository.Runtime` 调用。
 2. Docker socket 给予面板接近宿主 root 的权限；仅限可信管理员使用，必须保护网络入口和 Secret。这里不设置 `privileged: true`，不向 Pod 挂载 Kubernetes ServiceAccount 令牌。
 3. 栈、数据库、服务端口在容器内部固定为 `/opt/stacks`、`/app/data`、`5001`。只改 `hostPath.path` 等宿主/存储侧映射，**不要用环境变量改变内部路径**。Compose 的 bind mount 路径由宿主运行时解析：换宿主栈路径后，必须确认 YAML 中宿主绑定源真实存在；优先使用命名卷。
-4. `replicas: 1`、`Recreate` 和唯一节点标签保证单个 bbolt 写入实例，不支持跨节点调度、多个副本或水平扩容。数据备份必须包含选定节点的栈目录与 `/var/lib/dockge`。
+4. `replicas: 1`、`Recreate` 和唯一节点标签保证单个 bbolt 写入实例，不支持跨节点调度、多个副本或水平扩容。数据备份必须包含选定节点的栈目录及其隐藏 `.dockge-data`；容器内 `/app/data` 自动连接该隐藏目录。旧部署独立挂载的 `/var/lib/dockge` 可继续使用，迁移前必须停机备份。
 5. 配置有效的 HTTPS Ingress、证书和 OIDC 客户端。将 `configmap.yaml`、`ingress.example.yaml` 的示例域名替换为实际地址。在提供方登记精确回调地址：`https://实际面板域名/v1/auth/oidc/callback`。
 
 ## OIDC 安全模型
@@ -23,9 +23,11 @@
 
 ## 操作步骤
 
-清单使用版本固定的 `ghcr.io/dockge-go/dockge:0.2.5`，支持 `linux/amd64` 与 `linux/arm64`；也可将 `image` 替换为 `makeshit/dockge:0.2.5`（Docker Hub）。版本号不包含 Git tag 的 `v` 前缀。生产优先固定镜像摘要，不使用 `dev`。
+清单固定使用 Docker Hub 镜像 `makeshit/dockge:0.2.6`，拉取策略为 `IfNotPresent`，无需在节点手动导入源码镜像。两挂载布局从 `0.2.6` 起支持，旧 `0.2.5` 缺少新入口，不能用于此清单。部署前确认对应版本的 [Release 工作流](https://github.com/dockge-go/dockge/actions/workflows/release.yml)已成功完成镜像发布。
 
-GHCR 包首次创建通常为私有，公开仓库并不自动保证镜像公开。发布管理员需在组织的 Packages → dockge → Package settings 中将可见性设为 Public，再检查匿名拉取。若选择保持私有，必须通过现有凭据管理系统在 `dockge` 命名空间创建 `kubernetes.io/dockerconfigjson` 类型的 `ghcr` Secret，并在 Pod 的 `spec.imagePullSecrets` 引用它；凭据需要 `read:packages`，不要写进清单或版本控制。Docker Hub 公共镜像可作为无凭据部署的替代来源。
+GHCR 同版本镜像为 `ghcr.io/dockge-go/dockge:0.2.6`；核对访问权限后可替换清单的 `image`。生产升级时固定已发布版本或摘要，不使用浮动 `latest`。节点必须能访问所选镜像仓库；Docker Engine 与 K8s/containerd 的镜像存储彼此独立。
+
+GHCR 包首次创建通常为私有，公开仓库并不自动保证镜像公开。发布管理员需在组织的 Packages → dockge → Package settings 中将可见性设为 Public，再检查匿名拉取。若选择保持私有，必须通过现有凭据管理系统在 `dockge` 命名空间创建 `kubernetes.io/dockerconfigjson` 类型的 `ghcr` Secret，并在 Pod 的 `spec.imagePullSecrets` 引用它；凭据需要 `read:packages`，不要写进清单或版本控制。默认 Docker Hub 公共镜像作为无需仓库凭据的部署来源。
 
 ```bash
 # 只给一个具备运行时的节点打标签。
@@ -52,6 +54,7 @@ kubectl rollout status deployment/dockge -n dockge
 
 ## 删除与数据归属
 
+- 编排栈仅来自 stacks 内的真实配置目录，Dockge 自身和目录外项目不展示、不通过栈 API 操作；`.dockge-data` 不算栈。
 - 删除栈会先显示计划；删除专属容器（含孤儿）、卷、网络、镜像与整个栈目录（包括 `compose.yaml`、`.env` 和目录内文件）。共享、external、栈外 bind mount 数据会明确保留；不能以“删栈”为由破坏其他业务。
 - 独立容器、镜像、卷、网络可以在对应页面删除；仍被引用或内建网络等无法删除时返回真实原因。先停止/删除引用对象，再删除资源，不提供全主机强制清空。
 - 面板不会从页面删除正在运行的自身容器，也不会强行删除唯一账号造成公开初始化入口。账号/设置重置通过停机后删除数据库完成。
@@ -62,4 +65,4 @@ kubectl rollout status deployment/dockge -n dockge
 
 仓库自动化测试覆盖 OIDC 配置与协议，以及固定镜像版本、路径、副本数、权限、认证注入与健康探针；Actions 使用 kubeconform 对所有清单（含待填写的配置示例）执行严格 Kubernetes 1.31 schema 校验。静态校验不等于真实集群验收。生产部署仍需使用实际身份提供方和集群验证登录回调、唯一身份限制、Compose CRUD、终端及日志。
 
-清单已包含 8 个固定只读宿主信息文件。采样范围为选定节点，磁盘空间为 `/opt/stacks` 所在文件系统，不代表整个集群。采样周期与未知值处理参见 [服务器指标说明](../../README.zh-CN.md#服务器指标)。
+默认仅挂载运行时 socket、stacks，不增加宿主 procfs 文件、hostPID、privileged 或指标 Agent。标准 Linux procfs 提供选定节点内核全局计数，本机运行时提供宿主身份；LXCFS 等虚拟化来源不能冒充节点指标。磁盘空间为 `/opt/stacks` 所在文件系统，不代表整个集群。采样周期与未知值处理参见 [服务器指标说明](../../README.zh-CN.md#服务器指标)。
