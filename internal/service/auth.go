@@ -44,6 +44,14 @@ type AuthService interface {
 	ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error
 	// AutoLogin 免登录模式下以首个活跃用户自动登录。
 	AutoLogin(ctx context.Context) (*v1.LoginResponseData, error)
+	// ListUsers 管理员列出全部用户。
+	ListUsers(ctx context.Context, actingUID uint) ([]v1.UserPublicData, error)
+	// CreateUser 管理员创建 admin/member 用户。
+	CreateUser(ctx context.Context, actingUID uint, req *v1.CreateUserRequest) error
+	// ResetUserPassword 管理员重置他人密码（目标旧会话即时失效）。
+	ResetUserPassword(ctx context.Context, actingUID uint, username, newPassword string) error
+	// DeleteUser 管理员删除用户（最后一名 admin 与自删受服务端保护）。
+	DeleteUser(ctx context.Context, actingUID uint, username string) error
 }
 
 type authService struct {
@@ -66,6 +74,10 @@ func loginRateKey(clientIP, username string) string {
 	return clientIP + "|" + username
 }
 
+// dummyBcryptHash 是合法格式的 bcrypt 串：未知用户时也执行一次等成本校验，
+// 消除「不存在用户立即返回」与「密码校验耗时」之间的时序侧信道（防账号存在性探测）。
+const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+
 // Login 校验用户名密码；开启 2FA 的账号返回中间令牌并要求提交验证码。
 func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error) {
 	// 失败原因各自成文：都回「登录失效」会让用户把「密码错」「被限流」「账号停用」当成会话过期，
@@ -73,18 +85,24 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP 
 	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {
 		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "尝试过于频繁，请稍后再试"}
 	}
+	// 统一失败文案：未知用户与密码错误必须逐字一致（AUTH-05 防枚举）。
+	const badCredentials = "用户名或密码错误"
 	user, err := s.repo.GetUserByUsername(ctx, req.Username)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "用户名或密码错误"}
+			// 等成本：对 dummy 哈希跑一次 BcryptCheck（忽略结果），时序与真实校验一致。
+			_ = hash.BcryptCheck(req.Password, dummyBcryptHash)
+			return nil, &v1.Error{Code: http.StatusUnauthorized, Message: badCredentials}
 		}
 		return nil, fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
 	}
+	if err := hash.BcryptCheck(req.Password, user.Password); err != nil {
+		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: badCredentials}
+	}
+	// Active 检查必须在密码校验之后：放在前面会让密码错误时也能区分「账号存在但停用」，
+	// 形成账号存在性探测通道（AUTH-05 / D-06）。
 	if !user.Active {
 		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "该账号已被停用"}
-	}
-	if err := hash.BcryptCheck(req.Password, user.Password); err != nil {
-		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "用户名或密码错误"}
 	}
 	return s.session(&user)
 }

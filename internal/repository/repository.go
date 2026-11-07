@@ -160,6 +160,18 @@ func initBuckets(db *bbolt.DB) error {
 	})
 }
 
+// InitBuckets 是 initBuckets 的导出别名：service 层测试需要在自建的临时库上准备 bucket
+// （Repository 构造走 do.Injector，测试无法注入，故以最小构造器暴露）。
+func InitBuckets(db *bbolt.DB) error {
+	return initBuckets(db)
+}
+
+// NewRepositoryForTest 以仅含 db 的最小构造创建 Repository（测试专用：其余字段为 nil，
+// 只可调用用户/设置等纯存储方法，禁止触碰 runtime/stacksDir 相关方法）。
+func NewRepositoryForTest(db *bbolt.DB) *Repository {
+	return &Repository{db: db}
+}
+
 // StacksDirFromConf 解析 stacks 目录：DOCKGE_STACKS_DIR 环境变量
 // （viper 前缀绑定，与上游 dockge 同名，兼容既有编排）→ 缺省 storage/stacks。
 func StacksDirFromConf(conf *viper.Viper) string {
