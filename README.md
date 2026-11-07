@@ -47,10 +47,10 @@ Release images: [Docker Hub](https://hub.docker.com/r/makeshit/dockge) · [GHCR]
 ```sh
 docker run -d --name dockge --restart unless-stopped -p 5001:5001 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/stacks:/opt/stacks ghcr.io/dockge-go/dockge:0.2.8
+  -v /opt/stacks:/opt/stacks makeshit/dockge:0.2.9
 ```
 
-The Docker Hub mirror is `makeshit/dockge:0.2.8`. [Deployment, OIDC and upgrades](deploy/README.md).
+The GHCR mirror is `ghcr.io/dockge-go/dockge:0.2.9`; private packages require a `read:packages` credential. [Deployment, OIDC and upgrades](deploy/README.md).
 
 ## Operations
 
