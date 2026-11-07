@@ -1,68 +1,55 @@
-// i18n 核心：响应式语言切换（SolidJS signal），持久化 localStorage(dockge.lang)，默认 zh-CN。
-// t() 读取 locale 信号 —— 在 JSX 表达式中调用时语言切换自动重渲染；
-// 在事件回调（toast/confirm）中调用则取调用时刻的语言。
-// 词典为扁平 key（继承设计定稿 crateman_web_index 的 key 约定），zh-CN 为基准语言。
-import { createSignal } from "solid-js";
-import zhCN from "./zh-CN";
-import enUS from "./en-US";
+/* ─────────────────────────────────────────────────────────────────────────
+ * i18n：zh 为基准语言，t(key, vars) 支持 {var} 插值，语言切换即时生效。
+ * 首次进入：localStorage 无偏好时按浏览器语言（navigator.languages）检测，
+ * 非中文环境默认英文 —— 登录/初始化页也可手动切换并记忆。
+ * ─────────────────────────────────────────────────────────────────── */
+import { createSignal } from 'solid-js';
+import { zh } from './zh';
+import { en } from './en';
 
-export type LocaleKey = "zh-CN" | "en-US";
-export type MsgKey = keyof typeof zhCN;
+export type Lang = 'zh' | 'en';
 
-const LANG_KEY = "dockge.lang";
+const LS_KEY = 'dockge.lang';
 
-const dicts: Record<LocaleKey, Record<MsgKey, string>> = {
-  "zh-CN": zhCN,
-  "en-US": enUS,
-};
-
-// 兼容设计定稿时代存的 'zh' / 'en' 短码
-function normalize(v: string | null): LocaleKey | null {
-  if (v === "zh-CN" || v === "zh") return "zh-CN";
-  if (v === "en-US" || v === "en") return "en-US";
-  return null;
-}
-
-function initialLocale(): LocaleKey {
+function detectLang(): Lang {
   try {
-    const stored = normalize(localStorage.getItem(LANG_KEY));
-    if (stored) return stored;
-  } catch {
-    // localStorage 不可用时用默认语言
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored === 'zh' || stored === 'en') return stored;
+  } catch (e) { /* ignore */ }
+  const langs: string[] = (navigator.languages && navigator.languages.length)
+    ? Array.from(navigator.languages)
+    : [navigator.language || ''];
+  for (const l of langs) {
+    if (!l) continue;
+    if (l.toLowerCase().startsWith('zh')) return 'zh';
   }
-  return "zh-CN";
+  return 'en';
 }
 
-const [locale, setLocaleSignal] = createSignal<LocaleKey>(initialLocale());
+const [lang, setLangState] = createSignal<Lang>(detectLang());
 
-function applyDocumentLocale() {
-  document.documentElement.lang = locale();
-  document.title = t("app.title");
+export { lang };
+
+export function setLang(l: Lang) {
+  setLangState(l);
+  try { localStorage.setItem(LS_KEY, l); } catch (e) { /* ignore */ }
+  document.documentElement.lang = l === 'en' ? 'en-US' : 'zh-CN';
+  document.title = t('app.title');
 }
 
-export function useLocale(): LocaleKey {
-  return locale();
-}
-
-export function setLocale(next: LocaleKey) {
-  setLocaleSignal(next);
-  try {
-    localStorage.setItem(LANG_KEY, next);
-  } catch {
-    // 持久化失败不影响本次会话
-  }
-  applyDocumentLocale();
-}
-
-export function t(key: MsgKey, vars?: Record<string, string | number>): string {
-  let val = dicts[locale()][key] ?? zhCN[key];
+export function t(key: string, vars?: Record<string, string | number>): string {
+  const dict = lang() === 'en' ? en : zh;
+  let val: string | undefined = dict[key];
+  if (val === undefined) val = zh[key];
+  if (val === undefined) return key;
   if (vars) {
-    for (const [k, v] of Object.entries(vars)) {
-      val = val.replaceAll(`{${k}}`, String(v));
+    for (const k of Object.keys(vars)) {
+      val = val.split('{' + k + '}').join(String(vars[k]));
     }
   }
   return val;
 }
 
-// 模块加载即同步一次 <html lang> 与页面标题
-applyDocumentLocale();
+/* 初始化 html lang / 标题（不落盘：保持“检测优先”直到用户显式选择） */
+document.documentElement.lang = lang() === 'en' ? 'en-US' : 'zh-CN';
+document.title = t('app.title');

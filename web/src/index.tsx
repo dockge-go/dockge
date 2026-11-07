@@ -1,34 +1,30 @@
-// 入口：路由装配（上游复刻路由表）。Setup 独立于 Gate；其余经认证门。
-// 重页面（编辑器 CodeMirror、终端 xterm）按需加载：首屏只载入外壳与首页。
-import { lazy } from "solid-js";
-import { render } from "solid-js/web";
-import { Route, Router } from "@solidjs/router";
-import "./styles/app.css";
-import { Gate } from "./layout/Layout";
-import { Setup } from "./views/Setup";
-import { DashboardHome } from "./views/DashboardHome";
+import { render } from 'solid-js/web';
+import { Router, Route } from '@solidjs/router';
+import App from './App';
+import Dashboard from './views/Dashboard';
+import Containers from './views/Containers';
+import ContainerDetail from './views/ContainerDetail';
+import Stacks from './views/Stacks';
+import Images from './views/Images';
+import Volumes from './views/Volumes';
+import Networks from './views/Networks';
+import SysInfo from './views/SysInfo';
+import SysDf from './views/SysDf';
+import Settings from './views/Settings';
+import './styles/app.css';
 
-const Compose = lazy(() => import("./views/Compose").then((m) => ({ default: m.Compose })));
-const Images = lazy(() => import("./views/Images").then((m) => ({ default: m.Images })));
-const TerminalPage = lazy(() => import("./views/TerminalPage").then((m) => ({ default: m.TerminalPage })));
-const SettingsPage = lazy(() => import("./views/SettingsPage").then((m) => ({ default: m.SettingsPage })));
-
-const root = document.getElementById("root");
-
-render(
-  () => (
-    <Router>
-      <Route path="/setup" component={Setup} />
-      <Route path="/" component={Gate}>
-        <Route path="/" component={DashboardHome} />
-        <Route path="/images" component={Images} />
-        <Route path="/compose" component={Compose} />
-        <Route path="/compose/:name" component={Compose} />
-        <Route path="/terminal/:stack/:service/:type" component={TerminalPage} />
-        <Route path="/settings/:tab" component={SettingsPage} />
-        <Route path="*" component={DashboardHome} />
-      </Route>
-    </Router>
-  ),
-  root!,
-);
+render(() => (
+  <Router root={App}>
+    <Route path="/" component={Dashboard} />
+    <Route path="/containers" component={Containers} />
+    <Route path="/containers/:id" component={ContainerDetail} />
+    <Route path="/stacks" component={Stacks} />
+    <Route path="/images" component={Images} />
+    <Route path="/volumes" component={Volumes} />
+    <Route path="/networks" component={Networks} />
+    <Route path="/sysinfo" component={SysInfo} />
+    <Route path="/sysdf" component={SysDf} />
+    <Route path="/settings" component={Settings} />
+    <Route path="*" component={Dashboard} />
+  </Router>
+), document.getElementById('root')!);
