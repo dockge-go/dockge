@@ -1,4 +1,6 @@
-## v0.2.7
+## v0.2.8
+
+包含 `v0.2.7` 的 Docker Compose 整改，并修复登录限流计数跨服务实例共享的问题。单实例限流阈值保持不变，增加重复运行和实例隔离回归验证。
 
 - 部署范围统一为单机 Docker Compose，移除集群清单和节点专用逻辑。
 - 仪表盘、资源列表、部署输出、日志和容器终端统一使用 SSE；系统指标直接采集真实内核数据。
@@ -12,6 +14,6 @@
 先备份栈目录（包含 `.dockge-data`）和业务卷，再更新面板镜像。内部路径仍为 `/opt/stacks`、`/app/data`，端口仍为 `5001`；原有数据挂载继续兼容。不自动迁移或删除业务数据。
 
 ```text
-ghcr.io/dockge-go/dockge:0.2.7
-makeshit/dockge:0.2.7
+ghcr.io/dockge-go/dockge:0.2.8
+makeshit/dockge:0.2.8
 ```

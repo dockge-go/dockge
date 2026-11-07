@@ -15,21 +15,22 @@ import (
 
 // AuthHandler 承载登录、Setup、2FA、当前用户、改密接口；依赖经 do:"" 标签注入。
 type AuthHandler struct {
-	Logger      *log.Logger         `do:""`
-	AuthService service.AuthService `do:""`
+	Logger       *log.Logger         `do:""`
+	AuthService  service.AuthService `do:""`
+	loginLimiter *rate.KeyedLimiter
 }
 
 // NewAuthHandler 构造认证处理器。
 func NewAuthHandler(i do.Injector) (*AuthHandler, error) {
-	return do.MustInvokeStruct[*AuthHandler](i), nil
+	h := do.MustInvokeStruct[*AuthHandler](i)
+	// 登录计数属于当前服务，避免重建处理器继承旧实例的请求额度。
+	h.loginLimiter = rate.NewKeyed(10, time.Minute, 10_000)
+	return h, nil
 }
-
-// loginLimiter 按 IP 限制登录尝试频率（防在线暴力破解）。
-var loginLimiter = rate.NewKeyed(10, time.Minute, 10_000)
 
 // Login 处理登录请求。
 func (h *AuthHandler) Login(ctx *gin.Context) {
-	if !loginLimiter.Allow(ctx.ClientIP()) {
+	if !h.loginLimiter.Allow(ctx.ClientIP()) {
 		v1.HandleError(ctx, http.StatusTooManyRequests,
 			&v1.Error{Code: http.StatusTooManyRequests, Message: "尝试过于频繁，请一分钟后再试"}, nil)
 		return

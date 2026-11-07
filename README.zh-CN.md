@@ -47,10 +47,10 @@ docker compose -f deploy/compose.yaml up -d --build
 ```sh
 docker run -d --name dockge --restart unless-stopped -p 5001:5001 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/stacks:/opt/stacks ghcr.io/dockge-go/dockge:0.2.7
+  -v /opt/stacks:/opt/stacks ghcr.io/dockge-go/dockge:0.2.8
 ```
 
-Docker Hub 镜像为 `makeshit/dockge:0.2.7`。[部署、OIDC 与升级](deploy/README.md)。
+Docker Hub 镜像为 `makeshit/dockge:0.2.8`。[部署、OIDC 与升级](deploy/README.md)。
 
 ## 日常维护
 
