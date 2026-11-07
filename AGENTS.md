@@ -28,7 +28,7 @@ web/           SolidJS 前端（构建产物 dist 由 go:embed 内嵌）
 ## 工程约定（最小集）
 
 - 分层单向：handler → service → repository；哨兵错误集中在 `api/v1` 与 repository 层。
-- 导出符号写中文注释（说「为什么」）；前端禁 `any`/`@ts-ignore`；i18n 文案进 `web/src/i18n/{zh-CN,en-US}.ts`（措辞对齐上游 locale）。
+- 导出符号写中文注释（说「为什么」）；前端禁 `any`/`@ts-ignore`；i18n 文案进 `web/src/i18n/{zh-CN,en-US}.ts`（措辞对齐上游 locale）。前端移植后 i18n 文件为 dockgy 原版 zh.ts/en.ts。
 - 测试就近、表驱动；完成改动后跑 `make verify`。
 
 ## 常用命令
