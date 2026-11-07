@@ -79,7 +79,8 @@ type Image struct {
 
 // 用户角色取值。
 const (
-	RoleAdmin = "admin"
+	RoleAdmin  = "admin"
+	RoleMember = "member"
 )
 
 // 账号来源取值。

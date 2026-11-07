@@ -149,6 +149,21 @@ func (r *Repository) ListUsers(ctx context.Context) ([]model.DockgeUser, error) 
 	return users, err
 }
 
+// DeleteUser 按用户名删除用户。users bucket 以 username 为 key，按 key 直删；
+// 不存在返回哨兵 ErrNotFound（与 GetUserByUsername 一致）。
+func (r *Repository) DeleteUser(ctx context.Context, username string) error {
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		b, err := TxBucket(tx, bucketUsers)
+		if err != nil {
+			return err
+		}
+		if b.Get([]byte(username)) == nil {
+			return ErrNotFound
+		}
+		return b.Delete([]byte(username))
+	})
+}
+
 // ==================== Setting ====================
 
 type settingPayload struct {

@@ -55,3 +55,30 @@ func TestUserRoundTrip(t *testing.T) {
 		t.Errorf("GetUser missing = %v, want ErrNotFound", err)
 	}
 }
+
+// TestUserDelete 覆盖按名删除的往返与哨兵语义。
+func TestUserDelete(t *testing.T) {
+	repo, _ := newTestUserDB(t)
+	ctx := context.Background()
+
+	extra := &model.DockgeUser{Username: "bob", Password: "x", Role: model.RoleMember, Active: true}
+	if err := repo.CreateUser(ctx, extra); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := repo.CountUsers(ctx); n != 2 {
+		t.Fatalf("CountUsers = %d, want 2", n)
+	}
+
+	if err := repo.DeleteUser(ctx, "bob"); err != nil {
+		t.Fatalf("DeleteUser(bob): %v", err)
+	}
+	if n, _ := repo.CountUsers(ctx); n != 1 {
+		t.Fatalf("CountUsers after delete = %d, want 1", n)
+	}
+	if _, err := repo.GetUserByUsername(ctx, "bob"); err != ErrNotFound {
+		t.Errorf("GetUserByUsername(bob) after delete = %v, want ErrNotFound", err)
+	}
+	if err := repo.DeleteUser(ctx, "bob"); err != ErrNotFound {
+		t.Errorf("DeleteUser missing = %v, want ErrNotFound", err)
+	}
+}
