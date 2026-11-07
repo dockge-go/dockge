@@ -1,3 +1,4 @@
+import { LogReplay, type LogRecord } from './lib/log-replay';
 /* 资源与界面状态；资源操作以服务端响应为准。 */
 import { createSignal, createEffect, createMemo, createRoot } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
@@ -6,7 +7,7 @@ import { defaultCompose, Container, Image, Volume, Network, Stack } from './lib/
 import { ctrName, statusKind, formatBytes, timeAgo } from './lib/format';
 import { AuthAPI, Session, passwordProblem } from './lib/auth';
 import { yamlProblem, parseServices } from './lib/yaml';
-import { api, stream, socketURL } from './lib/api';
+import { api, stream, events, terminalPath } from './lib/api';
 import { LogBuffer } from './lib/log-buffer';
 import { mergeStackRefresh } from './lib/stack-refresh';
 import type { HostSystem } from './lib/system';
@@ -136,7 +137,7 @@ export const recentContainers = createMemo(() => app.containers.slice(0, 5));
 export const selectedStackObj = createMemo<Stack | null>(() => app.stacks.find(s => s.id === app.selectedStack) || null);
 export const stackDirty = createMemo(() => {
   const s = selectedStackObj();
-  return !!(s && s.compose !== s.savedCompose);
+  return !!(s && (s.compose !== s.savedCompose || s.env !== s.savedEnv));
 });
 export const stackServiceNames = createMemo(() => {
   const s = selectedStackObj();
@@ -375,14 +376,14 @@ export function sheetTitle(): string {
 }
 interface HistoryLayer { id: string; cmd: string; size: string }
 export const [imageHistoryLayers, setImageHistoryLayers] = createSignal<HistoryLayer[]>([]);
-let logSocket: WebSocket | null = null;
+let logController: AbortController | null = null;
 let resetLogBuffer = () => {};
 let logGeneration = 0, logSeq = 0;
 export function openLog(kind: string, param: string) {
   stopLog(); setPausedLog([]);
   setApp('logView', { kind, param, lines: [], filter: '', follow: true, paused: false, timer: 0, connection: 'connecting' });
   const generation = logGeneration;
-  const buffer = new LogBuffer(); resetLogBuffer = () => buffer.clear();
+  const buffer = new LogBuffer(), replay = new LogReplay(); resetLogBuffer = () => buffer.clear();
   const append = (text: string) => {
     const rows = buffer.push(text);
     setApp('logView', 'lines', rows.map(raw => ({ id: String(++logSeq), raw })));
@@ -393,25 +394,27 @@ export function openLog(kind: string, param: string) {
     let name = param, type = 'container-logs'; const extra: Record<string,string> = {};
     if (kind === 'stackLogs') { name = app.stacks.find(s => s.id === param)?.name || param; type = 'compose-logs'; }
     if (kind === 'serviceLogs') { const p = param.split('||'); name = p[0]; extra.service = p[1]; type = 'compose-logs'; }
-    try {
-      const ws = new WebSocket(socketURL(name, type, extra)); logSocket = ws; ws.binaryType = 'arraybuffer'; const decoder = new TextDecoder();
-      ws.onopen = () => { if (generation === logGeneration) setApp('logView', 'connection', 'live'); };
-      ws.onmessage = e => { if (generation === logGeneration) append(e.data instanceof ArrayBuffer ? decoder.decode(e.data, {stream:true}) : String(e.data)); };
-      ws.onerror = () => { if (generation === logGeneration) setApp('logView', 'connection', 'ended'); };
-      ws.onclose = () => {
-        if (generation !== logGeneration) return;
-        append(decoder.decode());
-        buffer.push('\n');
-        setApp('logView', 'connection', 'ended');
-        setApp('logView', 'timer', window.setTimeout(connect, 3000));
-      };
-    } catch (e) { toast((e as Error).message, 'error'); setApp('logView', 'connection', 'ended'); }
+    const controller = new AbortController(); logController = controller;
+    const since = replay.begin();
+    if (since) { extra.since = since; extra.tail = 'all'; }
+    void events(terminalPath(name, type, extra), ({event, data}) => {
+      if (generation !== logGeneration) return;
+      if (event === 'ready') setApp('logView', 'connection', 'live');
+      if (event === 'log') append(replay.push(data as LogRecord));
+      if (event === 'error') throw new Error(String(data));
+    }, controller.signal).catch(e => {
+      if (generation === logGeneration && !controller.signal.aborted) append('\n' + (e as Error).message + '\n');
+    }).finally(() => {
+      if (generation !== logGeneration) return;
+      setApp('logView', 'connection', 'ended');
+      setApp('logView', 'timer', window.setTimeout(connect, 3000));
+    });
   };
   connect();
 }
 export function stopLog() {
   ++logGeneration; clearTimeout(app.logView.timer);
-  if (logSocket) { logSocket.close(); logSocket = null; }
+  logController?.abort(); logController = null;
   setApp('logView', 'connection', 'ended');
 }
 export const logFiltered = createMemo(() => {
@@ -518,9 +521,9 @@ export async function saveStack(id: string) {
   const submitted = s.compose, env = s.env;
   setApp('stacks', s => s.id === id, 'busy', true);
   const token = AuthAPI.token();
-  try { await saveDraft(id, submitted, env); if (token === AuthAPI.token()) { setApp('stacks', s => s.id === id, 'savedCompose', submitted); toast(t('stack.saved'), 'success'); } }
+  try { await saveDraft(id, submitted, env); if (token === AuthAPI.token()) { setApp('stacks', s => s.id === id, {savedCompose:submitted, savedEnv:env}); toast(t('stack.saved'), 'success'); } }
   catch(e) { if (token === AuthAPI.token()) toast((e as Error).message, 'error'); }
-  finally { if (token === AuthAPI.token()) setApp('stacks', s => s.id === id, 'busy', false); }
+  finally { if (token === AuthAPI.token()) { setApp('stacks', s => s.id === id, 'busy', false); await freshData(); } }
 }
 const streams = new Set<AbortController>();
 async function runStack(id: string, op: string, save: boolean) {
@@ -531,13 +534,13 @@ async function runStack(id: string, op: string, save: boolean) {
   setApp('stacks', s => s.id === id, {busy:true, deployLog:[]});
   let output = '';
   try {
-    if (save) { await saveDraft(id, submitted, env); if (token === AuthAPI.token()) setApp('stacks', s => s.id === id, 'savedCompose', submitted); }
+    if (save) { await saveDraft(id, submitted, env); if (token === AuthAPI.token()) setApp('stacks', s => s.id === id, {savedCompose:submitted, savedEnv:env}); }
     await stream('/stacks/' + encodeURIComponent(id) + '/' + op, text => {
       if (token !== AuthAPI.token()) return;
       output += text; setApp('stacks', s => s.id === id, 'deployLog', output.split('\n'));
       requestAnimationFrame(() => { const el = document.getElementById('wb-terminal'); if (el) el.scrollTop = el.scrollHeight; });
     }, undefined, controller.signal);
-    if (token === AuthAPI.token()) { if (save) setApp('stacks', s => s.id === id, 'composeDeployed', submitted); toast(t('toast.deployDone'), 'success'); }
+    if (token === AuthAPI.token()) { toast(t('toast.deployDone'), 'success'); }
   } catch(e) { if (token === AuthAPI.token()) toast((e as Error).message, 'error'); }
   finally { streams.delete(controller); if (token === AuthAPI.token()) { setApp('stacks', s => s.id === id, 'busy', false); await freshData(); } }
 }
@@ -575,64 +578,71 @@ export function sysdfPrune(key: string) {
 
 interface DiskRow {key:string; used:string; reclaim:string; count:number; reclaimBytes:number; reclaimKnown:boolean}
 interface Snapshot { containers:Container[]; images:Image[]; volumes:Volume[]; networks:Network[]; info:Record<string,string>; disk:DiskRow[]; errors:Record<string,string>; runtime:string }
-interface StackDTO {name:string; status:number; managed:boolean; configFiles?:string; yaml?:string; env?:string; runtimeError?:string}
+interface StackDTO {name:string; status:number; managed:boolean; configFiles?:string; yaml?:string; env?:string; runtimeError?:string; loadError?:string}
+interface LiveSnapshot { resources:Snapshot; stacks:StackDTO[]; health:{version:string; runtime:{cli:string; compose:string; ready:boolean; error?:string; stacks:{path:string; writable:boolean; error?:string}}} }
 let refreshGeneration = 0;
 let refreshPromise: Promise<void> | null = null;
-async function freshData() {
- const token = AuthAPI.token();
- if (refreshPromise) await refreshPromise;
- if (token === AuthAPI.token()) await refreshData();
+let liveController: AbortController | null = null;
+let liveTimer = 0;
+let settleRefresh: (() => void) | null = null;
+async function freshData() { stopLiveData(); await refreshData(); }
+function stopLiveData() {
+  ++refreshGeneration; clearTimeout(liveTimer); liveController?.abort(); liveController = null;
+  settleRefresh?.(); settleRefresh = null; refreshPromise = null;
 }
+function applySnapshot(snapshot: LiveSnapshot) {
+  const r = snapshot.resources, errors = {...r.errors}, h = snapshot.health;
+  setApp({containers:r.containers || [], images:r.images || [], volumes:r.volumes || [], networks:r.networks || [], info:r.info, disk:r.disk, runtime:r.runtime});
+  setApp('version', h.version);
+  setApp('deployment', h.runtime.cli + ' / ' + h.runtime.compose + ' · ' + h.runtime.stacks.path);
+  if (!h.runtime.ready) errors.runtime = h.runtime.error || t('data.unknown');
+  if (!h.runtime.stacks.writable) errors.stacksDirectory = h.runtime.stacks.error || t('data.unknown');
+  if (!errors.stacks) {
+    const rows = snapshot.stacks.map(d => {
+      const current = app.stacks.find(s => s.id === d.name);
+      const incoming: Stack = {id:d.name, name:d.name, compose_path:d.configFiles || '', status:stackStatus(d.status), compose:d.yaml || '', savedCompose:d.yaml || '', env:d.env || '', savedEnv:d.env || '', managed:d.managed, deployLog:[], busy:false, loadError:d.loadError || '', runtimeError:d.runtimeError || ''};
+      return mergeStackRefresh(incoming,current);
+    });
+    setApp('stacks',rows);
+    if (!rows.some(s => s.id === app.selectedStack)) setApp('selectedStack',rows[0]?.id || null);
+  }
+  setApp('errors',errors); setApp('refreshedAt',Date.now()); setApp('loading',false);
+}
+// 手动刷新与操作完成都重连同一个 SSE；不并行保留 HTTP 轮询。
 export function refreshData(): Promise<void> {
-  if (!user()) return Promise.resolve();
+  if (!user() || document.visibilityState === 'hidden') return Promise.resolve();
   if (refreshPromise) return refreshPromise;
-  const token = AuthAPI.token(), generation = refreshGeneration;
-  refreshPromise = (async () => {
-    try {
-      const [resources, list, health] = await Promise.allSettled([
-        api<Snapshot>('/resources'), api<{list:StackDTO[]}>('/stacks'), api<{version:string; runtime:{cli:string; compose:string; ready:boolean; error?:string; stacks:{path:string; writable:boolean; error?:string}}}>('/health')
-      ]);
-      if (generation !== refreshGeneration || token !== AuthAPI.token()) return;
-      const errors: Record<string,string> = {};
-      if (resources.status === 'fulfilled') {
-        const r = resources.value;
-        setApp({containers:r.containers || [], images:r.images || [], volumes:r.volumes || [], networks:r.networks || [], info:r.info, disk:r.disk, runtime:r.runtime});
-        Object.assign(errors, r.errors);
-      } else { errors.resources = String(resources.reason); setApp({containers:[], images:[], volumes:[], networks:[], info:{}, disk:[]}); }
-      if (health.status === 'fulfilled') { const h = health.value; setApp('version', h.version); setApp('deployment', h.runtime.cli + ' / ' + h.runtime.compose + ' · ' + h.runtime.stacks.path); if (!h.runtime.ready) errors.runtime = h.runtime.error || t('data.unknown'); if (!h.runtime.stacks.writable) errors.stacksDirectory = h.runtime.stacks.error || t('data.unknown'); }
-      else errors.health = String(health.reason);
-      if (list.status === 'fulfilled') {
-        const before = app.stacks.map(s => ({...s}));
-        const rows = await Promise.all(list.value.list.map(async dto => {
-          const old = before.find(s => s.id === dto.name);
-          // 编辑中的草稿和执行中的输出不被轮询覆盖；只刷新状态。
-          if (old && (old.busy || old.compose !== old.savedCompose)) return {...old, status: stackStatus(dto.status), runtimeError: dto.runtimeError || ''};
-          try {
-            const d = await api<StackDTO>('/stacks/' + encodeURIComponent(dto.name));
-            return {id:d.name, name:d.name, compose_path:d.configFiles || '', status:stackStatus(d.status), created:0, compose:d.yaml || '', savedCompose:d.yaml || '', composeDeployed:old?.composeDeployed || null, env:d.env || '', managed:d.managed, deployLog:old?.deployLog || [], busy:false, loadError:'', runtimeError:d.runtimeError || ''} satisfies Stack;
-          } catch(e) {
-            return {id:dto.name, name:dto.name, compose_path:dto.configFiles || '', status:'unknown' as const, created:0, compose:old?.compose || '', savedCompose:old?.savedCompose || '', composeDeployed:null, env:old?.env || '', managed:dto.managed, deployLog:old?.deployLog || [], busy:false, loadError:(e as Error).message};
-          }
-        }));
-        if (generation !== refreshGeneration || token !== AuthAPI.token()) return;
-        setApp('stacks', rows.map(row => mergeStackRefresh(row, app.stacks.find(s => s.id === row.id), before.find(s => s.id === row.id))));
-        if (!rows.some(s => s.id === app.selectedStack)) setApp('selectedStack', rows[0]?.id || null);
-      } else errors.stacks = String(list.reason);
-      setApp('errors', errors); setApp('refreshedAt', Date.now());
-    } catch(e) { if (generation === refreshGeneration) setApp('errors', {request:(e as Error).message}); }
-    finally { if (generation === refreshGeneration) { setApp('loading', false); refreshPromise = null; } }
-  })();
-  return refreshPromise;
+  stopLiveData();
+  const token = AuthAPI.token(), generation = refreshGeneration, controller = new AbortController();
+  liveController = controller;
+  refreshPromise = new Promise<void>(resolve => { settleRefresh = resolve; });
+  const initial = refreshPromise;
+  const settle = () => { settleRefresh?.(); settleRefresh = null; refreshPromise = null; };
+  void events('/events',({event,data}) => {
+    if (generation !== refreshGeneration || token !== AuthAPI.token()) return;
+    if (event === 'snapshot') { applySnapshot(data as LiveSnapshot); settle(); }
+    if (event === 'system') setApp({system:data as HostSystem,systemReceivedAt:Date.now(),systemError:''});
+    if (event === 'error') throw new Error(String(data));
+  },controller.signal).catch(e => {
+    if (generation === refreshGeneration && !controller.signal.aborted) setApp({errors:{request:(e as Error).message},loading:false,system:null,systemError:(e as Error).message});
+  }).finally(() => {
+    if (generation !== refreshGeneration) return;
+    // 正常 EOF 也表示订阅已失联，不能继续展示为有效实时快照。
+    setApp('errors','request',app.errors.request || t('data.reconnecting'));
+    setApp({system:null,systemReceivedAt:0,loading:false}); settle(); liveController = null;
+    liveTimer = window.setTimeout(() => { if (user()) void refreshData(); },3000);
+  });
+  return initial;
 }
 function stackStatus(n: number): Stack['status'] { return n === 3 ? 'up' : n === 0 ? 'unknown' : 'down'; }
 function endDataSession() {
-  ++refreshGeneration; refreshPromise = null;
+  stopLiveData();
   streams.forEach(c => c.abort()); streams.clear();
   setApp({system:null, systemReceivedAt:0, systemError:'', containers:[], images:[], volumes:[], networks:[], stacks:[], info:{}, disk:[], errors:{}, selectedStack:null, detailId:null, loading:true, actionBusy:false, version:'', deployment:'', refreshedAt:0, form:{}, pwForm:{current:'',next:'',confirm:'',error:'',busy:false}});
   setImageHistoryLayers([]);
 }
 void bootstrapAuth().then(() => { if (user()) void refreshData(); });
-setInterval(() => { if (user() && document.visibilityState === 'visible') void refreshData(); }, 10000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopLiveData(); else if (user()) void refreshData(); });
 window.addEventListener('storage', e => {
  if (e.key !== 'crate_token') return;
  closeSheet(); dialogCancel(); endDataSession(); setToasts([]);

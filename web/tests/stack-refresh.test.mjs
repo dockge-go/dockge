@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeStackRefresh } from '../src/lib/stack-refresh.ts';
-const base = {id:'test',name:'test',compose:'saved',savedCompose:'saved',env:'A=1',status:'down',busy:false,deployLog:['real output'],composeDeployed:'deployed',managed:true,loadError:''};
+const base = {id:'test',name:'test',compose:'saved',savedCompose:'saved',env:'A=1',savedEnv:'A=1',status:'down',busy:false,deployLog:['real output'],managed:true,loadError:''};
 test('刷新完成时保留请求期间编辑的草稿', () => {
  const current = {...base,compose:'unsaved'};
  const result = mergeStackRefresh({...base,status:'up'},current,base);
@@ -29,4 +29,10 @@ test('运行状态查询失败保留错误明细，不变成文件读取失败',
  assert.equal(result.runtimeError,'unsupported_field is not allowed');
  assert.equal(result.status,'unknown');
  assert.equal(mergeStackRefresh({...base,runtimeError:''},result,result).runtimeError,'');
+});
+
+test('仅 .env 未保存修改也必须保留，保存基线不会被推送覆盖', () => {
+ const current = {...base,env:'A=changed'};
+ const result = mergeStackRefresh({...base,env:'A=server',savedEnv:'A=server'},current);
+ assert.equal(result.env,'A=changed'); assert.equal(result.savedEnv,'A=1');
 });

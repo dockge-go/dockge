@@ -45,6 +45,8 @@ type HTTPServer struct {
 	ComposerizeHandler *handler.ComposerizeHandler `do:""`
 	TerminalHandler    *handler.TerminalHandler    `do:""`
 
+	EventsHandler *handler.EventsHandler `do:""`
+
 	engine  *gin.Engine
 	tlsCert string // ssl_cert, 空表示 HTTP
 	tlsKey  string // ssl_key, 空表示 HTTP
@@ -125,6 +127,7 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 			strictAuthRouter.GET("/me/disableauth", s.AuthHandler.GetDisableAuth)
 			strictAuthRouter.POST("/me/disableauth", s.AuthHandler.ToggleDisableAuth)
 
+			strictAuthRouter.GET("/events", s.EventsHandler.Events)
 			strictAuthRouter.GET("/resources", s.ResourceHandler.Snapshot)
 			strictAuthRouter.GET("/system", s.ResourceHandler.System)
 			strictAuthRouter.POST("/resources/:kind", s.ResourceHandler.Create)
@@ -152,7 +155,8 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 
 			strictAuthRouter.POST("/composerize", s.ComposerizeHandler.Convert)
 
-			strictAuthRouter.GET("/terminal/:name/:type", s.TerminalHandler.WebSocket)
+			strictAuthRouter.GET("/terminal/:name/:type", s.TerminalHandler.Events)
+			strictAuthRouter.POST("/terminal/sessions/:id", s.TerminalHandler.Input)
 		}
 	}
 
@@ -161,7 +165,7 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 		Addr:    fmt.Sprintf("%s:%d", s.Config.GetString("http.host"), s.Config.GetInt("http.port")),
 		Handler: engine,
 		// 防御慢速连接与空闲连接堆积；不设 Read/Write 超时——
-		// 栈操作是长时流式响应、终端是 WebSocket，均需长连接。
+		// 栈操作是长时流式响应、终端是 SSE，均需长连接。
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

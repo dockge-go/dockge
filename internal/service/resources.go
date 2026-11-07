@@ -4,6 +4,7 @@ import (
 	"context"
 	v1 "dockge/api/v1"
 	"dockge/internal/repository"
+	"errors"
 	"fmt"
 	"github.com/samber/do/v2"
 	"strconv"
@@ -43,10 +44,13 @@ func (s *ResourceService) Snapshot(ctx context.Context) *v1.ResourceSnapshot {
 	if err = s.repo.ResourceVolumeUsage(ctx, q.Volumes); err != nil {
 		q.Errors["volumeUsage"] = err.Error()
 	}
-	q.Networks, err = s.repo.ResourceNetworks(ctx)
+	q.Networks, err = s.repo.ResourceNetworks(ctx, q.Containers)
 	if err != nil {
 		q.Errors["networks"] = err.Error()
 		q.Networks = []v1.ResourceNetwork{}
+	}
+	if q.Errors["containers"] != "" {
+		q.Errors["networks"] = "无法核对网络引用：" + q.Errors["containers"]
 	}
 	if err = s.repo.ResourceStatistics(ctx, q.Containers); err != nil {
 		q.Errors["stats"] = err.Error()
@@ -99,7 +103,11 @@ func (s *ResourceService) Create(ctx context.Context, kind string, q v1.Resource
 	if q.Driver != "" && !repository.ContainerIDPattern.MatchString(q.Driver) {
 		return "", fmt.Errorf("%w: 非法 driver %q", v1.ErrBadRequest, q.Driver)
 	}
-	return s.repo.ResourceCreate(ctx, kind, q)
+	out, err := s.repo.ResourceCreate(ctx, kind, q)
+	if errors.Is(err, repository.ErrConflict) {
+		return out, fmt.Errorf("%w: %s", v1.ErrConflict, err)
+	}
+	return out, err
 }
 
 // History 经标识符校验返回真实镜像层。

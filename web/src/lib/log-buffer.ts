@@ -1,4 +1,4 @@
-/* 日志按连续字节流解析，不按 WebSocket 帧切行；保留未换行末行，控制码不泄漏。 */
+/* 日志按连续字节流解析，不按 SSE 帧切行；保留未换行末行，控制码不泄漏。 */
 export class LogBuffer {
   private rows: string[] = [];
   private line = '';

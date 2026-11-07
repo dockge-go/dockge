@@ -66,7 +66,7 @@ func (r Runtime) ComposeCommand(ctx context.Context, args ...string) (*exec.Cmd,
 	return r.command(ctx, r.composeBin, r.composeSub, args)
 }
 
-// command 组装可执行命令；同一命令名只解析一次路径（缓存），避免重复 PATH 查找。
+// command 组装参数数组，不经过 shell，防止命令注入。
 func (r Runtime) command(ctx context.Context, bin string, prefix, args []string) (*exec.Cmd, error) {
 	if bin == "" {
 		return nil, fmt.Errorf("容器运行时未配置")

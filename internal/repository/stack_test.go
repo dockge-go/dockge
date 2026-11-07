@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,7 @@ func TestStacksOnlyComeFromDirectory(t *testing.T) {
 	counter := filepath.Join(dir, "calls")
 	bin := filepath.Join(dir, "runtime")
 	script := "#!/bin/sh\nprintf x >> '" + counter + "'\n" +
-		"echo '[{\"Name\":\"managed\",\"Status\":\"running(1)\",\"ConfigFiles\":\"/host/stacks/managed/compose.yaml\"},{\"Name\":\"dockge\",\"Status\":\"running(1)\"},{\"Name\":\"external\",\"Status\":\"running(2)\"}]'\n"
+		"echo '[{\"Name\":\"managed\",\"Status\":\"running(1)\",\"ConfigFiles\":\"" + filepath.Join(dir, "stacks", "managed", "compose.yaml") + "\"},{\"Name\":\"dockge\",\"Status\":\"running(1)\"},{\"Name\":\"external\",\"Status\":\"running(2)\"}]'\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestStacksOnlyComeFromDirectory(t *testing.T) {
 			t.Fatalf("Get(%q): %v", name, err)
 		}
 		for _, op := range []string{"start", "stop", "restart", "down", "update"} {
-			if _, err := r.StackOp(ctx, name, op); !errors.Is(err, ErrNotFound) {
+			if err := r.StackOpStream(ctx, name, op, io.Discard); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("%s(%q): %v", op, name, err)
 			}
 		}

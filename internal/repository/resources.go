@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -100,10 +99,10 @@ func (r *Repository) ResourceContainers(ctx context.Context) ([]v1.ResourceConta
 	if err != nil {
 		return nil, err
 	}
-	hostname, _ := os.Hostname()
+	selfID := selfContainerIdentity()
 	for _, c := range rows {
 		v := v1.ResourceContainer{ID: c.ID, Names: []string{c.Name}, Image: c.Config.Image, ImageID: c.Image, State: c.State.Status, Created: c.Created.UnixMilli(), Ports: []v1.ResourcePort{}, Env: c.Config.Env, Mounts: []v1.ResourceMount{}, Networks: []string{}, NetworkIPs: map[string]string{}, Labels: c.Config.Labels, RestartPolicy: c.HostConfig.RestartPolicy.Name, RestartCount: c.RestartCount, CPUs: float64(c.HostConfig.NanoCPUs) / 1e9, MemoryMB: float64(c.HostConfig.Memory) / 1048576, Entrypoint: strings.Join(c.Config.Entrypoint, " "), Cmd: strings.Join(c.Config.Cmd, " ")}
-		v.System = len(hostname) >= 12 && strings.HasPrefix(c.ID, hostname)
+		v.System = selfID != "" && strings.HasPrefix(c.ID, selfID)
 		if c.State.Health != nil {
 			v.Health = c.State.Health.Status
 		}
@@ -233,7 +232,7 @@ func (r *Repository) ResourceVolumes(ctx context.Context, containers []v1.Resour
 }
 
 // ResourceNetworks 读取真实子网与端点，并保护运行时内置网络。
-func (r *Repository) ResourceNetworks(ctx context.Context) ([]v1.ResourceNetwork, error) {
+func (r *Repository) ResourceNetworks(ctx context.Context, containers []v1.ResourceContainer) ([]v1.ResourceNetwork, error) {
 	out, err := r.runDocker(ctx, composeOpTimeout, "network", "ls", "-q")
 	if err != nil {
 		return nil, err
@@ -273,6 +272,22 @@ func (r *Repository) ResourceNetworks(ctx context.Context) ([]v1.ResourceNetwork
 		for id, c := range x.Containers {
 			v.Containers = append(v.Containers, v1.ResourceEndpoint{ID: id, Name: c.Name, IP: strings.TrimSpace(c.IPv4Address + " " + c.IPv6Address)})
 		}
+		for _, c := range containers {
+			for _, name := range c.Networks {
+				if name != v.Name {
+					continue
+				}
+				found := false
+				for _, endpoint := range v.Containers {
+					found = found || endpoint.ID == c.ID
+				}
+				if !found {
+					v.Containers = append(v.Containers, v1.ResourceEndpoint{ID: c.ID, Name: strings.TrimPrefix(c.Names[0], "/"), IP: c.NetworkIPs[name]})
+				}
+				v.System = v.System || c.System
+			}
+		}
+		sort.Slice(v.Containers, func(i, j int) bool { return v.Containers[i].ID < v.Containers[j].ID })
 		result = append(result, v)
 	}
 	return result, nil
@@ -469,7 +484,13 @@ func (r *Repository) ResourceAction(ctx context.Context, kind, id, op, value str
 			return "", fmt.Errorf("容器 %q 不存在，请刷新列表", id)
 		}
 		switch op {
-		case "start", "stop", "restart":
+		case "start":
+			// 暂停中的进程已经启动，恢复执行不能调用运行时的 start。
+			if paused {
+				return r.runDocker(ctx, composeOpTimeout, "unpause", id)
+			}
+			return r.runDocker(ctx, composeOpTimeout, op, id)
+		case "stop", "restart":
 			return r.runDocker(ctx, composeOpTimeout, op, id)
 		case "delete":
 			if paused {
@@ -550,16 +571,50 @@ func (r *Repository) ResourceAction(ctx context.Context, kind, id, op, value str
 		case "tag":
 			return r.runDocker(ctx, composeOpTimeout, "image", "tag", id, value)
 		}
-	case "volumes":
+	case "volumes", "networks":
 		if op == "delete" {
-			return r.runDocker(ctx, composeOpTimeout, "volume", "rm", id)
-		}
-	case "networks":
-		if _, built := builtinNetworks[id]; built {
-			return "", fmt.Errorf("不能删除内置网络 %q", id)
-		}
-		if op == "delete" {
-			return r.runDocker(ctx, composeOpTimeout, "network", "rm", id)
+			cs, err := r.ResourceContainers(ctx)
+			if err != nil {
+				return "", fmt.Errorf("无法核对 %s 引用，删除未执行: %w", kind, err)
+			}
+			found := false
+			if kind == "volumes" {
+				volumes, err := r.ResourceVolumes(ctx, cs)
+				if err != nil {
+					return "", err
+				}
+				for _, v := range volumes {
+					if v.Name != id {
+						continue
+					}
+					found = true
+					if v.System || len(v.UsedBy) > 0 {
+						return "", fmt.Errorf("卷 %s 仍被容器引用（包括已停止容器）: %v", id, v.UsedBy)
+					}
+				}
+			} else {
+				networks, err := r.ResourceNetworks(ctx, cs)
+				if err != nil {
+					return "", err
+				}
+				for _, n := range networks {
+					if n.ID != id && n.Name != id {
+						continue
+					}
+					found = true
+					if n.System || len(n.Containers) > 0 {
+						return "", fmt.Errorf("网络 %s 为系统网络或仍被容器引用（包括已停止容器）: %v", n.Name, n.Containers)
+					}
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("%s %q 不存在，请刷新列表", kind, id)
+			}
+			command := "volume"
+			if kind == "networks" {
+				command = "network"
+			}
+			return r.runDocker(ctx, composeOpTimeout, command, "rm", id)
 		}
 	}
 	return "", fmt.Errorf("不支持资源操作 %s/%s/%s", kind, id, op)
@@ -569,6 +624,15 @@ func (r *Repository) ResourceAction(ctx context.Context, kind, id, op, value str
 func (r *Repository) ResourceCreate(ctx context.Context, kind string, q v1.ResourceCreateRequest) (string, error) {
 	switch kind {
 	case "volumes":
+		volumes, err := r.ResourceVolumes(ctx, nil)
+		if err != nil {
+			return "", fmt.Errorf("无法核对卷重名，创建未执行: %w", err)
+		}
+		for _, volume := range volumes {
+			if volume.Name == q.Name {
+				return "", fmt.Errorf("%w: 卷 %q 已存在，未新建或修改", ErrConflict, q.Name)
+			}
+		}
 		return r.runDocker(ctx, composeOpTimeout, "volume", "create", q.Name)
 	case "networks":
 		driver := q.Driver

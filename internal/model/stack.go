@@ -57,23 +57,6 @@ type Container struct {
 	State   string
 	Status  string
 	Ports   []PortMapping
-	Stack   string // 所属 compose 项目（来自容器 label，可空）
-}
-
-// Network 是本机一个 docker/podman 网络视图。
-type Network struct {
-	Name   string
-	Driver string
-}
-
-// Image 是本地镜像列表的一行（docker images）；Size/CreatedSince 为 docker 的展示串。
-type Image struct {
-	ID           string
-	Repository   string
-	Tag          string
-	Size         string
-	CreatedSince string
-	InUse        bool // 有容器（含已停止）引用
 }
 
 // ---- 账号 ----

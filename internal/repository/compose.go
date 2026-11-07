@@ -124,6 +124,9 @@ func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Containe
 	if err != nil {
 		return nil, err
 	}
+	if err := r.checkStackOwnership(ctx, name); err != nil {
+		return nil, err
+	}
 	out, err := r.runComposeIn(ctx, stackDir, composeOpTimeout,
 		composeArgs(name, files, "ps", "--all", "--format", "json")...)
 	if err != nil {
@@ -177,39 +180,6 @@ func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Containe
 	return containers, nil
 }
 
-// StackOp 执行栈生命周期操作，返回 compose 命令的组合输出供前端展示。
-// op 取值：start（up -d）/ stop / restart / down / update（pull + up -d）。
-func (r *Repository) StackOp(ctx context.Context, name, op string) (string, error) {
-	stackDir, files, err := r.resolveStackExec(ctx, name)
-	if err != nil {
-		return "", fmt.Errorf("栈 %q 无法执行 %s: %w", name, op, err)
-	}
-	runCompose := func(timeout time.Duration, args ...string) (string, error) {
-		return r.runComposeIn(ctx, stackDir, timeout, composeArgs(name, files, args...)...)
-	}
-	// up -d 在镜像缺失时内联拉取，与 pull 同用放宽的超时
-	upTimeout := composeUpdateTimeout
-	switch op {
-	case "start":
-		return runCompose(upTimeout, "up", "-d", "--remove-orphans")
-	case "stop":
-		return runCompose(composeOpTimeout, "stop")
-	case "restart":
-		return runCompose(composeOpTimeout, "restart")
-	case "down":
-		return runCompose(composeOpTimeout, "down", "--remove-orphans")
-	case "update":
-		pullOut, err := runCompose(composeUpdateTimeout, "pull")
-		if err != nil {
-			return pullOut, fmt.Errorf("stack pull: %w", err)
-		}
-		upOut, err := runCompose(composeOpTimeout, "up", "-d", "--remove-orphans")
-		return pullOut + upOut, err
-	default:
-		return "", fmt.Errorf("unknown stack op: %s", op)
-	}
-}
-
 // ServiceOp 对栈内单个服务执行 compose 操作（up/stop/restart <service>），
 // 与上游 dockge 的服务级操作对齐。服务名作 CLI 参数，须校验防 flag 注入。
 func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (string, error) {
@@ -219,6 +189,9 @@ func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (s
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
 		return "", fmt.Errorf("栈 %q 无法执行 %s: %w", name, op, err)
+	}
+	if err := r.checkStackOwnership(ctx, name); err != nil {
+		return "", err
 	}
 	var args []string
 	switch op {
@@ -239,6 +212,9 @@ func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (s
 func (r *Repository) StackStats(ctx context.Context, name string) ([]model.ContainerStat, error) {
 	dir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.checkStackOwnership(ctx, name); err != nil {
 		return nil, err
 	}
 	idsOut, err := r.runComposeIn(ctx, dir, composeOpTimeout, composeArgs(name, files, "ps", "--all", "-q")...)
@@ -289,7 +265,7 @@ func (r *Repository) DockerNetworkNames(ctx context.Context) ([]string, error) {
 }
 
 // stackOpPhases 把栈操作映射为依次执行的 compose 参数序列（不含 "compose"
-// 子命令本身），供 StackOpStream 流式执行；与 StackOp 的语义保持一致。
+// 子命令本身），供 StackOpStream 流式执行；作为唯一生命周期实现。
 func stackOpPhases(name string, files []string, op string) ([][]string, error) {
 	switch op {
 	case "start":
@@ -311,11 +287,14 @@ func stackOpPhases(name string, files []string, op string) ([][]string, error) {
 }
 
 // StackOpStream 以流式执行栈生命周期操作：输出逐行写入 w（调用方负责 flush
-// 语义），供前端进度终端实时呈现。op 语义与 StackOp 一致。
+// 语义），供前端进度终端实时呈现。与服务端操作白名单一致。
 func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Writer) error {
 	stackDir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
 		return fmt.Errorf("栈 %q 无法执行 %s: %w", name, op, err)
+	}
+	if err := r.checkStackOwnership(ctx, name); err != nil {
+		return err
 	}
 	phases, err := stackOpPhases(name, files, op)
 	if err != nil {
@@ -339,7 +318,7 @@ func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Wr
 		if err != nil {
 			return err
 		}
-		for line := range ch {
+		for line := range ch.lines {
 			if err := filter.line(strings.TrimSuffix(line, "\n")); err != nil {
 				return err
 			}
@@ -347,11 +326,12 @@ func (r *Repository) StackOpStream(ctx context.Context, name, op string, w io.Wr
 		if err := filter.flush(); err != nil {
 			return err
 		}
-		if code := cmd.ProcessState.ExitCode(); code != 0 {
+		if ch.err != nil {
+			code := cmd.ProcessState.ExitCode()
 			if ctx.Err() == context.DeadlineExceeded {
 				return fmt.Errorf("compose %s 超时（%s）", op, timeout)
 			}
-			return fmt.Errorf("compose %s 失败（退出码 %d）", op, code)
+			return fmt.Errorf("compose %s 失败（退出码 %d）: %w", op, code, ch.err)
 		}
 	}
 	return nil
@@ -409,11 +389,4 @@ func (p *progressFilter) closeOpen() error {
 	_, err := fmt.Fprint(p.w, "\n")
 	p.open = ""
 	return err
-}
-
-// StackExecDir 返回栈 compose 操作的工作目录：
-// 目录外项目没有执行上下文。
-func (r *Repository) StackExecDir(ctx context.Context, name string) (string, error) {
-	dir, _, err := r.resolveStackExec(ctx, name)
-	return dir, err
 }

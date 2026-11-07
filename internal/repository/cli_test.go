@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,7 +27,7 @@ func TestStreamCmdSetsProcessState(t *testing.T) {
 				t.Fatalf("streamCmd: %v", err)
 			}
 			var lines []string
-			for line := range ch {
+			for line := range ch.lines {
 				lines = append(lines, line)
 			}
 			if cmd.ProcessState == nil {
@@ -50,7 +51,7 @@ func TestStreamCmdCancel(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		for range ch {
+		for range ch.lines {
 		}
 		close(done)
 	}()
@@ -58,5 +59,26 @@ func TestStreamCmdCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("ctx 取消后通道未关闭")
+	}
+}
+
+func TestStreamCmdOversizedOutputReportsFailure(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "head -c 1100000 /dev/zero | tr '\\000' x; printf '\\n'")
+	stream, err := streamCmd(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range stream.lines {
+	}
+	if stream.err == nil {
+		t.Fatal("超长日志被静默截断并误报成功")
+	}
+}
+
+func TestRunCmdFailurePreservesBothOutputs(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "echo created-container-id; echo start-failed >&2; exit 1")
+	out, err := runCmd(context.Background(), cmd, "", time.Second, []string{"run"})
+	if err == nil || !strings.Contains(out, "created-container-id") || !strings.Contains(err.Error(), "start-failed") {
+		t.Fatalf("out=%q err=%v", out, err)
 	}
 }

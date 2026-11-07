@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	v1 "dockge/api/v1"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,6 +68,64 @@ func TestImageDeleteMultiTagAndContainerProtection(t *testing.T) {
 			}
 			if !used && (!strings.Contains(string(commands), "image rm test:1") || !strings.Contains(string(commands), "image rm test:2")) {
 				t.Fatalf("标签清理不完整: %s", commands)
+			}
+		})
+	}
+}
+
+func TestStoppedContainerReferencesBlockNetworkAndVolumeDelete(t *testing.T) {
+	for _, kind := range []string{"networks", "volumes"} {
+		t.Run(kind, func(t *testing.T) {
+			r, root := fixtureRuntime(t)
+			putFixture(t, filepath.Join(root, "container.json"), `[{"Id":"cid","Name":"/stopped","State":{"Status":"exited"},"Mounts":[{"Type":"volume","Name":"data"}],"NetworkSettings":{"Networks":{"private":{}}}}]`)
+			putFixture(t, filepath.Join(root, "network.json"), `[{"Id":"nid","Name":"private","Containers":{}}]`)
+			putFixture(t, filepath.Join(root, "volume.json"), `[{"Name":"data"}]`)
+			id := "nid"
+			if kind == "volumes" {
+				id = "data"
+			}
+			_, err := r.ResourceAction(context.Background(), kind, id, "delete", "")
+			if err == nil || !strings.Contains(err.Error(), "停止") {
+				t.Fatalf("err=%v", err)
+			}
+			commands, _ := os.ReadFile(filepath.Join(root, "commands"))
+			if strings.Contains(string(commands), "network rm") || strings.Contains(string(commands), "volume rm") {
+				t.Fatalf("删除了占用资源: %s", commands)
+			}
+		})
+	}
+}
+
+func TestBuiltinNetworkByIDAndDuplicateVolume(t *testing.T) {
+	r, root := fixtureRuntime(t)
+	putFixture(t, filepath.Join(root, "network.json"), `[{"Id":"nid","Name":"bridge"}]`)
+	if _, err := r.ResourceAction(context.Background(), "networks", "nid", "delete", ""); err == nil {
+		t.Fatal("通过 ID 绕过了系统网络保护")
+	}
+	putFixture(t, filepath.Join(root, "volume.json"), `[{"Name":"existing"}]`)
+	if _, err := r.ResourceCreate(context.Background(), "volumes", v1.ResourceCreateRequest{Name: "existing"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("重复新增: %v", err)
+	}
+}
+
+func TestStartPausedContainerUsesUnpause(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "暂停进程恢复执行", true: "恢复失败透出运行时原因"}[failed], func(t *testing.T) {
+			r, root := fixtureRuntime(t)
+			putFixture(t, filepath.Join(root, "container.json"), `[{"Id":"cid","Name":"/paused","State":{"Status":"paused"}}]`)
+			if failed {
+				putFixture(t, filepath.Join(root, "fail-unpause"), "")
+			}
+			_, err := r.ResourceAction(context.Background(), "containers", "cid", "start", "")
+			if (err != nil) != failed || failed && !strings.Contains(err.Error(), "unpause denied") {
+				t.Fatalf("恢复暂停容器结果不正确: %v", err)
+			}
+			commands, err := os.ReadFile(filepath.Join(root, "commands"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(commands), "unpause cid\n") || strings.Contains(string(commands), "start cid\n") {
+				t.Fatalf("暂停容器应恢复而非重复启动: %s", commands)
 			}
 		})
 	}

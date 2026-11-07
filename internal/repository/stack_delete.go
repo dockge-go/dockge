@@ -75,6 +75,9 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 	if _, _, err := r.resolveStackExec(ctx, name); err != nil {
 		return nil, err
 	}
+	if err := r.checkStackOwnership(ctx, name); err != nil {
+		return nil, err
+	}
 	plan := &v1.StackDeletePlan{Containers: []string{}, Volumes: []string{}, Networks: []string{}, Images: []string{}, Retained: []string{}, Blockers: []string{}, Directory: r.StackPath(name)}
 	if info, err := os.Lstat(plan.Directory); err != nil {
 		return nil, fmt.Errorf("不能完整删除栈 %q：托管目录 %s 无法读取: %w", name, plan.Directory, err)
@@ -93,7 +96,7 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 	if err != nil {
 		return nil, err
 	}
-	ns, err := r.ResourceNetworks(ctx)
+	ns, err := r.ResourceNetworks(ctx, cs)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +129,7 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 			candidateImage[cleanupImageRef(svc.Image)] = true
 		}
 		for _, m := range svc.Volumes {
-			if m.Type == "bind" && outsideDir(plan.Directory, m.Source) {
+			if m.Type == "bind" && !r.stackSourceInside(name, m.Source) {
 				plan.Retained = append(plan.Retained, "栈外宿主挂载 "+m.Source+" → "+m.Target)
 			}
 		}
@@ -134,6 +137,9 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 	for _, c := range cs {
 		if projectOf(c.Labels) != name {
 			continue
+		}
+		if configFiles := c.Labels["com.docker.compose.project.config_files"]; configFiles != "" && !r.configOwned(name, configFiles) {
+			plan.Blockers = append(plan.Blockers, "同名项目容器 "+c.ID+" 配置属于目录外: "+configFiles)
 		}
 		if c.System {
 			plan.Blockers = append(plan.Blockers, "栈包含面板自身容器 "+strings.Join(c.Names, ","))
@@ -158,7 +164,7 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 					}
 				}
 			}
-			if m.Type == "bind" && outsideDir(plan.Directory, m.Source) {
+			if m.Type == "bind" && !r.stackSourceInside(name, m.Source) {
 				plan.Retained = append(plan.Retained, "栈外宿主挂载 "+m.Source+" → "+m.Dest)
 			}
 		}
@@ -196,7 +202,7 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 		}
 	}
 	for path, stack := range otherBinds {
-		if !outsideDir(plan.Directory, path) {
+		if r.stackSourceInside(name, path) {
 			plan.Blockers = append(plan.Blockers, "栈目录内挂载 "+path+" 仍被其他栈 "+stack+" 引用")
 		}
 	}
@@ -310,6 +316,13 @@ func (r *Repository) CleanStackResources(ctx context.Context, name string) (stri
 		if !planned || c.System {
 			return output, fmt.Errorf("栈 %q 清理期间出现未确认归属的容器 %s，目录保留，请重新核对删除范围", name, c.ID)
 		}
+		if c.State == "paused" {
+			if out, e := r.runDocker(ctx, composeOpTimeout, "unpause", c.ID); e != nil {
+				return output, fmt.Errorf("孤立容器 %s 恢复失败，目录保留: %w", c.ID, e)
+			} else {
+				output += "\n" + out
+			}
+		}
 		// Compose 不一定识别缺少完整元数据的孤立容器，只清理预检确认的项目成员。
 		if c.State == "running" || c.State == "restarting" || c.State == "paused" {
 			out, e := r.runDocker(ctx, composeOpTimeout, "stop", c.ID)
@@ -346,7 +359,7 @@ func (r *Repository) CleanStackResources(ctx context.Context, name string) (stri
 			}
 		}
 	}
-	ns, err := r.ResourceNetworks(ctx)
+	ns, err := r.ResourceNetworks(ctx, cs)
 	if err != nil {
 		return output, err
 	}
@@ -366,15 +379,10 @@ func (r *Repository) CleanStackResources(ctx context.Context, name string) (stri
 	for _, image := range imgs {
 		for _, id := range plan.Images {
 			if image.ID == id {
-				// 多标签镜像按标签逐个非强制删除，最后一个标签会删除镜像本体。
-				refs := image.RepoTags
-				if len(refs) == 0 {
-					refs = []string{id}
-				}
-				for _, ref := range refs {
-					if e := run("image", ref); e != nil {
-						return output, e
-					}
+				out, e := r.ResourceAction(ctx, "images", id, "delete", "")
+				output += "\n" + out
+				if e != nil {
+					return output, fmt.Errorf("栈专属镜像 %s 清理失败，目录保留: %w", id, e)
 				}
 			}
 		}
@@ -399,7 +407,7 @@ func (r *Repository) CleanStackResources(ctx context.Context, name string) (stri
 			}
 		}
 	}
-	ns, err = r.ResourceNetworks(ctx)
+	ns, err = r.ResourceNetworks(ctx, cs)
 	if err != nil {
 		return output, err
 	}

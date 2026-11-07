@@ -45,7 +45,6 @@ export function statusText(c: Container): string {
   if (c.State === 'running') return t('status.upHours', { n: c.upHours ?? '—' });
   if (c.State === 'exited') {
     const code = c.exitCode ?? '—';
-    if (c.exitHoursAgo != null) return t('status.exitedHours', { code, n: c.exitHoursAgo });
     return t('status.exitedDetail', { code, m: c.exitMinAgo ?? '—' });
   }
   return statusLabel(c);

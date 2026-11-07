@@ -1,5 +1,6 @@
 /* 所有页面只消费服务端数据；错误原文保留，流式接口识别业务失败标记。 */
 import { AuthAPI } from './auth';
+import { readSSE, type SSEEvent } from './sse';
 import { LogBuffer } from './log-buffer';
 export function authHeaders(): HeadersInit {
   const token = AuthAPI.token();
@@ -13,26 +14,20 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok || body.code !== 0) throw new Error(body.message || `HTTP ${response.status}: ${path}`);
   return body.data;
 }
-export async function stream(path: string, onOutput: (text: string) => void, body?: unknown, signal?: AbortSignal): Promise<void> {
-  const response = await fetch('/v1' + path, { method: 'POST', headers: authHeaders(), body: body === undefined ? undefined : JSON.stringify(body), signal });
-  if (!response.ok) { const text = await response.text(); let message = text; try { message = JSON.parse(text).message || text; } catch { /* 保留运行时原文 */ } throw new Error(message || `HTTP ${response.status}: ${path}`); }
-  if (!response.body) throw new Error(`响应缺少输出流: ${path}`);
-  const reader = response.body.getReader(), decoder = new TextDecoder();
-  let output = '';
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      const text = decoder.decode(value, { stream: !done });
-      output += text; if (text) onOutput(text);
-      if (done) break;
-    }
-  } finally { reader.releaseLock(); }
-  const failed = /(?:^|\n)\[error\] ([\s\S]*)/.exec(output);
-  if (failed) throw new Error(new LogBuffer().push(output).join('\n').trim() || failed[1].trim());
+export async function events(path: string, onEvent: (event: SSEEvent) => void, signal: AbortSignal, init: RequestInit = {}): Promise<void> {
+  const response = await fetch('/v1' + path, { ...init, headers: authHeaders(), signal });
+  await readSSE(response, onEvent, signal);
 }
-export function socketURL(name: string, type: string, extra: Record<string, string> = {}): string {
-  const token = AuthAPI.token();
-  if (!token) throw new Error('会话已失效，请重新登录 / Session expired');
-  const query = new URLSearchParams({ token, ...extra });
-  return `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/v1/terminal/${encodeURIComponent(name)}/${type}?${query}`;
+export async function stream(path: string, onOutput: (text: string) => void, body?: unknown, signal?: AbortSignal): Promise<void> {
+  let output = '', finished = false;
+  const controller = new AbortController();
+  await events(path, ({event, data}) => {
+    if (event === 'output') { const text = String(data); output += text; onOutput(text); }
+    if (event === 'error') throw new Error(new LogBuffer().push(output + '\n' + String(data)).join('\n').trim());
+    if (event === 'done' && data === true) finished = true;
+  }, signal || controller.signal, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!finished) throw new Error('操作输出连接已中断，未收到完成确认 / Stream ended without completion');
+}
+export function terminalPath(name: string, type: string, extra: Record<string, string> = {}): string {
+  return `/terminal/${encodeURIComponent(name)}/${type}?${new URLSearchParams(extra)}`;
 }

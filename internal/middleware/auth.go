@@ -24,15 +24,12 @@ type sessionChecker interface {
 }
 
 // StrictAuth 强制认证中间件：Authorization 头缺失或非法时直接 401。
-// WebSocket/EventSource 无法自定义请求头，额外接受 ?token= 查询参数。
+// fetch SSE 同样携带 Authorization；不接收 URL token，避免访问日志泄漏。
 // token 解析成功后逐请求校验会话（CheckSession）：账号被停用/删除或改密后，
 // 旧 token 的下一次请求立即 401。
 func StrictAuth(j *jwt.JWT, logger *log.Logger, sessions sessionChecker) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		tokenString := ctx.Request.Header.Get("Authorization")
-		if tokenString == "" {
-			tokenString = ctx.Query("token")
-		}
 		if tokenString == "" {
 			v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
 			ctx.Abort()

@@ -31,6 +31,7 @@ var Package = do.Package(
 	do.Lazy(NewSettingsHandler),
 	do.Lazy(NewComposerizeHandler),
 	do.Lazy(NewTerminalHandler),
+	do.Lazy(NewEventsHandler),
 )
 
 // GetUserIDFromCtx 从 gin 上下文取出 JWT 中间件写入的当前用户 ID。

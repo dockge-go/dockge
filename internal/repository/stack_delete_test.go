@@ -43,6 +43,7 @@ func fixtureRuntime(t *testing.T) (*Repository, string) {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$FIXTURE_ROOT/commands"
 if [ "$1" = compose ]; then
+ if [ "$2" = ls ]; then printf '[{"Name":"test","Status":"running(1)","ConfigFiles":"%s/stacks/test/compose.yaml"}]' "$FIXTURE_ROOT"; exit 0; fi
  if [ "$6" = config ]; then cat "$PWD/resolved.json"; exit 0; fi
  if [ "$6" = down ]; then
   if [ -f "$FIXTURE_ROOT/fail-down" ]; then echo 'permission denied on test resource' >&2; exit 1; fi

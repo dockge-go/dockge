@@ -27,32 +27,3 @@ export function systemInfoRows(host:HostSystem|null, info:Record<string,string>,
     ['sysinfo.runtime',runtime || null], ['sysinfo.runtimeVersion',info.ServerVersion || null]
   ];
 }
-
-interface PollOptions<T> {
-  request:(signal:AbortSignal)=>Promise<T>;
-  session:()=>string|null;
-  visible:()=>boolean;
-  success:(value:T)=>void;
-  failure:(error:Error)=>void;
-}
-// 页面可见时才轮询；同一时间仅一个请求，停止/换会话后的响应不可写回。
-export function startSystemPolling<T>(options:PollOptions<T>) {
-  let stopped=false, pending:AbortController|null=null;
-  const refresh=async () => {
-    const session=options.session();
-    if(stopped || pending || !session || !options.visible()) return;
-    const controller=new AbortController();pending=controller;
-    const timeout=setTimeout(()=>controller.abort(new Error('GET /v1/system: timeout (5000ms)')),5000);
-    const valid=()=>!stopped && session===options.session() && options.visible();
-    try { const value=await options.request(controller.signal);if(valid() && !controller.signal.aborted) options.success(value); }
-    catch(error) { if(valid()) options.failure(error instanceof Error ? error : new Error(String(error))); }
-    finally {clearTimeout(timeout);if(pending===controller) pending=null;}
-  };
-  const timer=setInterval(()=>void refresh(),2000);
-  void refresh();
-  return {
-    refresh:()=>void refresh(),
-    visibilityChanged:()=>{ if(!options.visible()) pending?.abort();else void refresh(); },
-    stop:()=>{stopped=true;clearInterval(timer);pending?.abort();}
-  };
-}

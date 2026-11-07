@@ -15,7 +15,7 @@ func localHostSource(stacksDir string) (hostSource, error) {
 	if info, err := os.Stat("/host/proc/stat"); err == nil && !info.IsDir() {
 		return hostSource{proc: "/host/proc", etc: "/host/etc", disk: stacksDir, name: "host-mount"}, nil
 	}
-	container := os.Getenv("KUBERNETES_SERVICE_HOST") != "" || os.Getenv("container") != ""
+	container := os.Getenv("container") != ""
 	for _, p := range []string{"/.dockerenv", "/run/.containerenv", "/run/systemd/container"} {
 		if _, err := os.Stat(p); err == nil {
 			container = true

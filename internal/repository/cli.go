@@ -48,7 +48,10 @@ func (r *Repository) runComposeIn(ctx context.Context, dir string, timeout time.
 func runCmd(ctx context.Context, cmd *exec.Cmd, dir string, timeout time.Duration, args []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	old := cmd
 	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	cmd.Env, cmd.Dir = old.Env, old.Dir
+	ConfigureStreamingCommand(cmd, false)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -58,18 +61,15 @@ func runCmd(ctx context.Context, cmd *exec.Cmd, dir string, timeout time.Duratio
 
 	err := cmd.Run()
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
+		msg := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
 		name := filepath.Base(cmd.Path)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return msg, fmt.Errorf("%s %s: 超时（%s）", name, strings.Join(args, " "), timeout)
+			return msg, fmt.Errorf("%s %s: 超时（%s）：%s", name, strings.Join(args, " "), timeout, msg)
 		}
 		if msg != "" {
-			return msg, fmt.Errorf("%s %s: %s", name, args[0], msg)
+			return msg, fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
 		}
-		return msg, fmt.Errorf("%s %s: %w", name, args[0], err)
+		return msg, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
 	return stdout.String(), nil
 }
@@ -85,7 +85,12 @@ func shortID(id string) string {
 // streamCmd 启动命令并逐行转发 stdout/stderr 到通道。
 // 两个流并发读取：docker logs -f 的 stdout 永不 EOF，
 // 若串行合并（MultiReader），容器 stderr 侧的日志将永远读不到。
-func streamCmd(ctx context.Context, cmd *exec.Cmd) (<-chan string, error) {
+type commandStream struct {
+	lines <-chan string
+	err   error // 仅在 lines 关闭后读取
+}
+
+func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 	outPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -104,6 +109,9 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (<-chan string, error) {
 		return nil, err
 	}
 	ch := make(chan string, 64)
+	result := &commandStream{lines: ch}
+	var readMu sync.Mutex
+	var readErr error
 	var wg sync.WaitGroup
 	scan := func(r io.Reader) {
 		defer wg.Done()
@@ -115,6 +123,12 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (<-chan string, error) {
 				return
 			case ch <- scanner.Text() + "\n":
 			}
+		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			readMu.Lock()
+			readErr = errors.Join(readErr, fmt.Errorf("读取命令输出失败（单行限制 1 MiB）: %w", err))
+			readMu.Unlock()
+			killProcessGroup(cmd)
 		}
 	}
 	wg.Add(2)
@@ -133,8 +147,19 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (<-chan string, error) {
 		}
 		// Wait 收尸设置 ProcessState；缺失时 ExitCode() 恒为 -1，
 		// 流式栈操作会被误报「失败」。
-		_ = cmd.Wait()
+		waitErr := cmd.Wait()
+		<-done
+		result.err = errors.Join(readErr, waitErr, ctx.Err())
 		close(ch)
 	}()
-	return ch, nil
+	return result, nil
+}
+
+// ConfigureStreamingCommand 统一日志/终端的整组取消；PTY 自建 session，不能同时 Setpgid。
+func ConfigureStreamingCommand(cmd *exec.Cmd, usePTY bool) {
+	if !usePTY {
+		setProcessGroup(cmd)
+	}
+	cmd.Cancel = func() error { killProcessGroup(cmd); return nil }
+	cmd.WaitDelay = 2 * time.Second
 }

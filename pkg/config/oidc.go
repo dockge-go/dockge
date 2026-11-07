@@ -15,7 +15,7 @@ type OIDC struct {
 	Issuer, ClientID, ClientSecret, RedirectURL, Subject string
 }
 
-// OIDCFrom 读取可由 Kubernetes Secret/ConfigMap 注入的认证配置。
+// OIDCFrom 读取配置文件或环境变量中的认证配置。
 func OIDCFrom(v *viper.Viper) OIDC {
 	return OIDC{v.GetBool("oidc.enabled"), v.GetString("oidc.issuer"), v.GetString("oidc.client_id"), v.GetString("oidc.client_secret"), v.GetString("oidc.redirect_url"), v.GetString("oidc.subject")}
 }

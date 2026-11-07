@@ -2,20 +2,30 @@ import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { socketURL } from '../lib/api';
+import { api, events, terminalPath } from '../lib/api';
+import { eventBytes } from '../lib/sse';
 import { t } from '../i18n';
 
 /* 与上游相同的终端仿真：直接处理 ANSI、UTF-8 字节、键盘/粘贴和 PTY 尺寸。 */
 export default function TerminalPane(props: { output?: string; containerID?: string; compact?: boolean }) {
   let host!: HTMLDivElement;
   let terminal: Terminal | undefined, fit: FitAddon | undefined;
-  let socket: WebSocket | undefined, resize: ResizeObserver | undefined, themeObserver: MutationObserver | undefined;
+  let controller: AbortController | undefined, sessionID = '', inputQueue = Promise.resolve();
+  let resize: ResizeObserver | undefined, themeObserver: MutationObserver | undefined;
   let written = '', disposed = false;
   const [shell, setShell] = createSignal('sh');
   const [attempt, setAttempt] = createSignal(0);
   const [connection, setConnection] = createSignal('connecting');
+  const send = (body: {type:string; data?:string; rows?:number; cols?:number}) => {
+    const id = sessionID, current = controller;
+    if (!id || !current || current.signal.aborted) return;
+    inputQueue = inputQueue.then(async () => {
+      if (current !== controller || current.signal.aborted) return;
+      await api('/terminal/sessions/' + id,{method:'POST',body:JSON.stringify(body),signal:current.signal});
+    }).catch(e => { if (current === controller && !current.signal.aborted) { terminal?.writeln('\r\n' + (e as Error).message); current.abort(); } });
+  };
   const sendSize = () => {
-    if (socket?.readyState === WebSocket.OPEN && terminal) socket.send(JSON.stringify({ type: 'resize', data: { cols: Math.min(500, terminal.cols), rows: Math.min(500, terminal.rows) } }));
+    if (terminal) send({type:'resize',cols:Math.min(500,Math.max(1,terminal.cols)),rows:Math.min(500,Math.max(1,terminal.rows))});
   };
   const fitSize = () => { if (!disposed && host.clientWidth > 0 && host.clientHeight > 0) { fit?.fit(); sendSize(); } };
   const applyColors = () => {
@@ -38,7 +48,7 @@ export default function TerminalPane(props: { output?: string; containerID?: str
     resize = new ResizeObserver(fitSize); resize.observe(host); fitSize();
     themeObserver = new MutationObserver(applyColors); themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     terminal.onResize(sendSize);
-    terminal.onData(data => { if (socket?.readyState === WebSocket.OPEN) socket.send(data); });
+    terminal.onData(data => { const chars = Array.from(data); for (let offset=0; offset<chars.length; offset+=2048) send({type:'input',data:chars.slice(offset,offset+2048).join('')}); });
     createEffect(() => {
       const output = props.output || '';
       if (props.containerID || !terminal) return;
@@ -49,17 +59,21 @@ export default function TerminalPane(props: { output?: string; containerID?: str
     createEffect(() => {
       const id = props.containerID, selectedShell = shell(); attempt();
       if (!id || !terminal) return;
-      socket?.close(); terminal.reset(); setConnection('connecting');
-      try {
-        const ws = new WebSocket(socketURL(id, 'container-exec', { shell: selectedShell })); socket = ws; ws.binaryType = 'arraybuffer';
-        ws.onopen = () => { if (socket === ws && !disposed) { setConnection('live'); fitSize(); terminal?.focus(); } };
-        ws.onmessage = e => { if (socket === ws && !disposed) terminal?.write(e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : String(e.data)); };
-        ws.onerror = () => { if (socket === ws && !disposed) { setConnection('ended'); terminal?.writeln('\r\n' + t('term.connectionFailed')); } };
-        ws.onclose = () => { if (socket === ws && !disposed) { setConnection('ended'); terminal?.writeln('\r\n' + t('log.ended')); } };
-      } catch (e) { setConnection('ended'); terminal.writeln((e as Error).message); }
+      controller?.abort(); sessionID = ''; inputQueue = Promise.resolve(); terminal.reset(); setConnection('connecting');
+      const current = new AbortController(); controller = current;
+      void events(terminalPath(id,'container-exec',{shell:selectedShell}),({event,data}) => {
+        if (current !== controller || disposed) return;
+        if (event === 'ready') { sessionID = String(data); setConnection('live'); fitSize(); terminal?.focus(); }
+        if (event === 'bytes') terminal?.write(eventBytes(data));
+        if (event === 'error') throw new Error(String(data));
+      },current.signal).catch(e => {
+        if (current === controller && !disposed && !current.signal.aborted) terminal?.writeln('\r\n' + (e as Error).message);
+      }).finally(() => {
+        if (current === controller && !disposed) { sessionID = ''; setConnection('ended'); terminal?.writeln('\r\n' + t('log.ended')); }
+      });
     });
   });
-  onCleanup(() => { disposed = true; socket?.close(); resize?.disconnect(); themeObserver?.disconnect(); terminal?.dispose(); });
+  onCleanup(() => { disposed = true; controller?.abort(); resize?.disconnect(); themeObserver?.disconnect(); terminal?.dispose(); });
   return <div class="terminal-pane" classList={{ compact: props.compact, interactive: !!props.containerID }}>
     <Show when={props.containerID}>
       <div class="terminal-toolbar">

@@ -40,11 +40,19 @@ class Smoke:
             # 不回显请求体、令牌或密码。
             raise RuntimeError(f'{method} {path}: HTTP {status}，预期 {expected}；{text}')
         if stream:
-            # 流式接口开始响应后固定为 HTTP 200，运行时失败以 [error] 行收尾。
-            plain = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
-            if re.search(r'(?:^|[\r\n])\[error\]', plain):
-                raise RuntimeError(f'{method} {path}: 运行时操作失败；{plain}')
-            return text
+            event, output, complete = '', '', False
+            for frame in text.replace('\r\n', '\n').split('\n\n'):
+                data = []
+                for line in frame.split('\n'):
+                    if line.startswith('event:'): event = line[6:].strip()
+                    elif line.startswith('data:'): data.append(line[5:].lstrip())
+                if not data: continue
+                value = json.loads('\n'.join(data))
+                if event == 'output': output += value
+                elif event == 'error': raise RuntimeError(f'{method} {path}: {output}\n{value}')
+                elif event == 'done' and value is True: complete = True
+            if not complete: raise RuntimeError(f'{method} {path}: SSE 未收到完成确认')
+            return output
         if not text or expected != 200:
             return None
         try:

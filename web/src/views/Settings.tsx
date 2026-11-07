@@ -62,7 +62,6 @@ export default function Settings() {
           <h3 style="margin:0 0 var(--space-3);font-size:var(--text-base);font-weight:600">{t('set.about')}</h3>
           <div style="font-size:var(--text-sm);color:var(--fg-2);line-height:1.8">
             <div><strong>Dockge</strong> — {t('app.title').split('—')[1]?.trim() || ''}</div>
-            <div>{t('set.aboutLine2')}</div>
             <div style="margin-top:var(--space-3);color:var(--muted)">{t('set.version')}: {app.version || t('data.unknown')}</div>
           <Show when={app.version && app.version !== import.meta.env.VITE_APP_VERSION}><p class="form-error">{t('set.versionMismatch', {front:import.meta.env.VITE_APP_VERSION, back:app.version})}</p></Show>
           </div>

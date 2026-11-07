@@ -59,7 +59,12 @@ func (r *Repository) List(ctx context.Context) ([]model.Stack, error) {
 	}
 	for _, item := range lsItems {
 		if index, ok := byName[item.Name]; ok {
-			stacks[index].Status = StackStatusFromString(item.Status)
+			if r.configOwned(item.Name, item.ConfigFiles) {
+				stacks[index].Status = StackStatusFromString(item.Status)
+			} else {
+				stacks[index].Status = model.StatusUnknown
+				stacks[index].RuntimeError = fmt.Sprintf("同名目录外项目配置 %q 不属于托管目录 %s", item.ConfigFiles, r.StackPath(item.Name))
+			}
 		}
 	}
 
@@ -89,7 +94,12 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 	if lsItems, err := r.ComposeLs(ctx); err == nil {
 		for _, item := range lsItems {
 			if item.Name == name {
-				stack.Status = StackStatusFromString(item.Status)
+				if r.configOwned(name, item.ConfigFiles) {
+					stack.Status = StackStatusFromString(item.Status)
+				} else {
+					stack.Status = model.StatusUnknown
+					stack.RuntimeError = fmt.Sprintf("同名目录外项目配置 %q 不属于托管目录 %s", item.ConfigFiles, dir)
+				}
 				break
 			}
 		}
@@ -110,15 +120,28 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 
 // Save 把 compose 文件写入栈目录；isAdd 时创建目录并拒绝重名，
 // 否则要求目录已存在。栈目录其余文件（如 .env 之外的挂载卷）不受影响。
-func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) error {
+func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) (resultErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	dir := r.StackPath(stack.Name)
 	if isAdd {
 		if _, err := os.Lstat(dir); err == nil {
 			return ErrConflict
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(r.stacksDir, 0o755); err != nil {
+			return err
+		}
+		if err := os.Mkdir(dir, 0o755); err != nil {
 			return fmt.Errorf("%w：无法创建目录 %s：%v", ErrStacksNotWritable, dir, err)
 		}
+		defer func() {
+			if resultErr != nil {
+				if e := os.Remove(dir); e != nil {
+					resultErr = errors.Join(resultErr, fmt.Errorf("清理失败的新栈目录 %s: %w", dir, e))
+				}
+			}
+		}()
 	} else {
 		if info, err := os.Lstat(dir); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -146,15 +169,56 @@ func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) e
 	if !valid {
 		return fmt.Errorf("非法 compose 文件名 %q：仅允许 %v", file, acceptedComposeFileNames)
 	}
-	if err := writeFileAtomic(filepath.Join(dir, file), []byte(stack.Yaml), 0o644); err != nil {
-		return fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, filepath.Join(dir, file), err)
+	yamlPath, envPath := filepath.Join(dir, file), filepath.Join(dir, ".env")
+	for _, path := range []string{yamlPath, envPath} {
+		info, err := os.Lstat(path)
+		if err == nil && !info.Mode().IsRegular() {
+			return fmt.Errorf("保存目标 %s 必须为普通文件，不能是目录或符号链接", path)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("检查保存目标 %s: %w", path, err)
+		}
+	}
+	oldEnv, err := os.ReadFile(envPath)
+	hadEnv := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("读取保存基线 %s: %w", envPath, err)
+	}
+	oldMode := os.FileMode(0o600)
+	if hadEnv {
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return err
+		}
+		oldMode = info.Mode().Perm()
+	}
+	restoreEnv := func() error {
+		if hadEnv {
+			return writeFileAtomic(envPath, oldEnv, oldMode)
+		}
+		err := os.Remove(envPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
 	if stack.Env != "" {
-		if err := writeFileAtomic(filepath.Join(dir, ".env"), []byte(stack.Env), 0o600); err != nil {
-			return fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, filepath.Join(dir, ".env"), err)
+		err = writeFileAtomic(envPath, []byte(stack.Env), 0o600)
+	} else {
+		err = os.Remove(envPath)
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
 		}
-	} else if err := os.Remove(filepath.Join(dir, ".env")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove stale .env: %w", err)
+	}
+	if err != nil {
+		return fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, envPath, err)
+	}
+	// YAML 是提交点；失败时恢复 .env，不让前端看到半成功保存。
+	if err := ctx.Err(); err != nil {
+		return errors.Join(err, restoreEnv())
+	}
+	if err := writeFileAtomic(yamlPath, []byte(stack.Yaml), 0o644); err != nil {
+		return errors.Join(fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, yamlPath, err), restoreEnv())
 	}
 	return nil
 }

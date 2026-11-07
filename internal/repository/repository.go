@@ -23,7 +23,6 @@ import (
 	"github.com/spf13/viper"
 
 	v1 "dockge/api/v1"
-	"dockge/pkg/log"
 )
 
 // bbolt bucket 名称。
@@ -53,7 +52,6 @@ var Package = do.Package(
 type Repository struct {
 	db        *bbolt.DB
 	stacksDir string
-	logger    *log.Logger
 	// runtime 是容器运行时命令行（docker/podman/nerdctl 等，可配置/自动探测）
 	runtime Runtime
 	// preflight* 缓存运行时自检结果：健康检查会周期调用，避免每次起子进程
@@ -76,7 +74,6 @@ func New(i do.Injector) (*Repository, error) {
 	r := &Repository{
 		db:        do.MustInvoke[*bbolt.DB](i),
 		stacksDir: StacksDirFromConf(conf),
-		logger:    do.MustInvoke[*log.Logger](i),
 		runtime:   DetectRuntime(conf.GetString("container.cli"), conf.GetString("container.compose")),
 	}
 	// JWT 密钥解析（显式环境变量 > 库中持久值 > 首启随机生成并写库），
@@ -125,6 +122,9 @@ func (r *Repository) ComposeCommand(ctx context.Context, args ...string) (*exec.
 func (r *Repository) StackComposeCommand(ctx context.Context, name string, extra ...string) (*exec.Cmd, error) {
 	dir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.checkStackOwnership(ctx, name); err != nil {
 		return nil, err
 	}
 	cmd, err := r.ComposeCommand(ctx, composeArgs(name, files, extra...)...)

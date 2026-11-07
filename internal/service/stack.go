@@ -7,20 +7,16 @@ import (
 	"io"
 	"regexp"
 	"strings"
-	"sync"
 
 	v1 "dockge/api/v1"
 	"dockge/internal/model"
 	"dockge/internal/repository"
-	"dockge/pkg/log"
 
 	"github.com/samber/do/v2"
 	"gopkg.in/yaml.v3"
 )
 
 var StackNamePattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
-
-var opMutex sync.Map
 
 type StackService interface {
 	List(ctx context.Context, filter string) (*v1.StackListData, error)
@@ -37,14 +33,12 @@ type StackService interface {
 // NewStackService 构造栈服务，由注入容器调用。
 func NewStackService(i do.Injector) (StackService, error) {
 	return &stackService{
-		repo:   do.MustInvoke[*repository.Repository](i),
-		logger: do.MustInvoke[*log.Logger](i),
+		repo: do.MustInvoke[*repository.Repository](i),
 	}, nil
 }
 
 type stackService struct {
-	repo   *repository.Repository
-	logger *log.Logger
+	repo *repository.Repository
 }
 
 // List 返回栈列表（filter 非空时按名称子串过滤，忽略大小写）。
@@ -68,6 +62,11 @@ func (s *stackService) Get(ctx context.Context, name string) (*v1.StackDetailDat
 	if !StackNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
+	unlock, err := lockStack(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	stack, err := s.repo.Get(ctx, name)
 	if err != nil {
 		return nil, stackError(err)
@@ -108,9 +107,11 @@ func (s *stackService) Save(ctx context.Context, req *v1.StackSaveRequest, isAdd
 	if err := yaml.Unmarshal([]byte(req.Yaml), &doc); err != nil {
 		return fmt.Errorf("%w: YAML 语法错误: %s", v1.ErrBadRequest, err.Error())
 	}
-	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	unlock, err := lockStack(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	stack := &model.Stack{Name: name, Yaml: req.Yaml, Env: req.Env, ComposeFileName: "compose.yaml"}
 	if err := s.repo.Save(ctx, stack, isAdd); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -126,9 +127,11 @@ func (s *stackService) Delete(ctx context.Context, name string) (*v1.StackOpResp
 	if !StackNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("%w: 非法栈名 %q", v1.ErrBadRequest, name)
 	}
-	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	unlock, err := lockStack(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	output, err := s.repo.CleanStackResources(ctx, name)
 	if err != nil {
 		return nil, stackError(err)
@@ -144,12 +147,17 @@ func (s *stackService) DeletePlan(ctx context.Context, name string) (*v1.StackDe
 	if !StackNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("%w: 非法栈名 %q", v1.ErrBadRequest, name)
 	}
+	unlock, err := lockStack(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	plan, err := s.repo.PlanStackDelete(ctx, name)
 	return plan, stackError(err)
 }
 
 // StreamOp 流式执行栈生命周期操作：compose 输出逐行写入 w（进度终端实时流）。
-// 与 Op 互斥同一把栈锁；校验失败在写出任何内容前返回错误。
+// 与保存、删除和单服务操作共用同一把栈锁；校验失败在写出任何内容前返回错误。
 func (s *stackService) StreamOp(ctx context.Context, w io.Writer, name, op string) error {
 	if !StackNamePattern.MatchString(name) {
 		return fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
@@ -159,9 +167,11 @@ func (s *stackService) StreamOp(ctx context.Context, w io.Writer, name, op strin
 	default:
 		return fmt.Errorf("%w: 不支持的操作 %q（可选 start/stop/restart/down/update）", v1.ErrBadRequest, op)
 	}
-	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	unlock, err := lockStack(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	return s.repo.StackOpStream(ctx, name, op, w)
 }
@@ -176,6 +186,11 @@ func (s *stackService) ServiceOp(ctx context.Context, name, service, op string) 
 	if !StackNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
 	}
+	unlock, err := lockStack(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	output, err := s.repo.ServiceOp(ctx, name, service, op)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, stackError(err)

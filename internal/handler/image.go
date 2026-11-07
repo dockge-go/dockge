@@ -1,8 +1,7 @@
-// 镜像接口：列表（JSON）、拉取（text/plain 流式，进度终端实时呈现）、批量删除。
+// 镜像接口：列表（JSON）、拉取（SSE 流式，进度终端实时呈现）、批量删除。
 package handler
 
 import (
-	"fmt"
 	"net/http"
 
 	v1 "dockge/api/v1"
@@ -15,6 +14,7 @@ import (
 // ImageHandler 承载镜像列表、拉取与删除接口。
 type ImageHandler struct {
 	ImageService service.ImageService `do:""`
+	AuthService  service.AuthService  `do:""`
 }
 
 // NewImageHandler 构造镜像处理器，由注入容器调用。
@@ -24,7 +24,7 @@ func NewImageHandler(i do.Injector) (*ImageHandler, error) {
 
 // List 处理镜像列表查询请求。
 func (h *ImageHandler) List(ctx *gin.Context) {
-	list, err := h.ImageService.List(ctx)
+	list, err := h.ImageService.List(ctx.Request.Context())
 	if err != nil {
 		handleServiceError(ctx, err)
 		return
@@ -39,15 +39,13 @@ func (h *ImageHandler) Pull(ctx *gin.Context) {
 		v1.HandleError(ctx, http.StatusBadRequest, err, nil)
 		return
 	}
-	w := ctx.Writer
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	flusher := flushWriter{w: w, f: w}
-	if err := h.ImageService.PullStream(ctx, flusher, req.Image); err != nil {
-		fmt.Fprintf(flusher, "\n[error] %s\n", err.Error())
-	}
+	streamCtx, cancel := streamContext(ctx, h.AuthService)
+	defer cancel()
+	w := newSSE(ctx)
+	stopHeartbeat := w.heartbeat(streamCtx, cancel)
+	err := h.ImageService.PullStream(streamCtx, w, req.Image)
+	stopHeartbeat()
+	w.finish(err)
 }
 
 // Delete 处理批量删除镜像请求。
@@ -57,7 +55,7 @@ func (h *ImageHandler) Delete(ctx *gin.Context) {
 		v1.HandleError(ctx, http.StatusBadRequest, err, nil)
 		return
 	}
-	data, err := h.ImageService.Delete(ctx, req.Images)
+	data, err := h.ImageService.Delete(ctx.Request.Context(), req.Images)
 	if err != nil {
 		if data != nil {
 			v1.HandleError(ctx, http.StatusInternalServerError, err, data)

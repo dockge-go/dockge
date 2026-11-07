@@ -1,73 +1,63 @@
 package handler
 
 import (
-	"encoding/json"
+	"bufio"
+	"context"
+	"crypto/rand"
+	v1 "dockge/api/v1"
+	"dockge/internal/repository"
+	"dockge/internal/service"
+	"dockge/pkg/jwt"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"github.com/creack/pty"
+	"github.com/gin-gonic/gin"
+	"github.com/samber/do/v2"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
-
-	"dockge/internal/repository"
-	"dockge/internal/service"
-	"dockge/pkg/log"
-
-	"github.com/creack/pty"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"github.com/samber/do/v2"
 	"regexp"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
 )
 
-// upgrader 把 HTTP 连接升级为 WebSocket；站点自带 JWT 认证，默认限制同源以防跨站连接。
-// compose 服务名规则（compose spec：字母数字开头，允许 _.-），用于 exec 注入防线
 var serviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  8192,
-	WriteBufferSize: 8192,
-}
-
-// TerminalHandler 承载终端 WebSocket 与日志流端点。
-// 每个连接独占一个 PTY 子进程，连接关闭即回收，无跨连接共享状态。
+// TerminalHandler 每个 SSE 连接独占进程，HTTP 上行只接受对应认证会话的输入。
 type TerminalHandler struct {
-	Logger     *log.Logger            `do:""`
 	Repository *repository.Repository `do:""`
+	Auth       service.AuthService    `do:""`
+	sessions   sync.Map
 }
 
-// NewTerminalHandler 构造终端处理器，由注入容器调用。
+// NewTerminalHandler 注入终端依赖。
 func NewTerminalHandler(i do.Injector) (*TerminalHandler, error) {
 	return do.MustInvokeStruct[*TerminalHandler](i), nil
 }
 
-// wsControlMessage 客户端发送的 JSON 控制消息（如 resize）。
-type wsControlMessage struct {
-	Type string         `json:"type"`
-	Data map[string]any `json:"data"`
+type terminalSession struct {
+	mu     sync.Mutex
+	master *os.File
+	owner  uint
+	hash   string
+	cancel context.CancelFunc
+	closed bool
 }
 
-// WebSocket 终端端点：
-//   - /v1/terminal/<stack>/compose-logs 栈组合日志（docker compose logs -f）
-//   - /v1/terminal/<service>/exec?stack=&shell= 容器内交互 shell（compose exec 服务名）
-//
-// 浏览器 WebSocket API 无法自定义请求头，认证依赖 StrictAuth 对 ?token= 的支持。
-func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
+// Events 提供容器/栈日志与真实 PTY 输出，不把认证信息放入 URL。
+func (h *TerminalHandler) Events(ctx *gin.Context) {
+	streamCtx, cancel := streamContext(ctx, h.Auth)
+	defer cancel()
+	ctx.Request = ctx.Request.WithContext(streamCtx)
 	name, typ := ctx.Param("name"), ctx.Param("type")
 	var cmd *exec.Cmd
 	var err error
 	readOnly := typ == "compose-logs" || typ == "container-logs"
-	fail := func(message string) {
-		// 浏览器拿不到升级失败的 HTTP body；同源 WS 用文本传递校验明细。
-		if websocket.IsWebSocketUpgrade(ctx.Request) {
-			ws, e := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
-			if e == nil {
-				_ = ws.WriteMessage(websocket.TextMessage, []byte("[error] "+message+"\n"))
-				_ = ws.Close()
-			}
-			return
-		}
-		h.writeJSON(ctx, http.StatusBadRequest, gin.H{"message": message})
-	}
+	fail := func(message string) { v1.HandleError(ctx, http.StatusBadRequest, fmt.Errorf("%s", message), nil) }
 	if typ != "compose-logs" && typ != "exec" && typ != "container-logs" && typ != "container-exec" {
 		fail("未知终端类型: " + typ)
 		return
@@ -78,9 +68,16 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 		return
 	}
 	tail := ctx.DefaultQuery("tail", "100")
-	if readOnly {
+	since := ctx.Query("since")
+	if readOnly && since != "" {
+		if _, err := time.Parse(time.RFC3339Nano, since); err != nil {
+			fail("since=" + since + "，必须是 RFC3339 时间戳")
+			return
+		}
+	}
+	if readOnly && !(tail == "all" && since != "") {
 		if n, e := strconv.Atoi(tail); e != nil || n < 0 || n > 10000 {
-			fail("tail=" + tail + "，必须是 0–10000 的整数")
+			fail("tail=" + tail + "，必须是 0–10000 的整数；有效 since 游标允许 all")
 			return
 		}
 	}
@@ -90,7 +87,12 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 			return
 		}
 		if readOnly {
-			cmd, err = h.Repository.ContainerCommand(ctx.Request.Context(), "logs", "-f", "--tail", tail, name)
+			args := []string{"logs", "-f", "--timestamps", "--tail", tail}
+			if since != "" {
+				args = append(args, "--since", since)
+			}
+			args = append(args, name)
+			cmd, err = h.Repository.ContainerCommand(ctx.Request.Context(), args...)
 		} else {
 			cs, e := h.Repository.ResourceContainers(ctx.Request.Context())
 			if e != nil {
@@ -128,9 +130,12 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 		}
 		args := []string{}
 		if typ == "exec" {
-			args = append(args, "exec", name, shell)
+			args = append(args, "exec", "-e", "TERM=xterm-256color", name, shell)
 		} else {
-			args = append(args, "logs", "-f", "--tail", tail, "--no-color")
+			args = append(args, "logs", "-f", "--tail", tail, "--no-color", "--timestamps")
+			if since != "" {
+				args = append(args, "--since", since)
+			}
 			if svc := ctx.Query("service"); svc != "" {
 				if !serviceNamePattern.MatchString(svc) {
 					fail("非法服务名: " + svc)
@@ -145,116 +150,199 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 		fail(err.Error())
 		return
 	}
-	ws, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
-	if err != nil {
-		h.Logger.Error().Err(err).Msg("websocket upgrade")
-		return
-	}
-	h.serveSession(ws, cmd, readOnly, !readOnly)
+	h.serveSession(ctx, cmd, !readOnly, cancel)
 }
 
-// serveSession 把子进程输出接到 WebSocket 并双向转发：
-//   - usePTY=true（容器 exec）：经伪终端（creack/pty，覆盖 Linux/macOS/BSD），
-//     提供真正的交互式 TTY（提示符、行编辑、Ctrl+C、窗口尺寸）
-//   - usePTY=false（合并日志）：普通管道即可，无需 TTY，平台与运行时无关
-func (h *TerminalHandler) serveSession(ws *websocket.Conn, cmd *exec.Cmd, readOnly, usePTY bool) {
-	var (
-		reader io.ReadCloser
-		writer io.WriteCloser
-		resize func(rows, cols uint16)
-	)
-
-	if usePTY {
-		master, err := pty.Start(cmd) // 内部完成 setsid/setctty 与 stdio 绑定
-		if err != nil {
-			h.Logger.Error().Err(err).Msg("pty start")
-			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m无法打开终端: "+err.Error()+"\x1b[0m\r\n"))
-			_ = ws.Close()
+// Input 顺序输入与 resize 使用 JSON POST；只读日志不会创建可写会话。
+func (h *TerminalHandler) Input(c *gin.Context) {
+	var input struct {
+		Type string `json:"type"`
+		Data string `json:"data"`
+		Rows uint16 `json:"rows"`
+		Cols uint16 `json:"cols"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64*1024)
+	if err := bindJSON(c, &input); err != nil {
+		handleServiceError(c, err)
+		return
+	}
+	value, ok := h.sessions.Load(c.Param("id"))
+	if !ok {
+		v1.HandleError(c, 404, fmt.Errorf("终端会话 %q 已结束或不存在", c.Param("id")), nil)
+		return
+	}
+	session := value.(*terminalSession)
+	claimsValue, _ := c.Get("claims")
+	claims, _ := claimsValue.(*jwt.Claims)
+	if claims == nil || claims.UserId != session.owner || claims.H != session.hash {
+		v1.HandleError(c, 403, fmt.Errorf("当前登录会话不能操作终端 %q", c.Param("id")), nil)
+		return
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.closed {
+		v1.HandleError(c, 410, fmt.Errorf("终端会话 %q 已关闭", c.Param("id")), nil)
+		return
+	}
+	var err error
+	switch input.Type {
+	case "input":
+		if len(input.Data) > 16*1024 {
+			v1.HandleError(c, 400, fmt.Errorf("data 超过终端单次输入限制 16384 字节"), nil)
 			return
 		}
-		reader, writer = master, master
-		resize = func(rows, cols uint16) {
-			_ = pty.Setsize(master, &pty.Winsize{Rows: rows, Cols: cols})
+		_ = session.master.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		_, err = session.master.Write([]byte(input.Data))
+	case "resize":
+		if input.Rows < 1 || input.Rows > 500 || input.Cols < 1 || input.Cols > 500 {
+			v1.HandleError(c, 400, fmt.Errorf("rows=%d cols=%d，窗口尺寸必须为 1–500", input.Rows, input.Cols), nil)
+			return
 		}
-		resize(24, 80) // 默认窗口；随后以客户端 resize 消息为准
+		err = pty.Setsize(session.master, &pty.Winsize{Rows: input.Rows, Cols: input.Cols})
+	default:
+		v1.HandleError(c, 400, fmt.Errorf("未知终端控制类型 %q（input/resize）", input.Type), nil)
+		return
+	}
+	if err != nil {
+		session.cancel()
+		v1.HandleError(c, 500, fmt.Errorf("终端 %s %s 失败: %w", c.Param("id"), input.Type, err), nil)
+		return
+	}
+	v1.HandleSuccess(c, nil)
+}
+func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY bool, cancel context.CancelFunc) {
+	s := newSSE(c)
+	ctx := c.Request.Context()
+	repository.ConfigureStreamingCommand(cmd, usePTY)
+	var reader *os.File
+	var session *terminalSession
+	var id string
+	if usePTY {
+		master, err := pty.Start(cmd)
+		if err != nil {
+			s.finish(fmt.Errorf("无法打开终端: %w", err))
+			return
+		}
+		reader = master
+		session = &terminalSession{master: master, cancel: cancel}
+		if value, ok := c.Get("claims"); ok {
+			claims := value.(*jwt.Claims)
+			session.owner, session.hash = claims.UserId, claims.H
+		}
+		bytes := make([]byte, 24)
+		if _, err := rand.Read(bytes); err != nil {
+			_ = master.Close()
+			cancel()
+			_ = cmd.Wait()
+			s.finish(err)
+			return
+		}
+		id = hex.EncodeToString(bytes)
+		h.sessions.Store(id, session)
+		_ = pty.Setsize(master, &pty.Winsize{Rows: 24, Cols: 80})
 	} else {
 		pr, pw, err := os.Pipe()
 		if err != nil {
-			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m"+err.Error()+"\x1b[0m\r\n"))
-			_ = ws.Close()
+			s.finish(err)
 			return
 		}
 		cmd.Stdout, cmd.Stderr = pw, pw
 		if err := cmd.Start(); err != nil {
 			_ = pr.Close()
 			_ = pw.Close()
-			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m"+err.Error()+"\x1b[0m\r\n"))
-			_ = ws.Close()
+			s.finish(err)
 			return
 		}
-		// 父进程不再持有写端：子进程退出后读端 EOF，读循环自然收尾
 		_ = pw.Close()
 		reader = pr
-		resize = func(uint16, uint16) {}
 	}
-
+	// 断流立即关闭读写端，阻塞的 POST 输入及子进程一并释放。
+	closeReader := context.AfterFunc(ctx, func() { _ = reader.Close() })
 	defer func() {
+		h.sessions.Delete(id)
+		closeReader()
+		cancel()
 		_ = reader.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		if session != nil {
+			session.mu.Lock()
+			session.closed = true
+			session.mu.Unlock()
+		}
+		if cmd.ProcessState == nil {
 			_ = cmd.Wait()
 		}
-		_ = ws.Close()
 	}()
-
-	// 进程 → WebSocket：字节级转发（终端输出并非按行，逐块转发避免末行滞留）
+	if err := s.event("ready", id); err != nil {
+		return
+	}
+	chunks := make(chan []byte, 1)
+	var readErr error
+	isLog := c.Param("type") == "container-logs" || c.Param("type") == "compose-logs"
 	go func() {
-		buf := make([]byte, 8192)
-		for {
-			n, readErr := reader.Read(buf)
-			if n > 0 {
-				if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
-					_ = ws.Close()
+		defer close(chunks)
+		if isLog {
+			scanner := bufio.NewScanner(reader)
+			scanner.Buffer(make([]byte, 8192), 1024*1024)
+			for scanner.Scan() {
+				select {
+				case chunks <- []byte(scanner.Text() + "\n"):
+				case <-ctx.Done():
 					return
 				}
 			}
-			if readErr != nil {
-				// 子进程退出：关闭连接即可，结束提示由前端统一输出（避免重复且能跟随界面语言）
-				_ = ws.Close()
+			readErr = scanner.Err()
+			return
+		}
+		buf := make([]byte, 8192)
+		for {
+			n, err := reader.Read(buf)
+			if n > 0 {
+				data := append([]byte(nil), buf[:n]...)
+				select {
+				case chunks <- data:
+				case <-ctx.Done():
+					return
+				}
+			}
+			if err != nil {
+				if !errors.Is(err, io.EOF) && !(usePTY && errors.Is(err, syscall.EIO)) {
+					readErr = err
+				}
 				return
 			}
 		}
 	}()
-
-	// WebSocket → 进程：交互输入转发；JSON 控制消息处理 resize
+	tick := time.NewTicker(5 * time.Second)
+	defer tick.Stop()
 	for {
-		_, msg, err := ws.ReadMessage()
-		if err != nil {
+		select {
+		case <-ctx.Done():
 			return
-		}
-		if len(msg) == 0 {
-			continue
-		}
-		var ctrl wsControlMessage
-		if json.Unmarshal(msg, &ctrl) == nil && ctrl.Type == "resize" {
-			var rows, cols uint16 = 24, 80
-			if v, ok := ctrl.Data["rows"].(float64); ok && v >= 1 && v <= 500 && v == float64(uint16(v)) {
-				rows = uint16(v)
+		case <-tick.C:
+			if s.event("ping", true) != nil {
+				return
 			}
-			if v, ok := ctrl.Data["cols"].(float64); ok && v >= 1 && v <= 500 && v == float64(uint16(v)) {
-				cols = uint16(v)
+		case data, ok := <-chunks:
+			if !ok {
+				if readErr != nil {
+					cancel()
+				}
+				err := errors.Join(cmd.Wait(), readErr)
+				if err != nil {
+					s.finish(fmt.Errorf("终端命令 %s 结束: %w", cmd.Path, err))
+				} else {
+					s.finish(nil)
+				}
+				return
 			}
-			resize(rows, cols)
-			continue
-		}
-		if !readOnly && writer != nil {
-			_, _ = writer.Write(msg)
+			// []byte 在 JSON 中编码为 base64，不会破坏跨块 UTF-8 或 ANSI 字节。
+			event, payload := "bytes", any(data)
+			if isLog {
+				event, payload = "log", parseLogRecord(string(data))
+			}
+			if s.event(event, payload) != nil {
+				return
+			}
 		}
 	}
-}
-
-// writeJSON 发送 JSON 响应（升级失败等非 WS 场景）。
-func (h *TerminalHandler) writeJSON(ctx *gin.Context, status int, data any) {
-	ctx.Header("Content-Type", "application/json")
-	ctx.JSON(status, data)
 }

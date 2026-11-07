@@ -47,13 +47,13 @@ class SmokeTests(unittest.TestCase):
                 Smoke().request('GET', '/me')
 
     def test_operation_stream_is_not_json(self):
-        output = b' Container smoke-web-1 Started\n'
+        output = b'event: output\ndata: " Container smoke-web-1 Started\\n"\n\nevent: done\ndata: true\n\n'
         with patch('smoke.urlopen', return_value=Response(output)) as open_request:
-            self.assertEqual(Smoke().request('POST', '/stacks/owned/start', stream=True), output.decode())
+            self.assertEqual(Smoke().request('POST', '/stacks/owned/start', stream=True), ' Container smoke-web-1 Started\n')
             self.assertEqual(open_request.call_args.kwargs['timeout'], 660)
 
     def test_operation_stream_error_preserves_runtime_details(self):
-        output = b'pull access denied\n\x1b[31m[error] compose start failed (exit 1)\x1b[0m\n'
+        output = b'event: output\ndata: "pull access denied\\n"\n\nevent: error\ndata: "compose start failed (exit 1)"\n\n'
         with patch('smoke.urlopen', return_value=Response(output)):
             with self.assertRaisesRegex(RuntimeError, 'pull access denied'):
                 Smoke().request('POST', '/stacks/owned/start', stream=True)

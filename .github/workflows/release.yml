@@ -51,7 +51,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: bin/dockge-server-*
-          generate_release_notes: true
+          body_path: deploy/release-notes.md
 
   # 与 Docker Hub 独立发布，避免外部仓库凭据故障阻断 GHCR。
   ghcr:
