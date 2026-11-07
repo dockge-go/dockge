@@ -25,7 +25,16 @@ docker compose -f deploy/compose.yaml up -d --build
 
 Open `http://<host>:5001` and create the administrator. **There is no default password.** Use an HTTPS reverse proxy in production and restrict access during initial setup.
 
-The example builds the local image `dockge-go:local`. Prebuilt binaries are available under [Releases](https://github.com/dockge-go/dockge/releases); the default image publishing target is `makeshit/dockge`. Existing releases do not automatically include current source changes. Pin a verified version or image digest in production.
+The example builds the local image `dockge-go:local`. Prebuilt binaries are available under [Releases](https://github.com/dockge-go/dockge/releases). To use a release image, replace `image` in `deploy/compose.yaml` with either source below, remove the `build` section, then run `docker compose -f deploy/compose.yaml up -d`:
+
+- GHCR: `ghcr.io/dockge-go/dockge:0.2.5`
+- Docker Hub: `makeshit/dockge:0.2.5`
+
+Both support `linux/amd64` and `linux/arm64`. Pin a version or digest in production, not `dev`. Confirm GHCR package visibility after its first publication; private packages require pull credentials.
+
+### Kubernetes deployment
+
+[Single-node Kubernetes and OIDC manifests](deploy/kubernetes/README.md) include a Deployment, Service, ConfigMap, Secret and HTTPS Ingress example. Select exactly one node with a Docker Engine socket; a containerd-only Kubernetes node cannot run this image's Compose operations out of the box. HostPath storage preserves data and the fixed internal paths; one replica with `Recreate` prevents concurrent database writers. Supply real OIDC configuration as documented; do not apply the entire directory containing credential examples.
 
 ### Mounts and permissions
 
@@ -77,6 +86,8 @@ DOCKGE_TOKEN="$TOKEN" make smoke
 
 Smoke testing creates, starts/stops and deletes one randomly named stack. It defaults to `nginx:alpine` (override with `SMOKE_IMAGE`), binds no host port, changes no global settings and cleans no unrelated workloads. On interruption it attempts cleanup; failed cleanup reports the stack name for manual inspection.
 
-Main pushes and pull requests run verification. Release tags `v*` must pass the same build, tests and vulnerability checks before binaries and images are published. Manual release runs publish a `dev` image. Pushing main alone does not publish an image or deploy a server.
+Main pushes and pull requests run verification. Release tags `v*` must pass the same build, tests and vulnerability checks before binaries and images are published. Manual branch release runs publish a `dev` image. Pushing main alone does not publish an image or deploy a server.
+
+GHCR uses the workflow `GITHUB_TOKEN` and job-scoped `packages: write`, with no separate publishing token. Docker Hub requires Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` with repository write access; repository variable `DOCKERHUB_IMAGE` overrides the default `makeshit/dockge`. The registry jobs run independently and report failures without blocking one another. Release tag `v0.2.5` publishes image tags `0.2.5`, `0.2` and `latest`; manually rerunning that tag does not also publish `dev`.
 
 MIT License.

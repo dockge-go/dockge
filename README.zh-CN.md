@@ -25,7 +25,16 @@ docker compose -f deploy/compose.yaml up -d --build
 
 首次访问 `http://<主机>:5001` 创建管理员账号，**没有默认密码**。生产环境请通过 HTTPS 反向代理访问，并限制首次初始化入口。
 
-示例使用本地源码镜像 `dockge-go:local`。预构建二进制见 [Releases](https://github.com/dockge-go/dockge/releases)，镜像发布默认目标为 `makeshit/dockge`；旧发布不会自动包含当前源码改动。生产部署应选择经过验证的明确版本或镜像摘要。
+示例使用本地源码镜像 `dockge-go:local`。预构建二进制见 [Releases](https://github.com/dockge-go/dockge/releases)。使用发布镜像时，将 `deploy/compose.yaml` 中的 `image` 替换为以下任一来源，并移除 `build` 部分后执行 `docker compose -f deploy/compose.yaml up -d`：
+
+- GHCR：`ghcr.io/dockge-go/dockge:0.2.5`
+- Docker Hub：`makeshit/dockge:0.2.5`
+
+两者支持 `linux/amd64`、`linux/arm64`。生产固定明确版本或镜像摘要，不使用 `dev`。GHCR 首次发布需确认包可见性；私有包需要拉取凭据。
+
+### Kubernetes 部署
+
+提供[单节点 Kubernetes 与 OIDC 部署清单](deploy/kubernetes/README.md)，包含 Deployment、Service、ConfigMap、Secret 与 HTTPS Ingress 配置示例。必须选定具有 Docker Engine socket 的唯一节点；仅有 containerd 的普通 K8s 节点无法直接运行本镜像的 Compose 功能。数据采用 hostPath 持久化，内部路径不变；单副本与 `Recreate` 防止数据库多写。按部署说明填写真实 OIDC 配置，不能直接应用含示例凭据的整个目录。
 
 ### 挂载与权限
 
@@ -78,5 +87,7 @@ DOCKGE_TOKEN="$TOKEN" make smoke
 冒烟会创建、启停和删除一个随机名称的专属栈，默认使用 `nginx:alpine`（可通过 `SMOKE_IMAGE` 指定），不绑定宿主端口、不修改全局设置、不清理其他业务。异常退出会尝试清理专属栈；清理失败会报告栈名，需要人工核对。
 
 推送 main 或提交 PR 会运行验证；发布标签 `v*` 经同样的构建、测试和漏洞检查后才发布二进制及镜像。手动发布流程只发布 `dev` 镜像。推送 main 本身不会发布镜像或部署到服务器。
+
+GHCR 使用工作流的 `GITHUB_TOKEN` 与任务级 `packages: write` 权限，无需另设发布 Token。Docker Hub 使用 Actions Secrets `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`（目标仓库写权限），可通过 Repository Variable `DOCKERHUB_IMAGE` 覆盖默认 `makeshit/dockge`。两个镜像任务独立执行，任一仓库失败会明确报错，不阻断另一仓库。发布 tag `v0.2.5` 对应镜像标签 `0.2.5`、`0.2`、`latest`；重新手动运行该 tag 不会额外发布 `dev`。
 
 MIT License.

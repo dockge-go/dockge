@@ -23,11 +23,11 @@
 
 ## 操作步骤
 
-```bash
-# 当前源码镜像，推送到可访问镜像仓库；替换 deployment.yaml 的 image。
-docker build -f deploy/Dockerfile -t registry.example.com/your-project/dockge:your-version .
-docker push registry.example.com/your-project/dockge:your-version
+清单使用版本固定的 `ghcr.io/dockge-go/dockge:0.2.5`，支持 `linux/amd64` 与 `linux/arm64`；也可将 `image` 替换为 `makeshit/dockge:0.2.5`（Docker Hub）。版本号不包含 Git tag 的 `v` 前缀。生产优先固定镜像摘要，不使用 `dev`。
 
+GHCR 包首次创建通常为私有，公开仓库并不自动保证镜像公开。发布管理员需在组织的 Packages → dockge → Package settings 中将可见性设为 Public，再检查匿名拉取。若选择保持私有，必须通过现有凭据管理系统在 `dockge` 命名空间创建 `kubernetes.io/dockerconfigjson` 类型的 `ghcr` Secret，并在 Pod 的 `spec.imagePullSecrets` 引用它；凭据需要 `read:packages`，不要写进清单或版本控制。Docker Hub 公共镜像可作为无凭据部署的替代来源。
+
+```bash
 # 只给一个具备运行时的节点打标签。
 kubectl label node YOUR_RUNTIME_NODE dockge-runtime=true
 kubectl apply -f deploy/kubernetes/namespace.yaml
@@ -46,6 +46,8 @@ kubectl rollout status deployment/dockge -n dockge
 
 不要直接 `kubectl apply -f deploy/kubernetes/`：`*.example.yaml` 是需替换的示例，必须先填写实际配置。
 
+如果出现 `ImagePullBackOff`，先执行 `kubectl describe pod -n dockge` 检查具体原因：镜像版本是否存在、GHCR 可见性/拉取凭据、节点网络与架构。若 Pod 启动失败，使用 `kubectl logs -n dockge deployment/dockge --previous` 查看 OIDC 配置或运行时挂载错误；不要禁用认证来掩盖配置错误。
+
 浏览器访问真实 HTTPS 域名，点击 OIDC 登录。进入面板后先查看部署自检；再验证新增 Compose YAML、保存、部署、容器终端、实时日志、停止和删除。
 
 ## 删除与数据归属
@@ -58,6 +60,6 @@ kubectl rollout status deployment/dockge -n dockge
 
 ## 验证与服务器指标
 
-仓库自动化测试覆盖 OIDC 配置与协议。生产部署仍需使用实际身份提供方和集群验证登录回调、唯一身份限制、Compose CRUD、终端及日志。
+仓库自动化测试覆盖 OIDC 配置与协议，以及固定镜像版本、路径、副本数、权限、认证注入与健康探针；Actions 使用 kubeconform 对所有清单（含待填写的配置示例）执行严格 Kubernetes 1.31 schema 校验。静态校验不等于真实集群验收。生产部署仍需使用实际身份提供方和集群验证登录回调、唯一身份限制、Compose CRUD、终端及日志。
 
 清单已包含 8 个固定只读宿主信息文件。采样范围为选定节点，磁盘空间为 `/opt/stacks` 所在文件系统，不代表整个集群。采样周期与未知值处理参见 [服务器指标说明](../../README.zh-CN.md#服务器指标)。

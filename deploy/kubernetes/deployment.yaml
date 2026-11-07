@@ -22,8 +22,7 @@ spec:
         dockge-runtime: "true"
       containers:
         - name: dockge
-          # 先使用 deploy/Dockerfile 构建当前代码并推送到实际镜像仓库，再替换此值。
-          image: dockge-go:local
+          image: ghcr.io/dockge-go/dockge:0.2.5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

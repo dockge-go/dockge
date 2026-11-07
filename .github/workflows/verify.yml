@@ -30,6 +30,8 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Build and test
         run: make verify
+      - name: Validate Kubernetes manifests
+        run: go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 -strict -summary -kubernetes-version 1.31.0 deploy/kubernetes/*.yaml
       - name: Vet and race tests
         run: |
           go vet ./...
