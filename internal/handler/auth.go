@@ -133,3 +133,50 @@ func (h *AuthHandler) AutoLogin(ctx *gin.Context) {
 	}
 	v1.HandleSuccess(ctx, data)
 }
+
+// ListUsers 管理员列出全部用户。
+func (h *AuthHandler) ListUsers(ctx *gin.Context) {
+	data, err := h.AuthService.ListUsers(ctx, GetUserIDFromCtx(ctx))
+	if err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+	v1.HandleSuccess(ctx, data)
+}
+
+// CreateUser 管理员创建用户。
+func (h *AuthHandler) CreateUser(ctx *gin.Context) {
+	var req v1.CreateUserRequest
+	if err := bindJSON(ctx, &req); err != nil {
+		v1.HandleError(ctx, http.StatusBadRequest, err, nil)
+		return
+	}
+	if err := h.AuthService.CreateUser(ctx, GetUserIDFromCtx(ctx), &req); err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+	v1.HandleSuccess(ctx, nil)
+}
+
+// ResetUserPassword 管理员重置他人密码（目标旧会话即时失效）。
+func (h *AuthHandler) ResetUserPassword(ctx *gin.Context) {
+	var req v1.ResetUserPasswordRequest
+	if err := bindJSON(ctx, &req); err != nil {
+		v1.HandleError(ctx, http.StatusBadRequest, err, nil)
+		return
+	}
+	if err := h.AuthService.ResetUserPassword(ctx, GetUserIDFromCtx(ctx), ctx.Param("username"), req.Password); err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+	v1.HandleSuccess(ctx, nil)
+}
+
+// DeleteUser 管理员删除用户（保护在服务端：last-admin 409 / 自删 403）。
+func (h *AuthHandler) DeleteUser(ctx *gin.Context) {
+	if err := h.AuthService.DeleteUser(ctx, GetUserIDFromCtx(ctx), ctx.Param("username")); err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+	v1.HandleSuccess(ctx, nil)
+}

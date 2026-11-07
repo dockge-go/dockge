@@ -119,6 +119,11 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 			strictAuthRouter.GET("/me/disableauth", s.AuthHandler.GetDisableAuth)
 			strictAuthRouter.POST("/me/disableauth", s.AuthHandler.ToggleDisableAuth)
 
+			strictAuthRouter.GET("/users", s.AuthHandler.ListUsers)
+			strictAuthRouter.POST("/users", s.AuthHandler.CreateUser)
+			strictAuthRouter.PUT("/users/:username/password", s.AuthHandler.ResetUserPassword)
+			strictAuthRouter.DELETE("/users/:username", s.AuthHandler.DeleteUser)
+
 			strictAuthRouter.GET("/stacks/networks", s.StackHandler.Networks)
 			strictAuthRouter.GET("/stacks", s.StackHandler.List)
 			strictAuthRouter.POST("/stacks", s.StackHandler.Create)
