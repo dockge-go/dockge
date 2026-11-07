@@ -4,7 +4,7 @@ import { formatBytes, timeAgo } from '../lib/format';
 
 export default function Images() {
   const pg = () => paged('images', app.images);
-  const unused = () => app.images.filter(i => !i.system).length;
+  const unused = () => app.images.filter(i => !i.system && !i.InUse).length;
 
   return (
     <div class="view-section">

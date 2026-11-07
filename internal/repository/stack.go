@@ -51,8 +51,11 @@ func (r *Repository) List(ctx context.Context) ([]model.Stack, error) {
 
 	lsItems, err := r.ComposeLs(ctx)
 	if err != nil {
-		// docker 运行时不可用时降级：栈文件是唯一真相源，目录扫描结果照常
-		// 返回（状态停留在"仅有文件"、外部栈缺席），不因引擎故障遮蔽整个列表
+		// 文件仍可编辑，但无法查询运行时就不能断言栈未部署。
+		for i := range stacks {
+			stacks[i].Status = model.StatusUnknown
+			stacks[i].RuntimeError = fmt.Sprintf("查询栈 %q 运行状态失败: %v", stacks[i].Name, err)
+		}
 		return stacks, nil
 	}
 	for _, item := range lsItems {
@@ -86,6 +89,7 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 
 	if composeFile, ok := r.findComposeFile(name); ok {
 		stack.Managed = true
+		stack.Status = model.StatusCreatedFile
 		stack.ComposeFileName = composeFile
 		stack.ConfigFiles = filepath.Join(r.stacksDir, name, composeFile)
 		yaml, err := os.ReadFile(filepath.Join(r.stacksDir, name, composeFile))
@@ -93,8 +97,11 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 			return model.Stack{}, fmt.Errorf("read compose file: %w", err)
 		}
 		stack.Yaml = string(yaml)
-		if env, err := os.ReadFile(filepath.Join(r.stacksDir, name, ".env")); err == nil {
+		envPath := filepath.Join(r.stacksDir, name, ".env")
+		if env, err := os.ReadFile(envPath); err == nil {
 			stack.Env = string(env)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return model.Stack{}, fmt.Errorf("读取栈 %q 的环境文件 %s: %w", name, envPath, err)
 		}
 	} else {
 		// 目录不存在：仍可能是由 compose 管理的外部栈
@@ -123,7 +130,7 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 		}
 	}
 
-	// 托管栈的状态在上方文件读取时未知，需查询 compose ls；
+	// 托管栈先显示“仅有文件”，再查询 compose ls 获取运行状态；
 	// 外部栈分支刚刚查过并已设置状态，跳过以免重复调用 CLI。
 	if !external {
 		if lsItems, err := r.ComposeLs(ctx); err == nil {
@@ -134,12 +141,22 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 					break
 				}
 			}
+		} else {
+			stack.Status = model.StatusUnknown
+			stack.RuntimeError = fmt.Sprintf("查询栈 %q 运行状态失败: %v", name, err)
 		}
 	}
 
 	containers, err := r.StackPs(ctx, name)
 	if err != nil {
-		return model.Stack{}, err
+		if external {
+			return model.Stack{}, err
+		}
+		// Compose 也会验证配置；坏配置必须还能在编辑器中读取并修正。
+		stack.Status = model.StatusUnknown
+		stack.RuntimeError = strings.TrimSpace(stack.RuntimeError + "\n" + err.Error())
+		stack.Containers = []model.Container{}
+		return stack, nil
 	}
 	stack.Containers = containers
 	return stack, nil
@@ -150,21 +167,35 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) error {
 	dir := r.StackPath(stack.Name)
 	if isAdd {
-		if _, err := os.Stat(dir); err == nil {
+		if _, err := os.Lstat(dir); err == nil {
 			return ErrConflict
 		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("%w：无法创建目录 %s：%v", ErrStacksNotWritable, dir, err)
 		}
 	} else {
-		if _, err := os.Stat(dir); err != nil {
-			return ErrNotFound
+		if info, err := os.Lstat(dir); err != nil {
+			return fmt.Errorf("读取栈目录 %s: %w", dir, err)
+		} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("栈目录 %s 必须是真实目录而非符号链接", dir)
+		}
+	}
+	if !isAdd {
+		if file, ok := r.findComposeFile(stack.Name); ok {
+			stack.ComposeFileName = file
 		}
 	}
 	file := stack.ComposeFileName
 	if file == "" {
 		file = "compose.yaml"
 		stack.ComposeFileName = file
+	}
+	valid := false
+	for _, accepted := range acceptedComposeFileNames {
+		valid = valid || file == accepted
+	}
+	if !valid {
+		return fmt.Errorf("非法 compose 文件名 %q：仅允许 %v", file, acceptedComposeFileNames)
 	}
 	if err := writeFileAtomic(filepath.Join(dir, file), []byte(stack.Yaml), 0o644); err != nil {
 		return fmt.Errorf("%w：无法写入 %s：%v", ErrStacksNotWritable, filepath.Join(dir, file), err)
@@ -182,18 +213,38 @@ func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) e
 // writeFileAtomic 原子写文件：先写同目录临时文件再 rename 替换，
 // 中途崩溃（断电/被杀）不会留下半截文件——compose.yaml 是栈的唯一真相源。
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".dockge-tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), ".dockge-tmp-*")
+	if err != nil {
 		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err = f.Chmod(perm); err == nil {
+		_, err = f.Write(data)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	return os.Rename(tmp, path)
 }
 
-// Delete 删除整个栈目录（调用方须先执行 compose down）。
+// Delete 删除整个栈目录，调用方须先完成运行时资源清理与核验。
 func (r *Repository) Delete(ctx context.Context, name string) error {
 	dir := r.StackPath(name)
-	if _, err := os.Stat(dir); err != nil {
-		return ErrNotFound
+	if info, err := os.Lstat(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("读取栈目录 %s: %w", dir, err)
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("栈目录 %s 必须是真实目录而非符号链接", dir)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove stack dir: %w", err)
@@ -201,7 +252,7 @@ func (r *Repository) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-// EnsureStacksDir 确保 stacks 目录存在（迁移与启动时调用）。
+// EnsureStacksDir 在启动时确保 stacks 目录存在。
 func (r *Repository) EnsureStacksDir() error {
 	if err := os.MkdirAll(r.stacksDir, 0o755); err != nil {
 		return fmt.Errorf("ensure stacks dir: %w", err)

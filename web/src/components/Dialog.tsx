@@ -11,7 +11,7 @@ export default function Dialog() {
   });
 
   return (
-    <div class="dialog-overlay" classList={{ open: app.dialog.open }} role="alertdialog" aria-modal="true"
+    <div class="dialog-overlay" classList={{ open: app.dialog.open }} role="alertdialog" aria-modal="true" aria-hidden={!app.dialog.open} inert={!app.dialog.open}
          onClick={e => { if (e.target === e.currentTarget) dialogCancel(); }}>
       <div class="dialog-alert">
         <div class="dialog-message">{app.dialog.message}</div>

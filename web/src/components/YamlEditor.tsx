@@ -6,6 +6,7 @@
  *  - 格式化（确认提示会移除注释）；插入服务骨架（自动定位 services 块） */
 import { Show, createMemo, createSignal } from 'solid-js';
 import { app, setApp, selectedStackObj, confirmDlg, toast, t } from '../store';
+import { indentEdit, type EditorEdit } from '../lib/editor-edit';
 import { hlYaml } from '../lib/highlight';
 import { yamlProblem, parseServices, normalizeYaml } from '../lib/yaml';
 
@@ -17,10 +18,11 @@ export default function YamlEditor() {
   const [cursorCol, setCursorCol] = createSignal(1);
 
   const stack = selectedStackObj;
+  const readonly = () => !stack()?.managed || !!stack()?.loadError;
   const code = createMemo(() => stack()?.compose || '');
   const setCode = (v: string) => {
     const s = stack();
-    if (s) setApp('stacks', x => x.id === s.id, 'compose', v);
+    if (s && !readonly()) setApp('stacks', x => x.id === s.id, 'compose', v);
   };
   const highlighted = createMemo(() => hlYaml(code()));
   const lineCount = createMemo(() => code().split('\n').length);
@@ -33,7 +35,7 @@ export default function YamlEditor() {
   const valid = createMemo(() => problem() === null);
 
   const updateCursor = () => {
-    if (!ta) return;
+    if (!ta || readonly()) return;
     const before = ta.value.slice(0, ta.selectionStart || 0);
     const lines = before.split('\n');
     setCursorLn(lines.length);
@@ -45,33 +47,30 @@ export default function YamlEditor() {
     if (gutter) gutter.scrollTop = ta.scrollTop;
   };
   const onKeydown = (e: KeyboardEvent) => {
-    if (e.isComposing || !ta) return;
+    if (readonly() || e.isComposing || !ta) return;
     if (e.key === 'Tab') {
       e.preventDefault();
-      insertAtCaret('  ');
+      applyEdit(indentEdit(ta.value, ta.selectionStart, ta.selectionEnd, e.shiftKey));
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const el = ta;
       const before = el.value.slice(0, el.selectionStart);
-      const after = el.value.slice(el.selectionEnd);
       const curLine = before.slice(before.lastIndexOf('\n') + 1);
       let indent = (/^\s*/.exec(curLine) || [''])[0];
       if (/:\s*$/.test(curLine)) indent += '  ';
       else if (/^\s*-\s+\S/.test(curLine) && !/:\s/.test(curLine)) indent = (/^\s*-\s+/.exec(curLine) || [''])[0];
       const pos = el.selectionStart + ('\n' + indent).length;
-      el.value = before + '\n' + indent + after;
-      el.setSelectionRange(pos, pos);
-      setCode(el.value);
-      updateCursor();
+      applyEdit({from:el.selectionStart, to:el.selectionEnd, text:'\n' + indent, start:pos, end:pos});
     }
   };
-  const insertAtCaret = (text: string) => {
-    if (!ta) return;
-    const before = ta.value.slice(0, ta.selectionStart);
-    const after = ta.value.slice(ta.selectionEnd);
-    const pos = ta.selectionStart + text.length;
-    ta.value = before + text + after;
-    ta.setSelectionRange(pos, pos);
+  const applyEdit = (edit: EditorEdit) => {
+    if (!ta || readonly()) return;
+    ta.focus();
+    ta.setSelectionRange(edit.from, edit.to);
+    // 直接赋 value/setRangeText 会断开原生 undo；insertText 与普通输入共享历史。
+    const applied = document.execCommand(edit.text ? 'insertText' : 'delete', false, edit.text);
+    if (!applied) ta.setRangeText(edit.text, edit.from, edit.to, 'end');
+    ta.setSelectionRange(edit.start, edit.end);
     setCode(ta.value);
     updateCursor();
   };
@@ -89,7 +88,7 @@ export default function YamlEditor() {
   };
   const validate = () => {
     if (valid()) { toast(t('toast.yamlValid'), 'success'); return; }
-    toast(t('toast.yamlIssue'), 'error');
+    toast(problem()?.msg || t('toast.yamlIssue'), 'error');
     if (problem()?.line) jumpTo(problem()!.line);
   };
   const format = () => {
@@ -99,7 +98,7 @@ export default function YamlEditor() {
         setCode(normalizeYaml(code()));
         toast(t('toast.formatApplied'), 'success');
       } catch (e) {
-        toast(t('toast.yamlIssue'), 'info');
+        toast((e as Error).message, 'error');
       }
     });
   };
@@ -134,11 +133,11 @@ export default function YamlEditor() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12" /></svg>
             {t('stack.validate')}
           </button>
-          <button type="button" class="btn btn-ghost" onClick={format}>
+          <button type="button" class="btn btn-ghost" disabled={readonly()} onClick={format}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="21" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="3" y2="18" /></svg>
             {t('stack.format')}
           </button>
-          <button type="button" class="btn btn-ghost" onClick={insertService}>
+          <button type="button" class="btn btn-ghost" disabled={readonly()} onClick={insertService}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
             {t('editor.insertService')}
           </button>
@@ -163,7 +162,7 @@ export default function YamlEditor() {
           <div class="editor-code">
             <pre class="editor-hl editor-metric" ref={pre} aria-hidden="true"><code innerHTML={highlighted()} /></pre>
             <textarea class="editor-input editor-metric" ref={ta} spellcheck={false} wrap="off"
-                      value={code()}
+                      readonly={readonly()} aria-label="compose.yaml" value={code()}
                       onInput={e => { setCode(e.currentTarget.value); updateCursor(); }}
                       onScroll={onScroll}
                       onClick={updateCursor}

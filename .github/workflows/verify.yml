@@ -1,0 +1,40 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build and test
+        run: make verify
+      - name: Vet and race tests
+        run: |
+          go vet ./...
+          go test -race ./internal/repository ./internal/service ./internal/server
+      - name: Dependency security
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+          pnpm --dir ./web audit --audit-level=high

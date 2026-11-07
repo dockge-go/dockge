@@ -1,5 +1,5 @@
 import { A, useLocation } from '@solidjs/router';
-import { app, setApp, runningCount, user, doLogout, roleLabel, t } from '../store';
+import { app, setApp, runningCount, user, doLogout, t } from '../store';
 
 interface NavItem { route: string; label: string; icon: string; badge?: 'containers' | 'stacks' | 'images' }
 interface NavGroup { group: string; items: NavItem[] }
@@ -71,14 +71,14 @@ export default function Sidebar() {
       </nav>
       <div class="sidebar-footer">
         <div class="engine-badge" style="margin-bottom:var(--space-2)">
-          <span class="engine-dot" />
-          <span>Podman 5.2.2</span>
+          <span class="engine-dot" style={{background:app.errors.runtime || app.errors.info || !app.runtime ? 'var(--meta)' : 'var(--success)'}} />
+          <span>{app.runtime || t('data.unknown')} · {app.info.ServerVersion || t('data.unknown')}</span>
         </div>
         <div class="user-chip">
           <span class="user-avatar">{(user()?.username || '?').slice(0, 1).toUpperCase()}</span>
           <span class="user-chip-name">
             <span class="user-chip-username">{user()?.username}</span>
-            <span class="user-chip-role">{roleLabel(user()?.role || 'member')}</span>
+            <span class="user-chip-role">{t('auth.roleAdmin')}</span>
           </span>
           <button type="button" class="btn-icon" style="padding:4px" title={t('auth.logout')} aria-label={t('auth.logout')} onClick={doLogout}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>

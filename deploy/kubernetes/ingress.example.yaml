@@ -1,0 +1,23 @@
+# 需要实际 Ingress 控制器和有效 TLS Secret；替换域名及控制器名称。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dockge
+  namespace: dockge
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - dockge.example.com
+      secretName: dockge-tls
+  rules:
+    - host: dockge.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dockge
+                port:
+                  name: http

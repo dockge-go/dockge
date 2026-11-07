@@ -3,7 +3,7 @@ import { app, setApp, paged, openSheet, removeNetwork, clearUnused, t } from '..
 
 export default function Networks() {
   const pg = () => paged('networks', app.networks);
-  const unused = () => app.networks.filter(n => !n.system).length;
+  const unused = () => app.networks.filter(n => !n.system && !n.Containers?.length).length;
 
   return (
     <div class="view-section">
@@ -50,7 +50,7 @@ export default function Networks() {
                 <td><span class="cell-sub">{n.Subnet}</span></td>
                 <td><span style="font-size:var(--text-sm)">{t('common.containersCount', { n: n.Containers?.length ?? 0 })}</span></td>
                 <td onClick={e => e.stopPropagation()}>
-                  <Show when={!n.system}>
+                  <Show when={!n.system && !n.Containers?.length}>
                     <button type="button" class="btn-icon" style="color:var(--danger)" title={t('common.remove')} onClick={() => removeNetwork(n.ID)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
                     </button>

@@ -19,14 +19,13 @@ import (
 	"regexp"
 )
 
-// upgrader 把 HTTP 连接升级为 WebSocket；站点自带 JWT 认证，放行全部来源。
+// upgrader 把 HTTP 连接升级为 WebSocket；站点自带 JWT 认证，默认限制同源以防跨站连接。
 // compose 服务名规则（compose spec：字母数字开头，允许 _.-），用于 exec 注入防线
 var serviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  8192,
 	WriteBufferSize: 8192,
-	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 // TerminalHandler 承载终端 WebSocket 与日志流端点。
@@ -53,10 +52,97 @@ type wsControlMessage struct {
 //
 // 浏览器 WebSocket API 无法自定义请求头，认证依赖 StrictAuth 对 ?token= 的支持。
 func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
-	name := ctx.Param("name")
-	typ := ctx.Param("type")
-	if typ != "compose-logs" && typ != "exec" {
-		h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "未知终端类型: " + typ})
+	name, typ := ctx.Param("name"), ctx.Param("type")
+	var cmd *exec.Cmd
+	var err error
+	readOnly := typ == "compose-logs" || typ == "container-logs"
+	fail := func(message string) {
+		// 浏览器拿不到升级失败的 HTTP body；同源 WS 用文本传递校验明细。
+		if websocket.IsWebSocketUpgrade(ctx.Request) {
+			ws, e := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
+			if e == nil {
+				_ = ws.WriteMessage(websocket.TextMessage, []byte("[error] "+message+"\n"))
+				_ = ws.Close()
+			}
+			return
+		}
+		h.writeJSON(ctx, http.StatusBadRequest, gin.H{"message": message})
+	}
+	if typ != "compose-logs" && typ != "exec" && typ != "container-logs" && typ != "container-exec" {
+		fail("未知终端类型: " + typ)
+		return
+	}
+	shell := ctx.DefaultQuery("shell", "sh")
+	if !readOnly && shell != "bash" && shell != "sh" {
+		fail("不支持的 shell: " + shell + "，仅支持 sh/bash")
+		return
+	}
+	tail := ctx.DefaultQuery("tail", "100")
+	if readOnly {
+		if n, e := strconv.Atoi(tail); e != nil || n < 0 || n > 10000 {
+			fail("tail=" + tail + "，必须是 0–10000 的整数")
+			return
+		}
+	}
+	if typ == "container-logs" || typ == "container-exec" {
+		if !repository.ContainerIDPattern.MatchString(name) {
+			fail("非法容器标识符: " + name)
+			return
+		}
+		if readOnly {
+			cmd, err = h.Repository.ContainerCommand(ctx.Request.Context(), "logs", "-f", "--tail", tail, name)
+		} else {
+			cs, e := h.Repository.ResourceContainers(ctx.Request.Context())
+			if e != nil {
+				fail(e.Error())
+				return
+			}
+			found := false
+			for _, c := range cs {
+				if c.ID == name {
+					found = true
+					if c.System {
+						fail("禁止进入面板自身容器终端: " + name)
+						return
+					}
+				}
+			}
+			if !found {
+				fail("容器不存在: " + name)
+				return
+			}
+			cmd, err = h.Repository.ContainerCommand(ctx.Request.Context(), "exec", "-it", "-e", "TERM=xterm-256color", name, shell)
+		}
+	} else {
+		stack := name
+		if typ == "exec" {
+			stack = ctx.Query("stack")
+			if !serviceNamePattern.MatchString(name) {
+				fail("非法服务名: " + name)
+				return
+			}
+		}
+		if !service.StackNamePattern.MatchString(stack) {
+			fail("非法栈名: " + stack)
+			return
+		}
+		args := []string{}
+		if typ == "exec" {
+			args = append(args, "exec", name, shell)
+		} else {
+			args = append(args, "logs", "-f", "--tail", tail, "--no-color")
+			if svc := ctx.Query("service"); svc != "" {
+				if !serviceNamePattern.MatchString(svc) {
+					fail("非法服务名: " + svc)
+					return
+				}
+				args = append(args, svc)
+			}
+		}
+		cmd, err = h.Repository.StackComposeCommand(ctx.Request.Context(), stack, args...)
+	}
+	if err != nil {
+		fail(err.Error())
 		return
 	}
 	ws, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
@@ -64,70 +150,7 @@ func (h *TerminalHandler) WebSocket(ctx *gin.Context) {
 		h.Logger.Error().Err(err).Msg("websocket upgrade")
 		return
 	}
-
-	var cmd *exec.Cmd
-	readOnly := false
-	switch typ {
-	case "exec":
-		// 上游对齐：docker compose exec <服务名> <shell>（而非 docker exec 容器 ID），
-		// 栈名与 shell 经 query 下发（?stack=&shell=sh|bash）
-		stack := ctx.Query("stack")
-		shell := ctx.DefaultQuery("shell", "bash")
-		if stack == "" || !service.StackNamePattern.MatchString(stack) {
-			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "非法栈名: " + stack})
-			return
-		}
-		if shell != "bash" && shell != "sh" {
-			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "不支持的 shell: " + shell})
-			return
-		}
-		if !serviceNamePattern.MatchString(name) {
-			h.writeJSON(ctx, http.StatusBadRequest, gin.H{"error": "非法服务名: " + name})
-			return
-		}
-		dir, dirErr := h.Repository.StackExecDir(ctx.Request.Context(), stack)
-		if dirErr != nil {
-			h.writeJSON(ctx, http.StatusBadGateway, gin.H{"error": "找不到栈 " + stack + " 的 compose 文件，无法进入终端"})
-			_ = ws.Close()
-			return
-		}
-		// busybox sh 在 exec 目标缺失时会直接退出而非走 || 回退，
-		// 因此 bash 时先探测存在再 exec（nginx:alpine 等镜像只有 sh）；显式 sh 直连
-		args := []string{"-p", stack, "exec", name}
-		if shell == "bash" {
-			args = append(args, "/bin/sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
-		} else {
-			args = append(args, "sh")
-		}
-		cmd, err = h.Repository.ComposeCommand(ctx.Request.Context(), args...)
-		if err != nil {
-			h.writeJSON(ctx, http.StatusBadGateway, gin.H{"error": err.Error()})
-			_ = ws.Close()
-			return
-		}
-		cmd.Dir = dir
-	default:
-		tail := ctx.DefaultQuery("tail", "100")
-		if _, err := strconv.Atoi(tail); err != nil {
-			tail = "100"
-		}
-		dir, dirErr := h.Repository.StackExecDir(ctx.Request.Context(), name)
-		if dirErr != nil {
-			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m找不到栈 "+name+" 的 compose 文件，无法展示日志\x1b[0m\r\n"))
-			_ = ws.Close()
-			return
-		}
-		cmd, err = h.Repository.ComposeCommand(ctx.Request.Context(),
-			"-p", name, "logs", "-f", "--tail", tail, "--no-color")
-		if err != nil {
-			_ = ws.WriteMessage(websocket.TextMessage, []byte("\x1b[31m"+err.Error()+"\x1b[0m\r\n"))
-			_ = ws.Close()
-			return
-		}
-		cmd.Dir = dir
-		readOnly = true
-	}
-	h.serveSession(ws, cmd, readOnly, typ == "exec")
+	h.serveSession(ws, cmd, readOnly, !readOnly)
 }
 
 // serveSession 把子进程输出接到 WebSocket 并双向转发：
@@ -179,7 +202,7 @@ func (h *TerminalHandler) serveSession(ws *websocket.Conn, cmd *exec.Cmd, readOn
 		_ = reader.Close()
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
-			_, _ = cmd.Process.Wait()
+			_ = cmd.Wait()
 		}
 		_ = ws.Close()
 	}()
@@ -190,7 +213,8 @@ func (h *TerminalHandler) serveSession(ws *websocket.Conn, cmd *exec.Cmd, readOn
 		for {
 			n, readErr := reader.Read(buf)
 			if n > 0 {
-				if writeErr := ws.WriteMessage(websocket.TextMessage, buf[:n]); writeErr != nil {
+				if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+					_ = ws.Close()
 					return
 				}
 			}
@@ -214,10 +238,10 @@ func (h *TerminalHandler) serveSession(ws *websocket.Conn, cmd *exec.Cmd, readOn
 		var ctrl wsControlMessage
 		if json.Unmarshal(msg, &ctrl) == nil && ctrl.Type == "resize" {
 			var rows, cols uint16 = 24, 80
-			if v, ok := ctrl.Data["rows"].(float64); ok && v > 0 {
+			if v, ok := ctrl.Data["rows"].(float64); ok && v >= 1 && v <= 500 && v == float64(uint16(v)) {
 				rows = uint16(v)
 			}
-			if v, ok := ctrl.Data["cols"].(float64); ok && v > 0 {
+			if v, ok := ctrl.Data["cols"].(float64); ok && v >= 1 && v <= 500 && v == float64(uint16(v)) {
 				cols = uint16(v)
 			}
 			resize(rows, cols)

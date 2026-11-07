@@ -33,6 +33,10 @@ func stubCLI(t *testing.T) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "docker-stub")
 	script := `#!/bin/sh
+if [ "$1" = compose ] && [ "$6" = config ]; then
+ echo '{"services":{"web":{"image":"nginx:latest"}},"volumes":{},"networks":{}}'
+ exit 0
+fi
 case "$*" in
   "compose ls --all --format json") echo '[]' ;;
   "network ls --format {{.Name}}") echo "bridge host none mynet" ;;
@@ -206,8 +210,11 @@ func TestAPI(t *testing.T) {
 	if code, _ := call(t, engine, "POST", "/v1/stacks/demo/services/web/restart", token, nil); code != 200 {
 		t.Fatal("服务级重启应 200")
 	}
-	if code, _ := call(t, engine, "DELETE", "/v1/stacks/demo", token, nil); code != 200 {
-		t.Fatal("删除栈应 200")
+	if code, payload := call(t, engine, "GET", "/v1/stacks/demo/delete-plan", token, nil); code != 200 {
+		t.Fatalf("删除预检应 200: %d %v", code, payload)
+	}
+	if code, payload := call(t, engine, "DELETE", "/v1/stacks/demo", token, nil); code != 200 {
+		t.Fatalf("删除栈应 200: %d %v", code, payload)
 	}
 	if code, _ := call(t, engine, "GET", "/v1/stacks/demo", token, nil); code != http.StatusNotFound {
 		t.Fatal("删除后应 404")
@@ -288,7 +295,10 @@ func TestAPI(t *testing.T) {
 		{"GET", "/v1/console/terminal"},
 		{"POST", "/v1/stacks/validate"},
 		{"GET", "/v1/oidc/providers"},
-		{"GET", "/v1/auth/config"},
+		{"GET", "/v1/users"},
+		{"POST", "/v1/users"},
+		{"PUT", "/v1/users/other/password"},
+		{"DELETE", "/v1/users/other"},
 		{"GET", "/v1/version/check"},
 	} {
 		if code, _ := call(t, engine, removed.method, removed.path, token, map[string]string{}); code != http.StatusNotFound {

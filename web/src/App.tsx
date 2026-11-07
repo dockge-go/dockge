@@ -1,5 +1,5 @@
-import { onMount, Show, type JSX } from 'solid-js';
-import { app, setApp, closeSheet, dialogCancel, user } from './store';
+import { onMount, onCleanup, For, Show, type JSX } from 'solid-js';
+import { app, setApp, closeSheet, dialogCancel, user, refreshData, t } from './store';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import AuthScreen from './components/AuthScreen';
@@ -10,6 +10,7 @@ import Toasts from './components/Toasts';
 export default function App(props: { children?: JSX.Element }) {
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof Element && e.target.closest('.terminal-pane.interactive')) return;
       if (e.key === 'Escape') { closeSheet(); dialogCancel(); }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
@@ -18,6 +19,7 @@ export default function App(props: { children?: JSX.Element }) {
       }
     };
     window.addEventListener('keydown', onKey);
+    onCleanup(() => window.removeEventListener('keydown', onKey));
   });
 
   return (
@@ -27,13 +29,18 @@ export default function App(props: { children?: JSX.Element }) {
           <Sidebar />
           <div class="main-content">
             <Topbar />
-            <main class="content-area">{props.children}</main>
+            <main class="content-area">
+              <div class="data-source" style="margin-bottom:var(--space-3);font-size:var(--text-xs);color:var(--muted)">
+                {app.loading ? t('data.loading') : t('data.source', {runtime:app.runtime || t('data.unknown'), time:app.refreshedAt ? new Date(app.refreshedAt).toLocaleTimeString() : '—'})}
+                <button type="button" class="btn btn-ghost" disabled={app.loading} onClick={() => void refreshData()}>{t('common.refresh')}</button>
+                <For each={Object.entries(app.errors)}>{([source, message]) => <p class="auth-error" style="white-space:pre-wrap">{source}: {message}</p>}</For>
+              </div>
+              {props.children}</main>
           </div>
         </div>
         <div class="sidebar-backdrop" classList={{ open: app.sidebarOpen }} onClick={() => setApp('sidebarOpen', false)} />
       </Show>
-      <Sheet />
-      <Dialog />
+      <Show when={user()}><Sheet /><Dialog /></Show>
       <Toasts />
     </>
   );

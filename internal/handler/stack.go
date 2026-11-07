@@ -167,3 +167,13 @@ func (h *StackHandler) Stats(ctx *gin.Context) {
 	}
 	v1.HandleSuccess(ctx, data)
 }
+
+// DeletePlan 返回删除前的资源范围，不能以笼统确认误删共享资源。
+func (h *StackHandler) DeletePlan(c *gin.Context) {
+	q, err := h.StackService.DeletePlan(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		handleServiceError(c, err)
+		return
+	}
+	v1.HandleSuccess(c, q)
+}

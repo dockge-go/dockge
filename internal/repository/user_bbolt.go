@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"fmt"
 	"time"
 
 	"go.etcd.io/bbolt"
@@ -13,37 +13,31 @@ import (
 
 // ==================== User ====================
 
+// CreateUser 在单个写事务中只允许首次初始化，避免并发创建多个账号。
 func (r *Repository) CreateUser(ctx context.Context, m *model.DockgeUser) error {
 	err := r.db.Update(func(tx *bbolt.Tx) error {
 		b, err := TxBucket(tx, bucketUsers)
 		if err != nil {
 			return err
 		}
-		if b.Get([]byte(m.Username)) != nil {
+		if b.Stats().KeyN != 0 {
 			return ErrConflict
 		}
-		id, _ := b.NextSequence()
+		id, err := b.NextSequence()
+		if err != nil {
+			return fmt.Errorf("分配单用户账号 ID：%w", err)
+		}
 		m.ID = uint(id)
+		now := time.Now()
+		if m.CreatedAt.IsZero() {
+			m.CreatedAt = now
+		}
+		if m.UpdatedAt.IsZero() {
+			m.UpdatedAt = now
+		}
 		return b.Put([]byte(m.Username), marshalUser(m))
 	})
 	return err
-}
-
-// GetUserByUsername 按用户名查询用户记录（users bucket 以 username 为 key）。
-func (r *Repository) GetUserByUsername(ctx context.Context, username string) (model.DockgeUser, error) {
-	var result model.DockgeUser
-	err := r.db.View(func(tx *bbolt.Tx) error {
-		b, err := TxBucket(tx, bucketUsers)
-		if err != nil {
-			return err
-		}
-		data := b.Get([]byte(username))
-		if data == nil {
-			return ErrNotFound
-		}
-		return unmarshalUser(data, &result)
-	})
-	return result, err
 }
 
 // CountUsers 返回用户总数（用于判断是否需要首次安装引导）。
@@ -58,34 +52,6 @@ func (r *Repository) CountUsers(ctx context.Context) (int64, error) {
 		return nil
 	})
 	return count, err
-}
-
-// GetUser 按 ID 查找用户。users bucket 以 username 为 key（与迁移/创建逻辑一致），
-// 因此这里遍历匹配 user.ID，而不是按数值 key 直查。
-func (r *Repository) GetUser(ctx context.Context, uid uint) (model.DockgeUser, error) {
-	var result model.DockgeUser
-	var found bool
-	err := r.db.View(func(tx *bbolt.Tx) error {
-		b, err := TxBucket(tx, bucketUsers)
-		if err != nil {
-			return err
-		}
-		return b.ForEach(func(_, v []byte) error {
-			var u model.DockgeUser
-			if err := unmarshalUser(v, &u); err != nil {
-				return nil
-			}
-			if u.ID == uid {
-				result = u
-				found = true
-			}
-			return nil
-		})
-	})
-	if err == nil && !found {
-		return result, ErrNotFound
-	}
-	return result, err
 }
 
 // updateUser 在 users bucket 中按 ID 定位并以原 key 原地更新。
@@ -127,9 +93,10 @@ func (r *Repository) UpdatePassword(ctx context.Context, uid uint, passwordHash 
 	})
 }
 
-// ListUsers 返回全部用户（按 ID 升序）。
-func (r *Repository) ListUsers(ctx context.Context) ([]model.DockgeUser, error) {
-	var users []model.DockgeUser
+// SingleUser 只选最早创建的管理员，历史额外账号不再获得登录或会话权限；不静默删除旧数据。
+func (r *Repository) SingleUser(ctx context.Context) (model.DockgeUser, error) {
+	var result model.DockgeUser
+	found := false
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b, err := TxBucket(tx, bucketUsers)
 		if err != nil {
@@ -138,30 +105,22 @@ func (r *Repository) ListUsers(ctx context.Context) ([]model.DockgeUser, error) 
 		return b.ForEach(func(_, v []byte) error {
 			var u model.DockgeUser
 			if err := unmarshalUser(v, &u); err != nil {
+				return fmt.Errorf("读取单用户账号：%w", err)
+			}
+			if u.Role != "" && u.Role != model.RoleAdmin {
 				return nil
 			}
-			users = append(users, u)
+			if !found || u.ID < result.ID {
+				result = u
+				found = true
+			}
 			return nil
 		})
 	})
-	// 按 ID 排序
-	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
-	return users, err
-}
-
-// DeleteUser 按用户名删除用户。users bucket 以 username 为 key，按 key 直删；
-// 不存在返回哨兵 ErrNotFound（与 GetUserByUsername 一致）。
-func (r *Repository) DeleteUser(ctx context.Context, username string) error {
-	return r.db.Update(func(tx *bbolt.Tx) error {
-		b, err := TxBucket(tx, bucketUsers)
-		if err != nil {
-			return err
-		}
-		if b.Get([]byte(username)) == nil {
-			return ErrNotFound
-		}
-		return b.Delete([]byte(username))
-	})
+	if err == nil && !found {
+		return result, ErrNotFound
+	}
+	return result, err
 }
 
 // ==================== Setting ====================

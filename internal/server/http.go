@@ -35,8 +35,10 @@ type HTTPServer struct {
 	Logger             *log.Logger                 `do:""`
 	JWT                *jwt.JWT                    `do:""`
 	AuthService        service.AuthService         `do:""`
+	OIDCHandler        *handler.OIDCHandler        `do:""`
 	AuthHandler        *handler.AuthHandler        `do:""`
 	StackHandler       *handler.StackHandler       `do:""`
+	ResourceHandler    *handler.ResourceHandler    `do:""`
 	ImageHandler       *handler.ImageHandler       `do:""`
 	DockerHandler      *handler.DockerHandler      `do:""`
 	SettingsHandler    *handler.SettingsHandler    `do:""`
@@ -101,6 +103,10 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 	{
 		noAuthRouter := v1Group.Group("/")
 		{
+			noAuthRouter.GET("/auth/config", s.OIDCHandler.Config)
+			noAuthRouter.GET("/auth/oidc/login", s.OIDCHandler.Login)
+			noAuthRouter.GET("/auth/oidc/callback", s.OIDCHandler.Callback)
+			noAuthRouter.POST("/auth/oidc/session", s.OIDCHandler.Session)
 			noAuthRouter.POST("/login", s.AuthHandler.Login)
 			noAuthRouter.POST("/setup", s.AuthHandler.Setup)
 			noAuthRouter.GET("/setup/need", s.AuthHandler.NeedSetup)
@@ -119,11 +125,12 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 			strictAuthRouter.GET("/me/disableauth", s.AuthHandler.GetDisableAuth)
 			strictAuthRouter.POST("/me/disableauth", s.AuthHandler.ToggleDisableAuth)
 
-			strictAuthRouter.GET("/users", s.AuthHandler.ListUsers)
-			strictAuthRouter.POST("/users", s.AuthHandler.CreateUser)
-			strictAuthRouter.PUT("/users/:username/password", s.AuthHandler.ResetUserPassword)
-			strictAuthRouter.DELETE("/users/:username", s.AuthHandler.DeleteUser)
-
+			strictAuthRouter.GET("/resources", s.ResourceHandler.Snapshot)
+			strictAuthRouter.GET("/system", s.ResourceHandler.System)
+			strictAuthRouter.POST("/resources/:kind", s.ResourceHandler.Create)
+			strictAuthRouter.POST("/resources/:kind/:id/:action", s.ResourceHandler.Action)
+			strictAuthRouter.GET("/resources/images/:id/history", s.ResourceHandler.History)
+			strictAuthRouter.GET("/stacks/:name/delete-plan", s.StackHandler.DeletePlan)
 			strictAuthRouter.GET("/stacks/networks", s.StackHandler.Networks)
 			strictAuthRouter.GET("/stacks", s.StackHandler.List)
 			strictAuthRouter.POST("/stacks", s.StackHandler.Create)

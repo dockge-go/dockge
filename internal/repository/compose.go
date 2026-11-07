@@ -89,7 +89,13 @@ func (r *Repository) ComposeLs(ctx context.Context) ([]composeLsItem, error) {
 // down 仍可按项目名 label 执行，其余操作将由 compose 报缺文件错误。
 func (r *Repository) resolveStackExec(ctx context.Context, name string) (dir string, files []string, err error) {
 	stackDir := r.StackPath(name)
-	if info, statErr := os.Stat(stackDir); statErr == nil && info.IsDir() {
+	if info, statErr := os.Lstat(stackDir); statErr == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", nil, fmt.Errorf("栈目录 %s 必须是真实目录而非符号链接", stackDir)
+		}
+		if file, ok := r.findComposeFile(name); ok {
+			return stackDir, []string{filepath.Join(stackDir, file)}, nil
+		}
 		return stackDir, nil, nil
 	}
 	items, err := r.ComposeLs(ctx)
@@ -141,8 +147,7 @@ func (r *Repository) StackPs(ctx context.Context, name string) ([]model.Containe
 	out, err := r.runComposeIn(ctx, stackDir, composeOpTimeout,
 		composeArgs(name, files, "ps", "--all", "--format", "json")...)
 	if err != nil {
-		// compose v2 在项目不存在时可能报错，统一按无容器处理
-		return []model.Container{}, nil
+		return nil, fmt.Errorf("查询栈 %q 容器失败: %w", name, err)
 	}
 	items := make([]composePsItem, 0)
 	if strings.TrimSpace(out) == "" {
@@ -263,9 +268,13 @@ func (r *Repository) ServiceOp(ctx context.Context, name, service, op string) (s
 // StackStats 返回栈内容器的即时资源占用（docker stats --no-stream）。
 // 栈未部署（无容器 ID）时返回空切片。
 func (r *Repository) StackStats(ctx context.Context, name string) ([]model.ContainerStat, error) {
-	idsOut, err := r.runComposeIn(ctx, "", composeOpTimeout, "-p", name, "ps", "--all", "-q")
+	dir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
-		return []model.ContainerStat{}, nil
+		return nil, err
+	}
+	idsOut, err := r.runComposeIn(ctx, dir, composeOpTimeout, composeArgs(name, files, "ps", "--all", "-q")...)
+	if err != nil {
+		return nil, fmt.Errorf("查询栈 %q 统计对象失败: %w", name, err)
 	}
 	ids := strings.Fields(idsOut)
 	if len(ids) == 0 {
@@ -283,7 +292,7 @@ func (r *Repository) StackStats(ctx context.Context, name string) ([]model.Conta
 		}
 		var stat model.ContainerStat
 		if err := json.Unmarshal([]byte(line), &stat); err != nil {
-			continue // 跳过无法解析的行（容器刚退出等）
+			return nil, fmt.Errorf("解析统计行 %q: %w", line, err)
 		}
 		stats = append(stats, stat)
 	}

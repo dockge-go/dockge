@@ -6,7 +6,7 @@ import {
 } from '../store';
 import { ctrName, statusKind, statusLabel, statusText, portsText } from '../lib/format';
 
-/* 重启策略 → i18n 键；文案随语言切换即时生效（不做硬编码） */
+/* 重启策略 → i18n 键；文案随语言切换即时生效 */
 const RESTART_KEYS: Record<string, string> = {
   no: 'restart.no', always: 'restart.always',
   'unless-stopped': 'restart.unless-stopped', 'on-failure': 'restart.on-failure'

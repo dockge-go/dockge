@@ -23,8 +23,10 @@ import (
 // Package registers all handler-layer providers into the injector.
 var Package = do.Package(
 	do.Lazy(NewAuthHandler),
+	do.Lazy(NewOIDCHandler),
 	do.Lazy(NewStackHandler),
 	do.Lazy(NewImageHandler),
+	do.Lazy(NewResourceHandler),
 	do.Lazy(NewDockerHandler),
 	do.Lazy(NewSettingsHandler),
 	do.Lazy(NewComposerizeHandler),

@@ -12,3 +12,10 @@ web/node_modules
 web/dist
 *.md
 .DS_Store
+.planning
+docs
+stacks
+.env
+*.db
+*.sqlite
+*.log

@@ -9,11 +9,11 @@ func TestLoad(t *testing.T) {
 	}{
 		{"http.port", "", "5001"},
 		{"env", "", "prod"},
-		{"stacks_dir", "", "storage/stacks"},
-		{"data.db.user.dsn", "", "storage/dockge.db"},
+		{"stacks_dir", "", "/opt/stacks"},
+		{"data.db.user.dsn", "", "/app/data/dockge.db"},
 		{"log.mode", "", "console"},
 		{"http.port", "DOCKGE_HTTP_PORT", "15099"}, // 环境变量覆盖默认值
-		{"stacks_dir", "DOCKGE_STACKS_DIR", "/opt/stacks"},
+		{"stacks_dir", "DOCKGE_STACKS_DIR", "/tmp/bare-stacks"},
 	}
 	for _, c := range cases {
 		t.Run(c.key+"="+c.want, func(t *testing.T) {

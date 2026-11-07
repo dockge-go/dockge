@@ -1,7 +1,7 @@
 // Package repository 是 dockge 应用的数据访问层：
 // - 用户账号/设置存 bbolt（go.etcd.io/bbolt）
 // - compose 栈存文件系统（stacks 目录）
-// - 容器数据经 docker CLI 子进程
+// - 容器数据经 Runtime CLI 子进程
 package repository
 
 import (
@@ -22,6 +22,7 @@ import (
 	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
 
+	v1 "dockge/api/v1"
 	"dockge/pkg/log"
 )
 
@@ -35,14 +36,14 @@ const (
 var ErrNotFound = errors.New("记录不存在")
 
 // ErrStacksNotWritable 表示栈目录写入失败（只读挂载或权限不足）：
-// 该错误必须带上真实原因与路径，否则用户只看到「服务器错误~」，无从知道是挂载问题。
+// 调用方需包装底层原因与路径，便于定位挂载和权限问题。
 var ErrStacksNotWritable = errors.New("栈目录不可写")
 
 // ErrConflict 是"目标已存在"的哨兵错误。
 
 var ErrConflict = errors.New("记录已存在")
 
-// Package registers all repository-layer providers into the injector.
+// Package 注册仓储层依赖。
 var Package = do.Package(
 	do.Lazy(NewBBolt),
 	do.Lazy(New),
@@ -56,8 +57,14 @@ type Repository struct {
 	// runtime 是容器运行时命令行（docker/podman/nerdctl 等，可配置/自动探测）
 	runtime Runtime
 	// preflight* 缓存运行时自检结果：健康检查会周期调用，避免每次起子进程
-	preflightOnce   sync.Once
+	preflightMu     sync.Mutex
+	preflightAt     time.Time
 	preflightStatus RuntimeStatus
+	// system* 串行差分采样并短时缓存，多个浏览器不会产生互相污染的 CPU 区间。
+	systemMu       sync.Mutex
+	systemAt       time.Time
+	systemPrevious *cpuCounters
+	systemSnapshot *v1.HostSystem
 }
 
 // New 构造仓储基础对象，由注入容器调用。
@@ -111,12 +118,25 @@ func (r *Repository) ComposeCommand(ctx context.Context, args ...string) (*exec.
 	return r.runtime.ComposeCommand(ctx, args...)
 }
 
+// StackComposeCommand 为终端沿用与生命周期操作相同的 compose 文件选择。
+func (r *Repository) StackComposeCommand(ctx context.Context, name string, extra ...string) (*exec.Cmd, error) {
+	dir, files, err := r.resolveStackExec(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := r.ComposeCommand(ctx, composeArgs(name, files, extra...)...)
+	if cmd != nil {
+		cmd.Dir = dir
+	}
+	return cmd, err
+}
+
 // StackPath 返回指定栈的目录路径（已校验名的调用方负责传入合法 name）。
 func (r *Repository) StackPath(name string) string {
 	return filepath.Join(r.stacksDir, name)
 }
 
-// StacksDir 返回栈根目录（宿主 shell 终端的工作目录）。
+// StacksDir 返回栈根目录。
 func (r *Repository) StacksDir() string {
 	return r.stacksDir
 }
@@ -126,7 +146,7 @@ func NewBBolt(i do.Injector) (*bbolt.DB, error) {
 	conf := do.MustInvoke[*viper.Viper](i)
 	dsn := conf.GetString("data.db.user.dsn")
 	if dsn == "" {
-		dsn = "storage/dockge.db"
+		dsn = "/app/data/dockge.db"
 	}
 	// 确保父目录存在
 	if dir := filepath.Dir(dsn); dir != "" && dir != "." {
@@ -135,7 +155,7 @@ func NewBBolt(i do.Injector) (*bbolt.DB, error) {
 		}
 	}
 	// 单机约束：同一数据库同时只允许一个进程持有。加锁超时快速失败，
-	// 避免第二个进程（如 reset-password）静默挂起等待文件锁。
+	// 第二个实例超过等待期限即返回锁冲突，避免无限挂起。
 	db, err := bbolt.Open(dsn, 0o600, &bbolt.Options{Timeout: 5 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("open bbolt database %q: %w", dsn, err)
@@ -173,11 +193,11 @@ func NewRepositoryForTest(db *bbolt.DB) *Repository {
 }
 
 // StacksDirFromConf 解析 stacks 目录：DOCKGE_STACKS_DIR 环境变量
-// （viper 前缀绑定，与上游 dockge 同名，兼容既有编排）→ 缺省 storage/stacks。
+// （viper 前缀绑定，与上游 dockge 同名，兼容既有编排）→ 缺省 /opt/stacks。
 func StacksDirFromConf(conf *viper.Viper) string {
 	dir := strings.TrimSpace(conf.GetString("stacks_dir"))
 	if dir == "" {
-		return "storage/stacks"
+		return "/opt/stacks"
 	}
 	return dir
 }

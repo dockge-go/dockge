@@ -26,6 +26,7 @@ type Stack struct {
 	Yaml            string
 	Env             string
 	Containers      []Container
+	RuntimeError    string // 状态查询失败不代表文件不可读；保留配置供用户修正。
 }
 
 // PortMapping 是容器的一条端口映射（hostIP: hostPort -> containerPort/proto）。
@@ -79,13 +80,12 @@ type Image struct {
 
 // 用户角色取值。
 const (
-	RoleAdmin  = "admin"
-	RoleMember = "member"
+	RoleAdmin = "admin"
 )
 
 // 账号来源取值。
 const (
-	SourceLocal = "local" // 首启引导/管理员创建
+	SourceLocal = "local" // 首启引导
 )
 
 // DockgeUser 是 dockge 控制台的登录账号。
@@ -98,7 +98,7 @@ type DockgeUser struct {
 	Role      string // admin；空值兼容旧数据，按 admin 处理
 	Active    bool
 	Timezone  string
-	Source    string // "local"，记录账号来源
+	Source    string // "local" 或 "oidc"，记录账号来源
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

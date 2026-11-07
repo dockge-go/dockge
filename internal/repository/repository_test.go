@@ -57,10 +57,10 @@ func TestStacksDirFromConf(t *testing.T) {
 		env  string
 		want string
 	}{
-		{"缺省", "", "storage/stacks"},
-		{"环境变量覆盖默认值", "/opt/stacks", "/opt/stacks"},
+		{"缺省", "", "/opt/stacks"},
+		{"环境变量覆盖默认值", "/tmp/bare-stacks", "/tmp/bare-stacks"},
 		{"环境变量去空白", "  /opt/stacks  ", "/opt/stacks"},
-		{"空白环境变量视为未设", "   ", "storage/stacks"},
+		{"空白环境变量视为未设", "   ", "/opt/stacks"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

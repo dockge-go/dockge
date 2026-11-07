@@ -1,107 +1,27 @@
 # Dockge
 
-**English** | [简体中文](#dockge-简体中文)
+Single-host Compose stack management, rewritten in Go from [louislam/dockge](https://github.com/louislam/dockge). One executable with an embedded SolidJS frontend. Create, edit, validate and deploy YAML; view container logs and open container terminals. One administrator, optional OIDC, Apple System light/dark themes. No Prometheus dependency.
 
-Self-hosted Docker Compose stack manager for a single machine — a Go rewrite of [louislam/dockge](https://github.com/louislam/dockge). One binary, no Node runtime: create, edit, start/stop and view logs of compose stacks in the browser, while compose.yaml stays a plain file in your own directory.
+## Deployment
 
-## Quick start
+Use the mounts and server-metric files in the [deployment manifest](https://github.com/dockge-go/dockge/blob/main/deploy/compose.yaml). Replace its local build image with the verified version of this published image and omit the `build` section. Pin a version or digest matching the release you intend to deploy.
 
-```yaml
-services:
-  dockge:
-    image: makeshit/dockge:latest
-    container_name: dockge
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/stacks:/opt/stacks
-      - dockge-data:/app/data
-volumes:
-  dockge-data:
-```
+Internal paths and port are fixed: `/opt/stacks`, `/app/data`, `5001`. Change only host-side bind paths and ports. The runtime socket grants near-root access to the host; only trusted administrators should access the panel. Protect the endpoint with HTTPS.
 
-Or without a compose file:
+On first visit, create the sole administrator. There is no default password. For a forgotten local password, restrict access, stop the panel, back up the database and stacks, move `/app/data/dockge.db` to a secure backup location, then restart and create a new administrator. This resets account/settings and old sessions, not stack files or runtime containers. Never modify an open database. OIDC account recovery belongs to the identity provider.
 
-```bash
-docker run -d --name dockge -p 5001:5001 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/stacks:/opt/stacks \
-  -v dockge-data:/app/data \
-  makeshit/dockge
-```
+Stack deletion previews exclusive resources and retained shared/external resources. Uninstalling the panel does not automatically delete managed workloads or host data. Server disk metrics describe the filesystem containing the stack directory, not all host disks.
 
-Open `http://<host>:5001` and create the admin account on first visit (no default credentials).
+[Source and documentation](https://github.com/dockge-go/dockge) · [Kubernetes/OIDC deployment](https://github.com/dockge-go/dockge/blob/main/deploy/kubernetes/README.md)
 
-## Three things you must know
+## 简体中文
 
-1. **Stacks live in `/opt/stacks`** — same path inside and outside the container. Compose files stay on your host, editable by hand, and survive the panel. To move it, change the bind mount and `DOCKGE_STACKS_DIR` together.
-2. **Mounting `/var/run/docker.sock` equals handing host root to this container** — run it on trusted machines only. If you forget the mount, the panel still loads: startup logs and `/v1/health` will tell you `Cannot connect to the Docker daemon`.
-3. **Ports and reverse proxies** — the in-container port is fixed at 5001; to change the host port edit only the left side (`"15001:5001"`). Behind a reverse proxy, set the external hostname in panel settings.
+单机 Compose 栈管理面板，Go 后端与内嵌 SolidJS 前端。支持 YAML 新增、编辑、校验、部署、删除，容器日志与容器终端。单管理员，可配置 OIDC，使用 Apple System 明暗主题，不依赖 Prometheus。
 
-Timezone, stacks directory and container runtime (docker / podman / nerdctl) are all configurable in the panel — the image needs no environment variables.
+请参考[部署清单](https://github.com/dockge-go/dockge/blob/main/deploy/compose.yaml)配置运行时、数据卷和只读宿主指标文件，将本地构建镜像替换为本镜像已验证的版本并移除 `build` 部分。生产固定版本或摘要。
 
-## Forgot the admin password
+内部路径和端口保持 `/opt/stacks`、`/app/data`、`5001`；只修改宿主侧映射。运行时 socket 提供接近宿主 root 的权限，须限制访问并配置 HTTPS。
 
-```bash
-docker compose stop dockge          # the embedded DB allows a single process; stop first
-docker compose run --rm dockge reset-password
-docker compose start dockge
-```
+首次访问创建唯一管理员，无默认密码。忘记本地密码时，先限制入口并停机，备份栈与数据库，再将 `/app/data/dockge.db` 移到安全备份位置，重启后重新初始化。这会重置账号、设置并使旧会话失效，不删除栈文件或运行时容器。不要修改正在使用的数据库；OIDC 密码在身份提供方重置。
 
-`reset-password` asks for the username and a new password (≥6 chars with letters and digits, same rule as the web UI).
-
-# Dockge 简体中文
-
-[English](#dockge) | **简体中文**
-
-单机版 Docker Compose 栈管理器：[louislam/dockge](https://github.com/louislam/dockge) 的 Go 重写版。单个二进制、无 Node 运行时：在网页里创建、编辑、启停、查看日志，compose.yaml 始终留在你自己的目录里。
-
-## 快速开始
-
-```yaml
-services:
-  dockge:
-    image: makeshit/dockge:latest
-    container_name: dockge
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/stacks:/opt/stacks
-      - dockge-data:/app/data
-volumes:
-  dockge-data:
-```
-
-不想写文件的话：
-
-```bash
-docker run -d --name dockge -p 5001:5001 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/stacks:/opt/stacks \
-  -v dockge-data:/app/data \
-  makeshit/dockge
-```
-
-访问 `http://<主机>:5001`，首次进入引导创建管理员账号（无默认口令）。
-
-## 三件必须知道的事
-
-1. **栈在 `/opt/stacks`**：容器内外同一路径，compose 文件在宿主上直接可见、可直接编辑，不用本面板了也还在。要换目录就同时改挂载与 `DOCKGE_STACKS_DIR`。
-2. **必须挂 `/var/run/docker.sock`**：这等于把宿主 root 权限交给该容器，请只在可信主机运行。忘了挂也不会白屏——启动日志与 `/v1/health` 会直接告诉你是 `Cannot connect to the Docker daemon`。
-3. **端口与反代**：容器内固定 5001；映射到宿主其他端口只改冒号左侧（如 `"15001:5001"`），反代场景在面板设置里填外部主机名。
-
-时区、栈目录、容器运行时（docker / podman / nerdctl）等都已在面板内可设，镜像默认无需任何环境变量。
-
-## 忘记管理员密码
-
-```bash
-docker compose stop dockge          # 数据库一次只允许一个进程访问，须先停服务
-docker compose run --rm dockge reset-password
-docker compose start dockge
-```
-
-`reset-password` 会依次询问用户名、新密码（≥6 位且含字母和数字，与网页端同一规则）。
+删除栈前核对专属资源和共享保留清单。卸载面板不会自动删除栈或宿主数据。服务器磁盘指标表示栈目录所在文件系统，而非所有磁盘总量。

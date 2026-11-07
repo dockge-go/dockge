@@ -1,8 +1,9 @@
-import { For, Show } from 'solid-js';
+import { For, Show, lazy } from 'solid-js';
 import {
   app, setApp, paged, selectedStackObj, stackDirty, stackServiceNames,
-  createStack, renameStack, stackAction, removeStack, deployStack, openSheet, t
+  createStack, saveStack, stackAction, removeStack, deployStack, openSheet, t
 } from '../store';
+const TerminalPane = lazy(() => import('../components/TerminalPane'));
 import YamlEditor from '../components/YamlEditor';
 
 export default function Stacks() {
@@ -45,20 +46,23 @@ export default function Stacks() {
             <div class="wb-head">
               <span class="wb-title">{sel()!.name}</span>
               <span class={`status-badge ${sel()!.status === 'up' ? 'status-running' : 'status-exited'}`}>
-                {sel()!.status === 'up' ? t('status.running') : t('status.stopped')}
+                {sel()!.status === 'unknown' ? t('data.unknown') : sel()!.status === 'up' ? t('status.running') : t('status.stopped')}
               </span>
-              <div class="wb-actions">
+              <div class="wb-actions"><Show when={sel()!.managed && !sel()!.loadError}>
                 <button type="button" class="btn btn-secondary" onClick={() => openSheet('stackLogs', sel()!.id)}>{t('stack.viewServiceLogs')}</button>
-                <button type="button" class="btn btn-secondary" onClick={() => renameStack(sel()!.id)}>{t('common.rename')}</button>
-                <button type="button" class="btn btn-secondary" onClick={() => stackAction(sel()!.id)}>
+                <button type="button" class="btn btn-secondary" disabled={sel()!.busy} onClick={() => saveStack(sel()!.id)}>{t('stack.saveDraft')}</button>
+                <button type="button" class="btn btn-secondary" disabled={sel()!.busy} onClick={() => stackAction(sel()!.id)}>
                   {sel()!.status === 'up' ? t('act.stop') : t('act.start')}
                 </button>
-                <button type="button" class="btn btn-danger" onClick={() => removeStack(sel()!.id)}>{t('common.delete')}</button>
-                <button type="button" class="btn btn-primary" onClick={() => deployStack(sel()!.id)}
+                <button type="button" class="btn btn-secondary" disabled={sel()!.busy} onClick={() => stackAction(sel()!.id, 'restart')}>{t('act.restart')}</button>
+                <button type="button" class="btn btn-secondary" disabled={sel()!.busy} onClick={() => stackAction(sel()!.id, 'update')}>{t('stack.update')}</button>
+                <button type="button" class="btn btn-secondary" disabled={sel()!.busy} onClick={() => stackAction(sel()!.id, 'down')}>{t('stack.down')}</button>
+                <button type="button" class="btn btn-danger" disabled={sel()!.busy || app.actionBusy} onClick={() => removeStack(sel()!.id)}>{t('common.delete')}</button>
+                <button type="button" class="btn btn-primary" disabled={sel()!.busy} onClick={() => deployStack(sel()!.id)}
                         title={stackDirty() ? t('editor.dirty') : t('editor.inSync')}>
                   {t('stack.deploy')}
                 </button>
-                <span class="dirty-badge" style={`display:${stackDirty() ? 'inline-flex' : 'none'}`}>{t('editor.dirty')}</span>
+                <span class="dirty-badge" style={`display:${stackDirty() ? 'inline-flex' : 'none'}`}>{t('editor.dirty')}</span></Show>
               </div>
             </div>
             <div class="wb-services">
@@ -70,11 +74,12 @@ export default function Stacks() {
                 </button>
               )}</For>
             </div>
+            <Show when={sel()!.loadError || sel()!.runtimeError || !sel()!.managed}><p class="auth-error">{sel()!.loadError || sel()!.runtimeError || t('stack.readonly')}</p></Show>
             <YamlEditor />
             <div class="wb-terminal" id="wb-terminal">
               <Show when={sel()!.deployLog.length}
                 fallback={<div class="t-dim">$ {t('stack.termHint')}</div>}>
-                <For each={sel()!.deployLog}>{line => <div classList={{ 't-dim': line.startsWith('$') }}>{line}</div>}</For>
+                <TerminalPane output={sel()!.deployLog.join('\n')} compact />
               </Show>
             </div>
           </div>

@@ -1,16 +1,17 @@
-import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, lazy } from 'solid-js';
 import {
   app, setApp, openSheet, closeSheet, sheetTitle, imageHistoryLayers,
-  createContainer, pullImage, createVolume, createNetwork, createUser, tagImage,
+  createContainer, pullImage, createVolume, createNetwork, tagImage,
   logFiltered, logLevelClass, logScroll, toggleLogPause, clearLog, copyLog,
-  termExec, termKey, resizeTerminal, removeExecSession, toast, t
+  t
 } from '../store';
 
-const FORM_KINDS = ['newContainer', 'pullImage', 'newVolume', 'newNetwork', 'copyToHost', 'tagImage', 'newUser'];
+const TerminalPane = lazy(() => import('./TerminalPane'));
+
+const FORM_KINDS = ['newContainer', 'pullImage', 'newVolume', 'newNetwork', 'tagImage'];
 const VIEW_KINDS = ['logs', 'stackLogs', 'serviceLogs', 'terminal', 'history'];
 
 export default function Sheet() {
-  let termInput: HTMLInputElement | undefined;
   const kind = () => app.sheet.kind;
   const setForm = (k: string, v: string) => setApp('form', k, v);
 
@@ -38,11 +39,11 @@ export default function Sheet() {
   });
 
   return (
-    <div class="sheet-overlay" classList={{ open: app.sheet.open }} onClick={e => { if (e.target === e.currentTarget) closeSheet(); }}>
-      <div class="sheet" role="dialog" aria-label={sheetTitle()}>
+    <div class="sheet-overlay" classList={{ open: app.sheet.open }} aria-hidden={!app.sheet.open} inert={!app.sheet.open} onClick={e => { if (e.target === e.currentTarget) closeSheet(); }}>
+      <div class="sheet" role="dialog" aria-modal="true" aria-label={sheetTitle()}>
         <div class="sheet-header">
           <h2 class="sheet-title">{sheetTitle()}</h2>
-          <button type="button" class="btn-icon" onClick={closeSheet} aria-label={t('common.close')}>
+          <button type="button" class="btn-icon" disabled={app.actionBusy} onClick={closeSheet} aria-label={t('common.close')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
           </button>
         </div>
@@ -106,37 +107,8 @@ export default function Sheet() {
             </div>
           </Show>
 
-          <Show when={kind() === 'newUser'}>
-            <div class="form-group">
-              <label class="form-label">{t('auth.username')}</label>
-              <input class="form-input" value={app.userForm.username} autocomplete="off" onInput={e => setApp('userForm', 'username', e.currentTarget.value)} />
-            </div>
-            <div class="form-group">
-              <label class="form-label">{t('auth.role')}</label>
-              <select class="form-select" value={app.userForm.role} onInput={e => setApp('userForm', 'role', e.currentTarget.value)}>
-                <option value="member">{t('auth.roleMember')}</option>
-                <option value="admin">{t('auth.roleAdmin')}</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{t('auth.password')}</label>
-              <input class="form-input" type="password" value={app.userForm.password} autocomplete="new-password" onInput={e => setApp('userForm', 'password', e.currentTarget.value)} />
-              <p class="form-help">{t('auth.pwShort')} · {t('auth.pwWeak')}</p>
-            </div>
-          </Show>
-
-          <Show when={kind() === 'copyToHost'}>
-            <div class="form-group">
-              <label class="form-label">{t('form.sourcePath')}</label>
-              <input class="form-input" value={app.form.sourcePath || ''} placeholder="/app/data" onInput={e => setForm('sourcePath', e.currentTarget.value)} />
-            </div>
-            <div class="form-group">
-              <label class="form-label">{t('form.targetPath')}</label>
-              <input class="form-input" value={app.form.targetPath || ''} placeholder="/home/user/data" onInput={e => setForm('targetPath', e.currentTarget.value)} />
-            </div>
-          </Show>
-
-          <Show when={kind() === 'tagImage'}>
+          <Show when={kind() === 'pullImage' && app.form.output}><TerminalPane output={app.form.output || ''} compact /></Show>
+        <Show when={kind() === 'tagImage'}>
             <div class="form-group">
               <label class="form-label">{t('form.currentTag')}</label>
               <input class="form-input" readonly value={(app.images.find(x => x.Id === app.sheet.param)?.RepoTags[0]) || ''} />
@@ -161,8 +133,8 @@ export default function Sheet() {
               <button type="button" class="btn btn-secondary log-tool-btn" onClick={clearLog}>{t('log.clear')}</button>
               <button type="button" class="btn btn-secondary log-tool-btn" onClick={copyLog}>{t('log.copy')}</button>
               <span class="log-count">
-                <Show when={!app.logView.paused}><span class="live-dot" /></Show>
-                <span>{app.logView.paused ? t('log.pausedBadge') : t('log.live')}</span>
+                <Show when={app.logView.connection === 'live'}><span class="live-dot" /></Show>
+                <span>{t('log.' + app.logView.connection)}{app.logView.paused ? ' · ' + t('log.pausedBadge') : ''}</span>
                 <span>{t('log.lines', { n: logFiltered().length })}</span>
               </span>
             </div>
@@ -172,37 +144,8 @@ export default function Sheet() {
             </div>
           </Show>
 
-          <Show when={kind() === 'terminal'}>
-            <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2)">
-              <button type="button" class="btn btn-secondary" style="font-size:var(--text-xs);padding:4px 10px" onClick={resizeTerminal}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
-                {t('ctn.resize')}
-              </button>
-              <button type="button" class="btn btn-secondary" style="font-size:var(--text-xs);padding:4px 10px" onClick={removeExecSession}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
-                {t('ctn.removeSession')}
-              </button>
-            </div>
-            <div class="terminal" id="sheet-terminal" onClick={() => termInput && termInput.focus()}>
-              <div class="terminal-line"><span class="prompt">root@{app.term.host}:/# </span>help</div>
-              <div class="terminal-line" style="color:var(--muted)">{t('ctn.simulated')}</div>
-              <For each={app.term.lines}>{line => (
-                <div class="terminal-line">
-                  <Show when={line.isCmd}><span class="prompt">{line.prompt}</span></Show>
-                  <span>{line.text}</span>
-                </div>
-              )}</For>
-              <div class="terminal-input-row">
-                <span class="prompt">root@{app.term.host}:/#&nbsp;</span>
-                <input class="terminal-input" ref={termInput} value={app.term.input}
-                       placeholder={t('ctn.typeCommand')}
-                       onInput={e => setApp('term', 'input', e.currentTarget.value)}
-                       onKeyDown={e => {
-                         termKey(e);
-                         if (e.key === 'Enter' && !e.isComposing) termExec();
-                       }} />
-              </div>
-            </div>
+          <Show when={kind() === 'terminal' && app.sheet.param}>
+            <TerminalPane containerID={app.sheet.param!} />
           </Show>
 
           <Show when={kind() === 'history'}>
@@ -211,7 +154,7 @@ export default function Sheet() {
                 <th>{t('th.layer')}</th><th>{t('th.command')}</th><th>{t('common.size')}</th>
               </tr></thead>
               <tbody>
-                <For each={imageHistoryLayers}>{l => (
+                <For each={imageHistoryLayers()}>{l => (
                   <tr>
                     <td><span class="cell-meta" style="color:var(--accent)">{l.id}</span></td>
                     <td><span style="font-size:var(--text-sm)">{l.cmd}</span></td>
@@ -224,31 +167,27 @@ export default function Sheet() {
         </div>
         <div class="sheet-footer">
           <Show when={FORM_KINDS.includes(kind() || '')}>
-            <button type="button" class="btn btn-secondary" onClick={closeSheet}>{t('common.cancel')}</button>
+            <button type="button" class="btn btn-secondary" disabled={app.actionBusy} onClick={closeSheet}>{t('common.cancel')}</button>
             <Show when={kind() === 'newContainer'}>
-              <button type="button" class="btn btn-primary" onClick={createContainer}>{t('btn.createStart')}</button>
+              <button type="button" class="btn btn-primary" disabled={app.actionBusy} onClick={createContainer}>{t('btn.createStart')}</button>
             </Show>
             <Show when={kind() === 'pullImage'}>
-              <button type="button" class="btn btn-primary" onClick={pullImage}>{t('btn.pull')}</button>
+              <button type="button" class="btn btn-primary" disabled={app.actionBusy} onClick={pullImage}>{t('btn.pull')}</button>
             </Show>
             <Show when={kind() === 'newVolume'}>
-              <button type="button" class="btn btn-primary" onClick={createVolume}>{t('btn.create')}</button>
+              <button type="button" class="btn btn-primary" disabled={app.actionBusy} onClick={createVolume}>{t('btn.create')}</button>
             </Show>
             <Show when={kind() === 'newNetwork'}>
-              <button type="button" class="btn btn-primary" onClick={createNetwork}>{t('btn.create')}</button>
+              <button type="button" class="btn btn-primary" disabled={app.actionBusy} onClick={createNetwork}>{t('btn.create')}</button>
             </Show>
-            <Show when={kind() === 'newUser'}>
-              <button type="button" class="btn btn-primary" onClick={createUser}>{t('common.create')}</button>
-            </Show>
-            <Show when={kind() === 'copyToHost'}>
-              <button type="button" class="btn btn-primary" onClick={() => { toast(t('toast.copying'), 'info'); closeSheet(); }}>{t('btn.copy')}</button>
-            </Show>
-            <Show when={kind() === 'tagImage'}>
-              <button type="button" class="btn btn-primary" onClick={() => tagImage(app.sheet.param!)}>{t('btn.tag')}</button>
+
+
+        <Show when={kind() === 'tagImage'}>
+              <button type="button" class="btn btn-primary" disabled={app.actionBusy} onClick={() => tagImage(app.sheet.param!)}>{t('btn.tag')}</button>
             </Show>
           </Show>
           <Show when={VIEW_KINDS.includes(kind() || '')}>
-            <button type="button" class="btn btn-secondary" onClick={closeSheet}>{t('common.close')}</button>
+            <button type="button" class="btn btn-secondary" disabled={app.actionBusy} onClick={closeSheet}>{t('common.close')}</button>
           </Show>
         </div>
       </div>

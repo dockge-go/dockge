@@ -26,7 +26,7 @@ type sessionChecker interface {
 // StrictAuth 强制认证中间件：Authorization 头缺失或非法时直接 401。
 // WebSocket/EventSource 无法自定义请求头，额外接受 ?token= 查询参数。
 // token 解析成功后逐请求校验会话（CheckSession）：账号被停用/删除或改密后，
-// 旧 token 的下一次请求立即 401（债务 D12 接线）。
+// 旧 token 的下一次请求立即 401。
 func StrictAuth(j *jwt.JWT, logger *log.Logger, sessions sessionChecker) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		tokenString := ctx.Request.Header.Get("Authorization")
@@ -67,6 +67,9 @@ func SetupRequired(authService setupChecker) gin.HandlerFunc {
 		method := ctx.Request.Method
 		// 放行：setup 引导、健康检查、robots.txt
 		switch {
+		case path == "/v1/auth/config", path == "/v1/auth/oidc/login", path == "/v1/auth/oidc/callback", path == "/v1/auth/oidc/session":
+			ctx.Next()
+			return
 		case path == "/v1/setup/need":
 			ctx.Next()
 			return
@@ -85,7 +88,7 @@ func SetupRequired(authService setupChecker) gin.HandlerFunc {
 		default:
 			need, err := authService.CheckNeedSetup(ctx)
 			if err != nil {
-				v1.HandleError(ctx, http.StatusInternalServerError, v1.ErrInternalServerError, nil)
+				v1.HandleError(ctx, http.StatusInternalServerError, &v1.Error{Code: 500, Message: "检查单用户初始化状态失败：" + err.Error()}, nil)
 				ctx.Abort()
 				return
 			}

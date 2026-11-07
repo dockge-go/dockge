@@ -4,9 +4,25 @@ import {
   app, runningCount, stoppedCount, pausedCount, recentContainers, openSheet, createStack,
   ctrName, statusKind, statusLabel, statusText, portsText, t
 } from '../store';
+import { useSystemMetrics } from '../hooks/system';
+import { percentText, uptimeParts, resourceKnown as knownResource } from '../lib/system';
+import { formatBytes } from '../lib/format';
+import SystemStatus from '../components/SystemStatus';
 
 export default function Dashboard() {
   const nav = useNavigate();
+  const metrics = useSystemMetrics();
+  const host = metrics.system;
+  const unknown = () => t('data.unknown');
+  const duration = () => { const parts = uptimeParts(host()?.uptime); return parts ? t('sysinfo.duration', parts) : unknown(); };
+  const usage = (kind:'memory'|'disk') => { const value=host()?.[kind];return value ? formatBytes(value.used) + ' / ' + formatBytes(value.total) : unknown(); };
+  const rows = () => [
+    {key:'cpu',label:t('res.cpu'),value:host()?.cpuPercent,detail:host()?.cpuCount != null ? t('sysinfo.logicalCPUs',{n:host()!.cpuCount!}) : unknown()},
+    {key:'mem',label:t('res.memory'),value:host()?.memory?.percent,detail:usage('memory')},
+    {key:'disk',label:t('res.disk'),value:host()?.disk?.percent,detail:usage('disk')}
+  ];
+  const resourceKnown = (kind:string) => knownResource(app.loading, app.errors, kind);
+  const count = (kind:string, value:number) => resourceKnown(kind) ? value : unknown();
   const total = () => app.containers.length || 1;
   const pct = (n: number) => `width:${(n / total() * 100).toFixed(1)}%`;
 
@@ -15,19 +31,19 @@ export default function Dashboard() {
       <div class="stats-grid">
         <button type="button" class="stat-card" onClick={() => nav('/containers')}>
           <div class="stat-card-label">{t('dash.labelRunning')}</div>
-          <div class="stat-card-value running">{runningCount()}</div>
+          <div class="stat-card-value running">{count('containers', runningCount())}</div>
         </button>
         <button type="button" class="stat-card" onClick={() => nav('/containers')}>
           <div class="stat-card-label">{t('dash.labelStopped')}</div>
-          <div class="stat-card-value stopped">{stoppedCount()}</div>
+          <div class="stat-card-value stopped">{count('containers', stoppedCount())}</div>
         </button>
         <button type="button" class="stat-card" onClick={() => nav('/containers')}>
           <div class="stat-card-label">{t('dash.labelPaused')}</div>
-          <div class="stat-card-value warning">{pausedCount()}</div>
+          <div class="stat-card-value warning">{count('containers', pausedCount())}</div>
         </button>
         <button type="button" class="stat-card" onClick={() => nav('/images')}>
           <div class="stat-card-label">{t('dash.labelImages')}</div>
-          <div class="stat-card-value">{app.images.length}</div>
+          <div class="stat-card-value">{count('images', app.images.length)}</div>
         </button>
       </div>
 
@@ -46,6 +62,7 @@ export default function Dashboard() {
       <div class="charts-grid">
         <div class="chart-card">
           <div class="chart-card-title">{t('dash.containerStatus')}</div>
+          <Show when={resourceKnown('containers')} fallback={<p class="form-help">{unknown()}</p>}>
           <div class="bar-stacked">
             <div class="bar-seg running" style={pct(runningCount())} />
             <div class="bar-seg paused" style={pct(pausedCount())} />
@@ -56,19 +73,37 @@ export default function Dashboard() {
             <span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--warn)" />{t('legend.paused', { n: pausedCount() })}</span>
             <span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--meta)" />{t('legend.stopped', { n: stoppedCount() })}</span>
           </div>
+          </Show>
+          <dl class="host-facts resource-counts">
+            <div><dt>{t('nav.stacks')}</dt><dd>{count('stacks', app.stacks.length)}</dd></div>
+            <div><dt>{t('nav.volumes')}</dt><dd>{count('volumes', app.volumes.length)}</dd></div>
+            <div><dt>{t('nav.networks')}</dt><dd>{count('networks', app.networks.length)}</dd></div>
+          </dl>
+          <A href="/sysdf" class="host-info-link">{t('sysinfo.runtimeDisk')}</A>
         </div>
-        <div class="chart-card">
-          <div class="chart-card-title">{t('dash.resourceUsage')}</div>
-          <div class="resource-row"><span class="resource-label">{t('res.cpu')}</span><div class="resource-track"><div class="resource-fill cpu" style={`width:${app.sys.cpu}%`} /></div><span class="resource-val">{app.sys.cpu}%</span></div>
-          <div class="resource-row"><span class="resource-label">{t('res.memory')}</span><div class="resource-track"><div class="resource-fill mem" style={`width:${app.sys.mem}%`} /></div><span class="resource-val">{app.sys.mem}%</span></div>
-          <div class="resource-row"><span class="resource-label">{t('res.disk')}</span><div class="resource-track"><div class="resource-fill disk" style={`width:${app.sys.disk}%`} /></div><span class="resource-val">{app.sys.disk}%</span></div>
+        <div class="chart-card host-card">
+          <div class="host-card-heading"><div class="chart-card-title">{t('dash.resourceUsage')}</div><A href="/sysinfo" class="host-info-link">{t('nav.sysinfo')}</A></div>
+          <SystemStatus metrics={metrics} />
+          <For each={rows()}>{row => <div class="host-resource">
+            <div class="resource-row">
+              <span class="resource-label">{row.label}</span>
+              <div class="resource-track" role="meter" aria-label={row.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentText(row.value) ? row.value ?? undefined : undefined} aria-valuetext={percentText(row.value) || unknown()}><div class={`resource-fill ${row.key}`} style={{width:percentText(row.value) || '0%'}} /></div>
+              <span class="resource-val">{percentText(row.value) || (row.key==='cpu' && host()?.cpuCount && !host()?.errors.cpu ? t('sysinfo.warming') : unknown())}</span>
+            </div>
+            <div class="host-resource-detail">{row.detail}<Show when={row.key==='disk'}> · {t(host()?.source==='local' ? 'sysinfo.rootPartition' : 'sysinfo.stackPartition', {path:host()?.disk?.path || '/opt/stacks'})}</Show></div>
+          </div>}</For>
+          <dl class="host-facts">
+            <div><dt>{t('sysinfo.load')}</dt><dd>{host()?.load?.map(v=>v.toFixed(2)).join(' / ') || unknown()}</dd></div>
+            <div><dt>{t('sysinfo.uptime')}</dt><dd>{duration()}</dd></div>
+            <div><dt>{t('sysinfo.swap')}</dt><dd>{host()?.swap ? host()!.swap!.total === 0 ? t('sysinfo.swapDisabled') : formatBytes(host()!.swap!.used) + ' / ' + formatBytes(host()!.swap!.total) : unknown()}</dd></div>
+          </dl>
         </div>
       </div>
 
       <div class="section-header">
         <div>
           <h2 class="section-title">{t('dash.recentContainers')}</h2>
-          <p class="section-subtitle">{t('common.totalRunning', { total: app.containers.length, running: runningCount() })}</p>
+          <p class="section-subtitle">{t('common.totalRunning', { total: count('containers', app.containers.length), running: count('containers', runningCount()) })}</p>
         </div>
         <A href="/containers" class="btn btn-secondary">{t('common.viewAll')}</A>
       </div>

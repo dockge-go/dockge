@@ -10,7 +10,7 @@ type MeUserData struct {
 	ID       uint   `json:"id"`
 	Username string `json:"username"`
 	Nickname string `json:"nickname"`
-	Role     string `json:"role,omitempty"` // admin / member
+	Role     string `json:"role,omitempty"` // 单用户固定 admin
 }
 
 // 密码字段只做 required（防缺字段）；长度/强度规则统一由 service.ValidatePasswordStrength
@@ -27,6 +27,7 @@ type SetupRequest struct {
 
 type LoginResponseData struct {
 	AccessToken string     `json:"accessToken"`
+	ExpiresAt   int64      `json:"expiresAt"`
 	User        MeUserData `json:"user"`
 }
 
@@ -50,6 +51,7 @@ type StackSummaryData struct {
 	Managed         bool   `json:"managed"`
 	ComposeFileName string `json:"composeFileName,omitempty"`
 	ConfigFiles     string `json:"configFiles,omitempty"`
+	RuntimeError    string `json:"runtimeError,omitempty"`
 }
 
 type StackListData struct {
@@ -65,6 +67,7 @@ type StackDetailData struct {
 	Yaml            string           `json:"yaml"`
 	Env             string           `json:"env"`
 	Containers      []StackContainer `json:"containers"`
+	RuntimeError    string           `json:"runtimeError,omitempty"`
 	URLs            []string         `json:"urls,omitempty"`
 }
 
@@ -137,32 +140,4 @@ type ComposerizeRequest struct {
 
 type ComposerizeResponse struct {
 	ComposeTemplate string `json:"composeTemplate"`
-}
-
-// -------- 用户管理 --------
-
-// UserPublicData 是用户管理列表的一行（对齐前端冻结契约 auth.ts 的 UserPublic）。
-// Created 为毫秒时间戳——前端以数值渲染，后端负责 time.Time → ms 的转换。
-type UserPublicData struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	Created  int64  `json:"created"`
-}
-
-// UserListData 是用户列表响应。
-type UserListData struct {
-	List []UserPublicData `json:"list"`
-}
-
-// CreateUserRequest 是管理员创建用户请求。密码只做 required：强度规则统一由
-// service.ValidatePasswordStrength 判定，绑定层放 min 会把具体原因吞成笼统的「参数错误」。
-type CreateUserRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Role     string `json:"role" binding:"required"`
-}
-
-// ResetUserPasswordRequest 是管理员重置他人密码请求（同样只做 required）。
-type ResetUserPasswordRequest struct {
-	Password string `json:"password" binding:"required"`
 }

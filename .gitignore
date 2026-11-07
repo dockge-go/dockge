@@ -16,11 +16,9 @@ dist/
 # OpenSpec specifications and change artifacts are versioned project documentation.
 !openspec/
 !openspec/**
-.playwright-mcp
 .codegraph
 *.db
 *.sqlite
-*.db
 
 # Windows / Go toolchain artifacts
 *.exe
@@ -33,3 +31,7 @@ go.work.sum
 # 开发实例数据（软链/本地库/日志）
 storage/
 docs/
+.planning/
+stacks
+.DS_Store
+__pycache__/

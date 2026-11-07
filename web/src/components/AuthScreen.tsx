@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import { app, setApp, doSetup, doLogin, noUsers, authBooted, pwChecks, t, lang, setLang } from '../store';
+import { app, setApp, doSetup, doLogin, doOIDCLogin, authMode, noUsers, authBooted, authBootError, bootstrapAuth, pwChecks, t, lang, setLang } from '../store';
 
 /* 首启初始化 / 登录。
  * 多语言：进入即可切换 中/EN（无需登录），选择持久化；
@@ -24,8 +24,17 @@ export default function AuthScreen() {
         </div>
 
         <Show when={authBooted()} fallback={
-          <div class="auth-booting" role="status">{t('auth.booting')}</div>
+          <Show when={authBootError()} fallback={<div class="auth-booting" role="status">{t('auth.booting')}</div>}>
+            <p class="auth-error" role="alert">{authBootError()}</p>
+            <button type="button" class="btn btn-secondary" onClick={() => void bootstrapAuth()}>{t('common.refresh')}</button>
+          </Show>
         }>
+        <Show when={authMode() === 'oidc'}>
+          <h1 class="auth-title">{t('auth.loginTitle')}</h1>
+          <p class="auth-subtitle">{t('auth.oidcSubtitle')}</p>
+          <button type="button" class="btn btn-primary auth-submit" onClick={doOIDCLogin}>{t('auth.oidcSignIn')}</button>
+        </Show>
+        <Show when={authMode() === 'local'}>
         <form onSubmit={submit}>
           <h1 class="auth-title">{noUsers() ? t('auth.setupTitle') : t('auth.loginTitle')}</h1>
           <p class="auth-subtitle">{noUsers() ? t('auth.setupSubtitle') : t('auth.loginSubtitle')}</p>
@@ -65,6 +74,7 @@ export default function AuthScreen() {
             {noUsers() ? t('auth.createAdmin') : (app.authForm.busy ? t('auth.signingIn') : t('auth.signIn'))}
           </button>
         </form>
+        </Show>
         </Show>
       </div>
     </div>

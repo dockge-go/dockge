@@ -3,7 +3,9 @@ package repository
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 )
@@ -24,21 +26,43 @@ type RuntimeStatus struct {
 // StacksStatus 描述栈目录及其持久性：Mounted=false 表示目录不在宿主挂载的
 // 卷/绑定目录下，栈只写在容器可写层，容器重建即丢失。
 type StacksStatus struct {
-	Path    string `json:"path"`
-	Mounted bool   `json:"mounted"`
+	Path     string `json:"path"`
+	Mounted  bool   `json:"mounted"`
+	Writable bool   `json:"writable"`
+	Error    string `json:"error,omitempty"`
 }
 
-// Preflight 首次调用时探测运行时（CLI info）并缓存结果。
+// Preflight 短暂缓存自检，避免永久保留启动时的故障。
 // 只报告不阻断：运行时不可用时面板的登录/设置/浏览仍应可用，呈现方式交由调用方。
 //
 // 必须用 info 而非 compose version：后者只打印 CLI 版本、不接触守护进程，
 // 漏挂 docker socket 时依然成功，会漏报最常见的部署事故。
 func (r *Repository) Preflight(ctx context.Context) RuntimeStatus {
-	r.preflightOnce.Do(func() {
+	r.preflightMu.Lock()
+	defer r.preflightMu.Unlock()
+	if !r.preflightAt.IsZero() && time.Since(r.preflightAt) < time.Second {
+		return r.preflightStatus
+	}
+	{
 		status := RuntimeStatus{
 			CLI:     r.runtime.bin,
 			Compose: r.runtime.composeBin,
 			Stacks:  StacksStatus{Path: r.stacksDir, Mounted: stacksPersistent(r.stacksDir)},
+		}
+		probe, e := os.CreateTemp(r.stacksDir, ".dockge-probe-*")
+		if e != nil {
+			status.Stacks.Error = fmt.Sprintf("栈目录 %s 不可写: %v", r.stacksDir, e)
+		} else {
+			path := probe.Name()
+			e = probe.Close()
+			if removeErr := os.Remove(path); e == nil {
+				e = removeErr
+			}
+			if e != nil {
+				status.Stacks.Error = fmt.Sprintf("栈目录 %s 写入自检清理失败: %v", r.stacksDir, e)
+			} else {
+				status.Stacks.Writable = true
+			}
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, preflightTimeout)
 		defer cancel()
@@ -50,7 +74,7 @@ func (r *Repository) Preflight(ctx context.Context) RuntimeStatus {
 			cmd.Stdout = io.Discard
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
-				status.Error = firstLine(stderr.Bytes())
+				status.Error = strings.TrimSpace(stderr.String())
 				if status.Error == "" {
 					status.Error = err.Error()
 				}
@@ -59,17 +83,7 @@ func (r *Repository) Preflight(ctx context.Context) RuntimeStatus {
 			}
 		}
 		r.preflightStatus = status
-	})
-	return r.preflightStatus
-}
-
-// firstLine 取输出的首个非空行：CLI 报错首行（如 cannot connect to the Docker daemon）
-// 远比 "exit status 1" 有指导性。
-func firstLine(out []byte) string {
-	for _, line := range strings.Split(string(out), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			return line
-		}
+		r.preflightAt = time.Now()
 	}
-	return ""
+	return r.preflightStatus
 }

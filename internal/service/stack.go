@@ -27,6 +27,7 @@ type StackService interface {
 	Get(ctx context.Context, name string) (*v1.StackDetailData, error)
 	Save(ctx context.Context, req *v1.StackSaveRequest, isAdd bool) error
 	Delete(ctx context.Context, name string) (*v1.StackOpResponse, error)
+	DeletePlan(ctx context.Context, name string) (*v1.StackDeletePlan, error)
 	StreamOp(ctx context.Context, w io.Writer, name, op string) error
 	ServiceOp(ctx context.Context, name, service, op string) (*v1.StackOpResponse, error)
 	Stats(ctx context.Context, name string) ([]v1.ContainerStat, error)
@@ -93,7 +94,7 @@ func (s *stackService) Get(ctx context.Context, name string) (*v1.StackDetailDat
 		Name: stack.Name, Status: int(stack.Status),
 		Managed: stack.Managed, ComposeFileName: stack.ComposeFileName,
 		ConfigFiles: stack.ConfigFiles, Yaml: stack.Yaml, Env: stack.Env,
-		Containers: containers, URLs: urls,
+		Containers: containers, URLs: urls, RuntimeError: stack.RuntimeError,
 	}, nil
 }
 
@@ -101,7 +102,7 @@ func (s *stackService) Get(ctx context.Context, name string) (*v1.StackDetailDat
 func (s *stackService) Save(ctx context.Context, req *v1.StackSaveRequest, isAdd bool) error {
 	name := strings.ToLower(strings.TrimSpace(req.Name))
 	if !StackNamePattern.MatchString(name) {
-		return fmt.Errorf("%w: 栈名只能包含小写字母、数字、下划线与连字符", v1.ErrBadRequest)
+		return fmt.Errorf("%w: 非法栈名 %q，仅允许小写字母、数字、下划线与连字符", v1.ErrBadRequest, req.Name)
 	}
 	if strings.TrimSpace(req.Yaml) == "" {
 		return fmt.Errorf("%w: compose 内容不能为空", v1.ErrBadRequest)
@@ -110,6 +111,9 @@ func (s *stackService) Save(ctx context.Context, req *v1.StackSaveRequest, isAdd
 	if err := yaml.Unmarshal([]byte(req.Yaml), &doc); err != nil {
 		return fmt.Errorf("%w: YAML 语法错误: %s", v1.ErrBadRequest, err.Error())
 	}
+	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	stack := &model.Stack{Name: name, Yaml: req.Yaml, Env: req.Env, ComposeFileName: "compose.yaml"}
 	if err := s.repo.Save(ctx, stack, isAdd); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -123,34 +127,30 @@ func (s *stackService) Save(ctx context.Context, req *v1.StackSaveRequest, isAdd
 	return nil
 }
 
-// Delete 先执行 compose down 再删除栈目录；删除后仍注册于 compose 则报错。
+// Delete 运行时清理和核验全部成功后才删除配置与栈内数据目录。
 func (s *stackService) Delete(ctx context.Context, name string) (*v1.StackOpResponse, error) {
 	if !StackNamePattern.MatchString(name) {
-		return nil, fmt.Errorf("%w: 非法栈名 %q（仅允许小写字母、数字、下划线、连字符）", v1.ErrBadRequest, name)
+		return nil, fmt.Errorf("%w: 非法栈名 %q", v1.ErrBadRequest, name)
 	}
 	mu, _ := opMutex.LoadOrStore(name, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
-
-	output, err := s.repo.StackOp(ctx, name, "down")
+	output, err := s.repo.CleanStackResources(ctx, name)
 	if err != nil {
-		s.logger.WithContext(ctx).Warn().Err(err).Str("stack", name).Msg("stack down before delete")
+		return nil, err
 	}
-	if err := s.repo.Delete(ctx, name); err != nil {
-		if !errors.Is(err, repository.ErrNotFound) {
-			return nil, err
-		}
-		output += "\n（外部栈：无本地目录可删）"
-	}
-	if items, lsErr := s.repo.ComposeLs(ctx); lsErr == nil {
-		for _, item := range items {
-			if item.Name == name {
-				return nil, fmt.Errorf("%w: 容器/网络未能完全移除，项目仍注册于 docker compose：%s",
-					v1.ErrDockerError, repository.TrimStackOutput(output))
-			}
-		}
+	if err = s.repo.Delete(ctx, name); err != nil {
+		return nil, fmt.Errorf("运行时已清理，但栈目录删除失败: %w", err)
 	}
 	return &v1.StackOpResponse{Output: repository.TrimStackOutput(output)}, nil
+}
+
+// DeletePlan 在确认前展示清理资源、保留引用和阻塞原因。
+func (s *stackService) DeletePlan(ctx context.Context, name string) (*v1.StackDeletePlan, error) {
+	if !StackNamePattern.MatchString(name) {
+		return nil, fmt.Errorf("%w: 非法栈名 %q", v1.ErrBadRequest, name)
+	}
+	return s.repo.PlanStackDelete(ctx, name)
 }
 
 // StreamOp 流式执行栈生命周期操作：compose 输出逐行写入 w（进度终端实时流）。
@@ -211,6 +211,6 @@ func (s *stackService) Stats(ctx context.Context, name string) ([]v1.ContainerSt
 func stackSummary(stack model.Stack) v1.StackSummaryData {
 	return v1.StackSummaryData{
 		Name: stack.Name, Status: int(stack.Status),
-		Managed: stack.Managed, ComposeFileName: stack.ComposeFileName, ConfigFiles: stack.ConfigFiles,
+		Managed: stack.Managed, ComposeFileName: stack.ComposeFileName, ConfigFiles: stack.ConfigFiles, RuntimeError: stack.RuntimeError,
 	}
 }

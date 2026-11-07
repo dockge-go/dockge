@@ -9,8 +9,7 @@ import (
 	"github.com/samber/do/v2"
 )
 
-// DockerHandler 承载健康检查接口（一比一复刻页面集所需的全部
-// 「docker」命名空间端点；资源管理端点已随上游对齐删除）。
+// DockerHandler 提供免鉴权健康检查，供容器编排探测面板与运行时状态。
 type DockerHandler struct {
 	Repository *repository.Repository `do:""`
 }

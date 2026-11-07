@@ -3,7 +3,7 @@ import { app, setApp, paged, openSheet, removeVolume, clearUnused, volumeUsedBy,
 
 export default function Volumes() {
   const pg = () => paged('volumes', app.volumes);
-  const unused = () => app.volumes.filter(v => !v.system).length;
+  const unused = () => app.volumes.filter(v => !v.system && !v.UsedBy?.length).length;
   const usedBy = (name: string) => volumeUsedBy()[name] || [];
 
   return (
@@ -36,7 +36,7 @@ export default function Volumes() {
           </tr></thead>
           <tbody>
             <For each={pg().rows}>{v => {
-              const refs = usedBy(v.Name);
+              const refs = () => usedBy(v.Name);
               return (
               <tr classList={{ 'row-system': v.system }} style="cursor:default">
                 <td>
@@ -48,8 +48,8 @@ export default function Volumes() {
                   </div>
                 </td>
                 <td><span class="cell-sub">{v.Driver}</span></td>
-                <td><span class="cell-sub">{v.Usage || '—'}</span></td>
-                <td><span class="cell-sub">{refs.length ? refs.map(r => r.name).join(', ') : '—'}</span></td>
+                <td><span class="cell-sub">{v.Usage || t('data.unknown')}</span></td>
+                <td><span class="cell-sub">{refs().length ? refs().map(r => r.name).join(', ') : '—'}</span></td>
                 <td onClick={e => e.stopPropagation()}>
                   <Show when={!v.system}>
                     <button type="button" class="btn-icon" style="color:var(--danger)" title={t('common.remove')} onClick={() => removeVolume(v.Name)}>

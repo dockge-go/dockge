@@ -2,11 +2,11 @@ import { For, Show, createEffect } from 'solid-js';
 import { useNavigate, useParams } from '@solidjs/router';
 import {
   app, setApp, detail, detailEnv, detailNets, detailMounts, openDetail,
-  openSheet, containerAction, removeContainer, renameContainer, commitContainer, exportContainer, t, healthBadge
+  openSheet, containerAction, removeContainer, renameContainer, commitContainer, t, healthBadge
 } from '../store';
 import { ctrName, statusKind, statusLabel, statusText, portsText } from '../lib/format';
 
-/* 重启策略 → i18n 键；文案随语言切换即时生效（不做硬编码） */
+/* 重启策略 → i18n 键；文案随语言切换即时生效 */
 const RESTART_KEYS: Record<string, string> = {
   no: 'restart.no', always: 'restart.always',
   'unless-stopped': 'restart.unless-stopped', 'on-failure': 'restart.on-failure'
@@ -22,6 +22,7 @@ export default function ContainerDetail() {
   /* 路由参数 → store.detailId；容器不存在时回列表 */
   createEffect(() => {
     const id = params.id;
+    if (app.loading || app.errors.resources || app.errors.containers) return;
     if (!app.containers.some(x => x.Id === id)) { nav('/containers', { replace: true }); return; }
     if (app.detailId !== id) openDetail(id);
   });
@@ -45,7 +46,7 @@ export default function ContainerDetail() {
           <Show when={c()!.State === 'running'}><span class="live-dot" /></Show>
           <div class="detail-tools">
             <button type="button" class="btn btn-secondary" onClick={() => openSheet('logs', app.detailId)}>{t('tab.logs')}</button>
-            <button type="button" class="btn btn-secondary" onClick={() => openSheet('terminal', app.detailId)}>{t('tab.exec')}</button>
+            <button type="button" class="btn btn-secondary" disabled={c()!.State !== 'running' || c()!.system} onClick={() => openSheet('terminal', app.detailId)}>{t('tab.exec')}</button>
             <Show when={c()!.State === 'running'} fallback={
               <button type="button" class="btn btn-primary" onClick={() => containerAction(app.detailId!, 'start')}>{t('act.start')}</button>}>
               <button type="button" class="btn btn-secondary" onClick={() => containerAction(app.detailId!, 'stop')}>{t('act.stop')}</button>
@@ -71,8 +72,6 @@ export default function ContainerDetail() {
             <button type="button" classList={{ active: app.detailTab === 'net' }} onClick={() => setApp('detailTab', 'net')}>{t('tab.net')}</button>
             <button type="button" classList={{ active: app.detailTab === 'mounts' }} onClick={() => setApp('detailTab', 'mounts')}>{t('tab.mounts')}</button>
           </div>
-          <button type="button" class="btn btn-secondary" style="height:26px;font-size:var(--text-xs)" onClick={() => openSheet('copyToHost')}>{t('ctn.copyToHost')}</button>
-          <button type="button" class="btn btn-secondary" style="height:26px;font-size:var(--text-xs)" onClick={exportContainer}>{t('ctn.export')}</button>
           <button type="button" class="btn btn-secondary" style="height:26px;font-size:var(--text-xs)" onClick={() => commitContainer(app.detailId!)}>{t('ctn.commit')}</button>
         </div>
 
@@ -80,27 +79,27 @@ export default function ContainerDetail() {
           <div class="stat-grid">
             <div class="stat-cell">
               <div class="stat-cell-label">{t('res.cpu')}</div>
-              <div class="stat-cell-value">{(c()!._stats ? c()!._stats!.cpuPct : '0.0')}%</div>
+              <div class="stat-cell-value">{c()!._stats ? c()!._stats!.cpuPct + '%' : t('data.unknown')}</div>
               <div class="stat-bar-track"><div class="stat-bar-fill cpu" style={`width:${c()!._stats ? c()!._stats!.cpuBar : 0}%`} /></div>
-              <div class="stat-detail">{c()!.State === 'running' ? t('ctn.statsCores') : t('ctn.na')}</div>
+              <div class="stat-detail">{c()!.Cpus ? c()!.Cpus + ' CPU' : t('data.noLimit')}</div>
             </div>
             <div class="stat-cell">
               <div class="stat-cell-label">{t('res.memory')}</div>
-              <div class="stat-cell-value">{(c()!._stats ? c()!._stats!.memMB : 0)} MB</div>
+              <div class="stat-cell-value">{c()!._stats ? c()!._stats!.memMB + ' MB' : t('data.unknown')}</div>
               <div class="stat-bar-track"><div class="stat-bar-fill mem" style={`width:${c()!._stats ? c()!._stats!.memBar : 0}%`} /></div>
-              <div class="stat-detail">{t('ctn.memLimit')}</div>
+              <div class="stat-detail">{c()!.MemoryMB ? c()!.MemoryMB + ' MB' : t('data.noLimit')}</div>
             </div>
             <div class="stat-cell">
               <div class="stat-cell-label">{t('stat.netIO')}</div>
-              <div class="stat-cell-value" style="font-size:var(--text-lg)">{c()!.State === 'running' ? '1.2 MB' : '0 B'}</div>
-              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.rx')}</span><span>{c()!.State === 'running' ? '820 KB' : '0 B'}</span></div>
-              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.tx')}</span><span>{c()!.State === 'running' ? '380 KB' : '0 B'}</span></div>
+              <div class="stat-cell-value" style="font-size:var(--text-lg)">{c()!._stats?.netIO || t('data.unknown')}</div>
+              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.rx')}</span><span>{c()!._stats?.netIO?.split('/')[0]?.trim() || t('data.unknown')}</span></div>
+              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.tx')}</span><span>{c()!._stats?.netIO?.split('/')[1]?.trim() || t('data.unknown')}</span></div>
             </div>
             <div class="stat-cell">
               <div class="stat-cell-label">{t('stat.blockIO')}</div>
-              <div class="stat-cell-value" style="font-size:var(--text-lg)">{c()!.State === 'running' ? '24.5 MB' : '0 B'}</div>
-              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.read')}</span><span>{c()!.State === 'running' ? '18.2 MB' : '0 B'}</span></div>
-              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.write')}</span><span>{c()!.State === 'running' ? '6.3 MB' : '0 B'}</span></div>
+              <div class="stat-cell-value" style="font-size:var(--text-lg)">{c()!._stats?.blockIO || t('data.unknown')}</div>
+              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.read')}</span><span>{c()!._stats?.blockIO?.split('/')[0]?.trim() || t('data.unknown')}</span></div>
+              <div class="stat-io-row"><span style="color:var(--muted)">{t('stat.write')}</span><span>{c()!._stats?.blockIO?.split('/')[1]?.trim() || t('data.unknown')}</span></div>
             </div>
           </div>
         </Show>

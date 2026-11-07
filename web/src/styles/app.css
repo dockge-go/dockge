@@ -34,6 +34,12 @@
   --danger-soft: rgba(255, 59, 48, 0.12);
   --info: #0071e3;
 
+  --syntax-key: #0066b8;
+  --syntax-string: #6b399c;
+  --syntax-number: #865500;
+  --terminal-green: #237b3b;
+  --terminal-yellow: #865500;
+
   --font-display: -apple-system, "SF Pro Display", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-body: -apple-system, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
@@ -60,6 +66,11 @@
 }
 /* 暗色（macOS 深色窗口） */
 :root[data-theme="dark"] {
+  --syntax-key: #78c8ff;
+  --syntax-string: #d6b4f4;
+  --syntax-number: #ffcc66;
+  --terminal-green: #30d158;
+  --terminal-yellow: #ffd60a;
   --bg: #1e1e20;
   --bg-sidebar: rgba(30, 30, 32, 0.85);
   --panel: #2a2a2d;
@@ -389,6 +400,7 @@ body {
 }
 .dialog-overlay.open .dialog-alert { transform: scale(1); opacity: 1; }
 .dialog-message {
+  white-space: pre-line;
   padding: var(--space-5) var(--space-5) var(--space-4);
   font-size: var(--text-base); line-height: 1.45; color: var(--fg); text-align: center;
 }
@@ -496,13 +508,13 @@ body {
 .wb-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--space-3) var(--space-5); }
 .wb-terminal {
   height: 170px; flex-shrink: 0; margin: 0 var(--space-5) var(--space-4);
-  background: #141416; color: #e8e8ed; border-radius: var(--radius-card);
+  background: var(--panel-2); color: var(--fg); border-radius: var(--radius-card);
   font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.7;
   padding: var(--space-3); overflow-y: auto;
 }
 .wb-terminal::-webkit-scrollbar { width: 4px; }
-.wb-terminal::-webkit-scrollbar-thumb { background: #3a3a3e; border-radius: 2px; }
-.wb-terminal .t-dim { color: #7c7c82; }
+.wb-terminal::-webkit-scrollbar-thumb { background: var(--fill-strong); border-radius: 2px; }
+.wb-terminal .t-dim { color: var(--muted); }
 .wb-empty {
   display: flex; align-items: center; justify-content: center; flex: 1;
   color: var(--muted); font-size: var(--text-base);
@@ -516,7 +528,7 @@ body {
   font-size: var(--text-xs); font-weight: 600;
 }
 
-/* ── YAML 编辑器（覆盖高亮；控制台恒定深色） ──────────────────────────── */
+/* ── YAML 编辑器（覆盖高亮；随 Apple System 主题切换） ──────────────────────────── */
 .editor-status {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--text-xs); font-weight: 600; padding: 2px 9px;
@@ -548,7 +560,7 @@ body {
 .ep-msg { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-surface {
   flex: 1; min-height: 0; display: flex;
-  background: #141416; overflow: hidden;
+  background: var(--panel-2); overflow: hidden;
   border-inline: 1px solid var(--sep);
 }
 .editor-metric {
@@ -556,8 +568,8 @@ body {
   tab-size: 2; -moz-tab-size: 2;
 }
 .editor-lines.editor-metric {
-  padding: 12px 8px 12px 12px; background: #1b1b1e; color: #6f6f76;
-  border-right: 1px solid #26262a; overflow: hidden; white-space: pre;
+  padding: 12px 8px 12px 12px; background: var(--fill); color: var(--muted);
+  border-right: 1px solid var(--sep); overflow: hidden; white-space: pre;
   min-width: 42px; text-align: right; user-select: none; flex-shrink: 0;
 }
 .editor-code { position: relative; flex: 1; min-width: 0; }
@@ -565,10 +577,10 @@ body {
   position: absolute; inset: 0; margin: 0; padding: 12px;
   border: none; white-space: pre; word-break: normal; overflow-wrap: normal;
 }
-.editor-hl { overflow: hidden; pointer-events: none; color: #e8e8ed; }
+.editor-hl { overflow: hidden; pointer-events: none; color: var(--fg); }
 .editor-hl code { font: inherit; }
 .editor-input {
-  background: transparent; color: transparent; caret-color: #7fd4ff;
+  background: transparent; color: transparent; caret-color: var(--accent);
   resize: none; outline: none; overflow: auto;
   -webkit-text-fill-color: transparent;
 }
@@ -590,11 +602,11 @@ body {
 }
 .editor-fullscreen .editor-statusbar { border-radius: 0; }
 /* YAML 语法配色（编辑器恒定深色底） */
-.syn-key { color: #78c8ff; }
-.syn-str { color: #a5d6a7; }
-.syn-num { color: #ffcc66; }
-.syn-comment { color: #6a6a70; font-style: italic; }
-.syn-punct { color: #88888c; }
+.syn-key { color: var(--syntax-key); }
+.syn-str { color: var(--syntax-string); }
+.syn-num { color: var(--syntax-number); }
+.syn-comment { color: var(--muted); font-style: italic; }
+.syn-punct { color: var(--fg-2); }
 
 /* ── Container detail ─────────────────────────────────────────────────── */
 .crumb {
@@ -663,7 +675,6 @@ body {
 
 /* ≤768px：顶栏换行（搜索降为第二行全宽）；区头/详情操作纵向堆叠 */
 @media (max-width: 768px) {
-  .hamburger { display: flex; }
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
     transform: translateX(-100%);
@@ -809,6 +820,9 @@ body {
   color: var(--fg); cursor: pointer; border-radius: var(--radius-ctl);
   flex-shrink: 0;
 }
+@media (max-width: 768px) {
+  .hamburger { display: flex; }
+}
 .hamburger:hover { background: var(--fill); }
 .hamburger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .sidebar-backdrop {
@@ -862,30 +876,27 @@ body {
   50% { opacity: 0.35; transform: scale(0.8); }
 }
 
-/* ── Terminal / logs（控制台恒定深色） ────────────────────────────────── */
-.terminal {
-  background: #141416; color: #e8e8ed; border-radius: var(--radius-card);
-  padding: var(--space-4); font-family: var(--font-mono); font-size: var(--text-xs);
-  max-height: 360px; overflow-y: auto; line-height: 1.65;
-}
-.terminal-line { white-space: pre-wrap; word-break: break-all; }
-.terminal-line .prompt { color: #30d158; }
-.terminal-input-row { display: flex; align-items: center; gap: var(--space-2); }
-.terminal-input {
-  background: transparent; border: none; color: #e8e8ed;
-  font-family: var(--font-mono); font-size: var(--text-xs);
-  outline: none; flex: 1;
-}
-.terminal-input::placeholder { color: #6a6a70; }
-@keyframes blink { 50% { opacity: 0; } }
+/* ── Terminal / logs（随 Apple System 主题切换） ────────────────────────────────── */
+ .terminal-pane { min-width: 0; }
+.terminal-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.terminal-toolbar .form-label { display: flex; align-items: center; gap: var(--space-2); margin: 0; }
+.terminal-toolbar .form-select { width: auto; }
+.terminal-toolbar .btn { margin-inline-start: auto; }
+.terminal-surface { height: 360px; padding: var(--space-3); background: var(--panel-2); border: 1px solid var(--sep); border-radius: var(--radius-card); overflow: hidden; }
+.terminal-pane.compact .terminal-surface { height: 220px; }
+.wb-terminal:has(.terminal-pane) { padding: 0; overflow: hidden; }
+.wb-terminal .terminal-pane, .wb-terminal .terminal-pane.compact .terminal-surface { height: 100%; }
+.terminal-surface:focus-within { box-shadow: var(--focus-ring); }
+.terminal-surface .xterm { height: 100%; }
+.terminal-surface .xterm .xterm-viewport { border-radius: var(--radius-ctl); }
 .log-only-viewer {
-  background: #141416; color: #e8e8ed; font-family: var(--font-mono);
+  background: var(--panel-2); color: var(--fg); font-family: var(--font-mono);
   font-size: var(--text-xs); line-height: 1.6; padding: var(--space-4);
   border-radius: var(--radius-card); max-height: 400px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
 .log-only-viewer::-webkit-scrollbar { width: 4px; }
-.log-only-viewer::-webkit-scrollbar-thumb { background: #3a3a3e; border-radius: 2px; }
+.log-only-viewer::-webkit-scrollbar-thumb { background: var(--fill-strong); border-radius: 2px; }
 .kv-table tbody tr:not(:last-child) td { border-bottom: 1px solid var(--sep-soft); }
 
 /* ── 日志流 ───────────────────────────────────────────────────────────── */
@@ -900,10 +911,10 @@ body {
 }
 .log-stream { min-height: 260px; max-height: 420px; }
 .log-line { white-space: pre-wrap; word-break: break-all; }
-.log-line.log-lv-info { color: #e8e8ed; }
-.log-line.log-lv-warn { color: #ffd60a; }
-.log-line.log-lv-error { color: #ff453a; }
-.log-empty { color: #6a6a70; padding: var(--space-4) 0; text-align: center; }
+.log-line.log-lv-info { color: var(--fg); }
+.log-line.log-lv-warn { color: var(--terminal-yellow); }
+.log-line.log-lv-error { color: var(--danger); }
+.log-empty { color: var(--muted); padding: var(--space-4) 0; text-align: center; }
 
 /* ── 认证：Setup / 登录 ───────────────────────────────────────────────── */
 .auth-screen {
@@ -968,3 +979,28 @@ body {
 .user-chip-username { font-size: var(--text-xs); font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-chip-role { font-size: 11px; color: var(--muted); }
 
+
+/* 服务器概览沿用 Apple System 的系统字体、hairline 与面板令牌。 */
+.host-card-heading { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-3); }
+.host-info-link { color:var(--accent); font-size:var(--text-xs); text-decoration:none; }
+.host-info-link:hover { text-decoration:underline; }
+.host-status { margin-bottom:var(--space-4); }
+.host-status .form-help { margin:0; }
+.host-status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--success); margin-inline-end:6px; }
+.host-error { color:var(--danger); font-size:var(--text-xs); overflow-wrap:anywhere; margin-top:var(--space-2); }
+.host-resource { margin-bottom:var(--space-4); }
+.host-resource .resource-row { margin-bottom:var(--space-1); }
+.host-card .resource-val { width:62px; }
+.host-resource-detail { margin-inline-start:76px; color:var(--muted); font-size:var(--text-xs); font-variant-numeric:tabular-nums; }
+.host-facts { margin:var(--space-4) 0 0; padding-top:var(--space-3); border-top:1px solid var(--sep-soft); display:grid; gap:var(--space-2); font-size:var(--text-xs); }
+.host-facts > div { display:flex; justify-content:space-between; gap:var(--space-3); }
+.host-facts dt { color:var(--muted); }
+.host-facts dd { margin:0; font-variant-numeric:tabular-nums; text-align:right; }
+.resource-counts { margin-bottom:var(--space-4); }
+.system-summary td:first-child { width:160px; }
+.system-summary td:last-child { font-weight:500; overflow-wrap:anywhere; }
+@media (max-width:720px) {
+  .charts-grid { grid-template-columns:minmax(0,1fr); }
+  .system-summary { min-width:0; table-layout:fixed; }
+  .system-summary td:first-child, .system-summary th:first-child { width:110px; }
+}

@@ -3,8 +3,10 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dockge/internal/model"
@@ -118,5 +120,99 @@ func TestGetExternalStackCallsComposeLsOnce(t *testing.T) {
 	// 外部栈分支 1 次 + StackPs 的 resolveStackExec 1 次 = 2；重复查询回归会变成 3。
 	if n := len(data); n != 2 {
 		t.Errorf("compose ls called %d times, want 2 (no duplicate status query)", n)
+	}
+}
+
+// TestGetManagedDraft 校验详情与列表的草稿状态一致，环境文件读取失败不能伪装为空。
+func TestGetManagedDraft(t *testing.T) {
+	for _, badEnv := range []bool{false, true} {
+		t.Run(fmt.Sprintf("badEnv=%v", badEnv), func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "runtime")
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '[]'\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			r := &Repository{stacksDir: dir, runtime: Runtime{bin: bin, composeBin: bin, composeSub: []string{}}}
+			stack := &model.Stack{Name: "draft", Yaml: "services: {}\n"}
+			if err := r.Save(context.Background(), stack, true); err != nil {
+				t.Fatal(err)
+			}
+			if badEnv {
+				if err := os.Mkdir(filepath.Join(dir, "draft", ".env"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := r.Get(context.Background(), "draft")
+			if badEnv {
+				if err == nil || !strings.Contains(err.Error(), ".env") || !strings.Contains(err.Error(), "draft") {
+					t.Fatalf("expected environment read details, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != model.StatusCreatedFile || got.Yaml != stack.Yaml {
+				t.Fatalf("draft mismatch: %+v", got)
+			}
+		})
+	}
+}
+
+// TestGetManagedInvalidComposeKeepsEditableFile 防止状态查询失败遮蔽可修正的 YAML。
+func TestGetManagedInvalidComposeKeepsEditableFile(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "runtime")
+	script := "#!/bin/sh\nfor arg; do\nif [ \"$arg\" = ps ]; then\necho 'services.app Additional property unsupported_field is not allowed' >&2\nexit 1\nfi\ndone\necho '[]'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := &Repository{stacksDir: dir, runtime: Runtime{bin: bin, composeBin: bin, composeSub: []string{}}}
+	stack := &model.Stack{Name: "invalid", Yaml: "services:\n  app:\n    image: busybox:1.37.0\n    unsupported_field: true\n", Env: "A=1\n"}
+	if err := r.Save(context.Background(), stack, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Get(context.Background(), stack.Name)
+	if err != nil {
+		t.Fatalf("运行状态失败不应遮蔽可编辑的真实文件: %v", err)
+	}
+	if !got.Managed || got.Yaml != stack.Yaml || got.Env != stack.Env || got.Status != model.StatusUnknown {
+		t.Fatalf("配置或未知运行状态不正确: %+v", got)
+	}
+	if !strings.Contains(got.RuntimeError, "unsupported_field") || !strings.Contains(got.RuntimeError, stack.Name) {
+		t.Fatalf("未保留具体运行时错误: %q", got.RuntimeError)
+	}
+}
+
+// TestListRuntimeFailurePreservesFilesAsUnknown 防止运行时不可达时把已有栈误报为未部署。
+func TestListRuntimeFailurePreservesFilesAsUnknown(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unavailable=%v", unavailable), func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "runtime")
+			script := "#!/bin/sh\necho '[]'\n"
+			if unavailable {
+				script = "#!/bin/sh\necho 'runtime socket permission denied' >&2\nexit 1\n"
+			}
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			r := &Repository{stacksDir: dir, runtime: DetectRuntime(bin, "")}
+			stack := &model.Stack{Name: "editable", Yaml: "services: {}\n"}
+			if err := r.Save(context.Background(), stack, true); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := r.List(context.Background())
+			if err != nil || len(rows) != 1 || !rows[0].Managed {
+				t.Fatalf("文件列表不可丢失：%+v, %v", rows, err)
+			}
+			if unavailable {
+				if rows[0].Status != model.StatusUnknown || !strings.Contains(rows[0].RuntimeError, "runtime socket permission denied") {
+					t.Fatalf("未知状态必须含真实错误：%+v", rows[0])
+				}
+			} else if rows[0].Status != model.StatusCreatedFile || rows[0].RuntimeError != "" {
+				t.Fatalf("查询成功才可确认仅有文件：%+v", rows[0])
+			}
+		})
 	}
 }

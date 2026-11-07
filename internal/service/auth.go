@@ -11,9 +11,11 @@ import (
 	v1 "dockge/api/v1"
 	"dockge/internal/model"
 	"dockge/internal/repository"
+	"dockge/pkg/config"
 	"dockge/pkg/hash"
 	"dockge/pkg/jwt"
 	"dockge/pkg/rate"
+	"github.com/spf13/viper"
 
 	"github.com/samber/do/v2"
 )
@@ -35,8 +37,7 @@ type AuthService interface {
 	ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error
 	Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error)
 	CheckNeedSetup(ctx context.Context) (bool, error)
-	// CheckSession 供 StrictAuth 逐请求校验：用户存在、启用且密码哈希未变
-	// （已接线关闭债务 D12：停用/改密后旧 token 下一次请求即 401）。
+	// CheckSession 供 StrictAuth 逐请求校验：用户存在、启用且密码哈希未变，改密后旧 token 立即失效。
 	CheckSession(ctx context.Context, uid uint, h string) error
 	// GetDisableAuth 读取免登录模式开关。
 	GetDisableAuth(ctx context.Context) bool
@@ -44,20 +45,13 @@ type AuthService interface {
 	ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error
 	// AutoLogin 免登录模式下以首个活跃用户自动登录。
 	AutoLogin(ctx context.Context) (*v1.LoginResponseData, error)
-	// ListUsers 管理员列出全部用户。
-	ListUsers(ctx context.Context, actingUID uint) ([]v1.UserPublicData, error)
-	// CreateUser 管理员创建 admin/member 用户。
-	CreateUser(ctx context.Context, actingUID uint, req *v1.CreateUserRequest) error
-	// ResetUserPassword 管理员重置他人密码（目标旧会话即时失效）。
-	ResetUserPassword(ctx context.Context, actingUID uint, username, newPassword string) error
-	// DeleteUser 管理员删除用户（最后一名 admin 与自删受服务端保护）。
-	DeleteUser(ctx context.Context, actingUID uint, username string) error
 }
 
 type authService struct {
 	repo         *repository.Repository
 	jwt          *jwt.JWT
 	loginLimiter *rate.KeyedLimiter
+	oidc         config.OIDC
 }
 
 // NewAuthService 构造认证服务（含按 IP+账号的登录限流器），由注入容器调用。
@@ -66,6 +60,7 @@ func NewAuthService(i do.Injector) (AuthService, error) {
 		repo:         do.MustInvoke[*repository.Repository](i),
 		jwt:          do.MustInvoke[*jwt.JWT](i),
 		loginLimiter: rate.NewKeyed(loginRateLimit, loginRateWindow, loginMaxKeys),
+		oidc:         config.OIDCFrom(do.MustInvoke[*viper.Viper](i)),
 	}, nil
 }
 
@@ -78,16 +73,19 @@ func loginRateKey(clientIP, username string) string {
 // 消除「不存在用户立即返回」与「密码校验耗时」之间的时序侧信道（防账号存在性探测）。
 const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
-// Login 校验用户名密码；开启 2FA 的账号返回中间令牌并要求提交验证码。
+// Login 仅校验唯一账号的用户名与密码；OIDC 模式禁止本地登录。
 func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error) {
 	// 失败原因各自成文：都回「登录失效」会让用户把「密码错」「被限流」「账号停用」当成会话过期，
 	// 无法判断该改什么（上游同样区分 authIncorrectCreds / authUserInactiveOrDeleted）。
 	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {
 		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "尝试过于频繁，请稍后再试"}
 	}
-	// 统一失败文案：未知用户与密码错误必须逐字一致（AUTH-05 防枚举）。
+	// 未知用户与密码错误使用相同文案，防止探测账号是否存在。
 	const badCredentials = "用户名或密码错误"
-	user, err := s.repo.GetUserByUsername(ctx, req.Username)
+	if s.oidc.Enabled {
+		return nil, oidcOnlyError()
+	}
+	user, err := s.repo.SingleUser(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			// 等成本：对 dummy 哈希跑一次 BcryptCheck（忽略结果），时序与真实校验一致。
@@ -96,11 +94,15 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP 
 		}
 		return nil, fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
 	}
+	if user.Username != req.Username {
+		_ = hash.BcryptCheck(req.Password, dummyBcryptHash)
+		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: badCredentials}
+	}
 	if err := hash.BcryptCheck(req.Password, user.Password); err != nil {
 		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: badCredentials}
 	}
 	// Active 检查必须在密码校验之后：放在前面会让密码错误时也能区分「账号存在但停用」，
-	// 形成账号存在性探测通道（AUTH-05 / D-06）。
+	// 形成账号存在性探测通道。
 	if !user.Active {
 		return nil, &v1.Error{Code: http.StatusUnauthorized, Message: "该账号已被停用"}
 	}
@@ -109,6 +111,12 @@ func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP 
 
 // Setup 创建首个管理员账号（仅当无任何用户时），成功即返回登录态。
 func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.LoginResponseData, error) {
+	if s.oidc.Enabled {
+		return nil, oidcOnlyError()
+	}
+	if !ValidateUsername(req.Username) {
+		return nil, &v1.Error{Code: 400, Message: fmt.Sprintf("用户名不合法：%s（需 2-32 位字母、数字或 _ . -）", req.Username)}
+	}
 	count, err := s.repo.CountUsers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: 检查初始化状态失败：%v", v1.ErrInternalServerError, err)
@@ -128,6 +136,9 @@ func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.Logi
 		Password: hashed, Role: model.RoleAdmin, Active: true, Source: model.SourceLocal,
 	}
 	if err := s.repo.CreateUser(ctx, user); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return nil, &v1.Error{Code: 409, Message: "Dockge 已完成初始化，单用户模式不允许新增账号"}
+		}
 		return nil, fmt.Errorf("%w: 创建管理员账号失败：%v", v1.ErrInternalServerError, err)
 	}
 	return s.session(user)
@@ -135,6 +146,9 @@ func (s *authService) Setup(ctx context.Context, req *v1.SetupRequest) (*v1.Logi
 
 // CheckNeedSetup 判断是否需要首次安装引导（用户数为 0）。
 func (s *authService) CheckNeedSetup(ctx context.Context) (bool, error) {
+	if s.oidc.Enabled {
+		return false, nil
+	}
 	count, err := s.repo.CountUsers(ctx)
 	if err != nil {
 		return false, err
@@ -142,14 +156,17 @@ func (s *authService) CheckNeedSetup(ctx context.Context) (bool, error) {
 	return count == 0, nil
 }
 
-// Me 返回当前登录用户信息（含角色与 2FA 状态）。
+// Me 仅返回唯一账号的身份，不暴露历史额外账号。
 func (s *authService) Me(ctx context.Context, uid uint) (*v1.MeUserData, error) {
-	user, err := s.repo.GetUser(ctx, uid)
+	user, err := s.repo.SingleUser(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, fmt.Errorf("%w: 用户不存在", v1.ErrNotFound)
 		}
 		return nil, fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
+	}
+	if user.ID != uid {
+		return nil, v1.ErrUnauthorized
 	}
 	mp := meData(&user)
 	return &mp, nil
@@ -158,12 +175,18 @@ func (s *authService) Me(ctx context.Context, uid uint) (*v1.MeUserData, error) 
 // ChangePassword 校验旧密码与强度后更新密码；
 // 旧 token 因 claims 中的密码摘要绑定（CheckSession）自动失效。
 func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.ChangePasswordRequest) error {
-	user, err := s.repo.GetUser(ctx, uid)
+	if s.oidc.Enabled {
+		return oidcOnlyError()
+	}
+	user, err := s.repo.SingleUser(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return fmt.Errorf("%w: 用户不存在", v1.ErrNotFound)
 		}
 		return fmt.Errorf("%w: 读取用户失败：%v", v1.ErrInternalServerError, err)
+	}
+	if user.ID != uid {
+		return v1.ErrUnauthorized
 	}
 	if err := hash.BcryptCheck(req.OldPassword, user.Password); err != nil {
 		// 上游此处有明确文案，不能落回笼统的「参数错误」
@@ -181,17 +204,17 @@ func (s *authService) ChangePassword(ctx context.Context, uid uint, req *v1.Chan
 
 // CheckSession 逐请求校验会话有效性：用户存在、启用，且密码哈希摘要与 token 一致。
 func (s *authService) CheckSession(ctx context.Context, uid uint, h string) error {
-	user, err := s.repo.GetUser(ctx, uid)
+	user, err := s.repo.SingleUser(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return v1.ErrUnauthorized
 		}
 		return err
 	}
-	if !user.Active {
+	if user.ID != uid || !user.Active {
 		return v1.ErrUnauthorized
 	}
-	if hash.Shake256(user.Password) != h {
+	if hash.Shake256(sessionSecret(&user, s.oidc)) != h {
 		return v1.ErrUnauthorized // 密码已修改，旧 token 失效
 	}
 	return nil
@@ -199,6 +222,9 @@ func (s *authService) CheckSession(ctx context.Context, uid uint, h string) erro
 
 // GetDisableAuth 读取免登录模式开关。
 func (s *authService) GetDisableAuth(ctx context.Context) bool {
+	if s.oidc.Enabled {
+		return false
+	}
 	v, err := s.repo.GetSetting(ctx, "disableAuth")
 	if err != nil {
 		return false
@@ -208,10 +234,16 @@ func (s *authService) GetDisableAuth(ctx context.Context) bool {
 
 // ToggleDisableAuth 切换免登录模式：切换到关闭认证时须校验当前密码。
 func (s *authService) ToggleDisableAuth(ctx context.Context, uid uint, enable bool, currentPassword string) error {
+	if s.oidc.Enabled {
+		return oidcOnlyError()
+	}
 	if enable {
-		user, err := s.repo.GetUser(ctx, uid)
+		user, err := s.repo.SingleUser(ctx)
 		if err != nil {
 			return err
+		}
+		if user.ID != uid {
+			return v1.ErrUnauthorized
 		}
 		if err := hash.BcryptCheck(currentPassword, user.Password); err != nil {
 			return &v1.Error{Code: http.StatusBadRequest, Message: "当前密码不正确"}
@@ -226,42 +258,41 @@ func (s *authService) AutoLogin(ctx context.Context) (*v1.LoginResponseData, err
 	if !s.GetDisableAuth(ctx) {
 		return nil, v1.ErrUnauthorized
 	}
-	users, err := s.repo.ListUsers(ctx)
+	user, err := s.repo.SingleUser(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: 读取用户列表失败：%v", v1.ErrInternalServerError, err)
+		return nil, fmt.Errorf("%w: 读取单用户账号失败：%v", v1.ErrInternalServerError, err)
 	}
-	for _, u := range users {
-		if u.Active {
-			token, err := s.jwt.GenToken(u.ID, u.Password, time.Now().Add(SessionTTL))
-			if err != nil {
-				return nil, fmt.Errorf("%w: 签发会话令牌失败：%v", v1.ErrInternalServerError, err)
-			}
-			return &v1.LoginResponseData{
-				AccessToken: token,
-				User:        v1.MeUserData{ID: u.ID, Username: u.Username, Nickname: u.Nickname},
-			}, nil
-		}
+	if !user.Active {
+		return nil, v1.ErrUnauthorized
 	}
-	return nil, v1.ErrUnauthorized
+	return s.session(&user)
 }
 
 // session 签发绑定密码哈希的本地 JWT。
 func (s *authService) session(user *model.DockgeUser) (*v1.LoginResponseData, error) {
-	token, err := s.jwt.GenToken(user.ID, user.Password, time.Now().Add(SessionTTL))
+	expiry := time.Now().Add(SessionTTL).Truncate(time.Second)
+	token, err := s.jwt.GenToken(user.ID, sessionSecret(user, s.oidc), expiry)
 	if err != nil {
 		return nil, fmt.Errorf("%w: 签发会话令牌失败：%v", v1.ErrInternalServerError, err)
 	}
-	return &v1.LoginResponseData{AccessToken: token, User: meData(user)}, nil
+	return &v1.LoginResponseData{AccessToken: token, ExpiresAt: expiry.UnixMilli(), User: meData(user)}, nil
 }
 
 // meData 把用户实体转为对外视图（角色为空的历史用户按 admin 展示）。
 func meData(u *model.DockgeUser) v1.MeUserData {
-	role := u.Role
-	if role == "" {
-		role = model.RoleAdmin
-	}
 	return v1.MeUserData{
 		ID: u.ID, Username: u.Username, Nickname: u.Nickname,
-		Role: role,
+		Role: model.RoleAdmin,
 	}
+}
+
+func oidcOnlyError() error {
+	return &v1.Error{Code: 403, Message: "已启用 OIDC：本地初始化、密码登录、改密及免认证模式已禁用，请使用配置的唯一 OIDC 身份登录"}
+}
+
+func sessionSecret(u *model.DockgeUser, c config.OIDC) string {
+	if !c.Enabled {
+		return u.Password
+	}
+	return u.Password + "\x00oidc\x00" + c.Issuer + "\x00" + c.ClientID + "\x00" + c.Subject
 }
