@@ -1,46 +1,62 @@
-/* 认证模拟层：对齐后端契约（docs/REQUIREMENTS.md R1）
- *  - 首启无用户 → 强制 Setup 创建 admin（密码 ≥6 位且含字母与数字）
- *  - 登录签发 7 天会话（localStorage key 沿用后端 "crate_token"）
- *  - 改密后旧会话全部失效（会话绑定密码版本，同 JWT claim 绑定哈希摘要）
- *  - admin 用户管理：创建/重置密码/删除；不可删除自己或最后一名 admin
- *  - 登录防爆破：连续失败 5 次锁定 10 秒
- * 接真实后端：把本文件替换为 fetch /v1/* 即可，调用方接口不变。 */
+/* 认证适配层：把 dockgy mock 实现替换为真实 /v1/* fetch（调用方接口不变）。
+ * 冻结约定（02-CONTEXT D-01/D-03/D-05）：
+ *  - 导出符号（Session/UserPublic/passwordProblem/AuthAPI）与 localStorage 键名不变；
+ *    唯一有意偏离：deleteUser 异步化（Promise<boolean>）——错误明细铁律要求 await 后
+ *    经 catch 直出后端 message，fire-and-forget 会静默丢失（store.ts 调用点已补 await）。
+ *  - crate_token 存 {token,username,role,exp} JSON 包装：session() 保持同步签名读取；
+ *    旧 mock 残留值（无 token 字段）经形状校验判无效，自动落登录/初始化页。
+ *  - 后端错误包 {code,message} 映射回 mock 错误码；未命中的映射直出后端原文 message。
+ *  - verify() 已删除（全仓零调用方）；'dockge.users' mock 存储不再读写。
+ *  - needSetup()/listUsers() 同步签名靠模块级缓存维持；启动引导经 refreshNeedSetup/
+ *    refreshUsers 更新缓存（见 store.ts bootstrapAuth）。 */
 
 export interface Session { username: string; role: 'admin' | 'member'; exp: number }
-interface UserRec { username: string; role: string; salt: string; hash: string; pwVer: number; created: number }
 export interface UserPublic { username: string; role: string; created: number }
 
-const USERS_KEY = 'dockge.users';
 const SESSION_KEY = 'crate_token';
 const SESSION_TTL = 7 * 24 * 3600 * 1000;
 
-function readJSON<T>(key: string, fallback: T): T {
-  try { const v = JSON.parse(localStorage.getItem(key) || 'null'); return v == null ? fallback : v; } catch (e) { return fallback; }
+/* 会话包装：localStorage 里的形状是前端内部自由度，后端只认 Authorization 头。 */
+interface SessionEnvelope { token: string; username: string; role: 'admin' | 'member'; exp: number }
+
+function readSession(): SessionEnvelope | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    if (!v || typeof v.token !== 'string' || !v.token) return null; // 旧 mock 残留无 token → 判无效
+    if (!v.username || typeof v.exp !== 'number' || v.exp < Date.now()) return null;
+    return v;
+  } catch (e) { return null; }
 }
-function writeJSON(key: string, val: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* ignore */ }
+function writeSession(s: SessionEnvelope) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) { /* ignore */ }
 }
 
-function djb2(s: string): string {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
-  return 'djb2:' + h.toString(16);
-}
-async function sha256Hex(str: string): Promise<string | null> {
-  if (window.crypto && crypto.subtle && crypto.subtle.digest) {
-    const data = new TextEncoder().encode(str);
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+/* 统一请求：成功（2xx 且 body.code===0）返回 body.data；失败 throw 后端原文 message
+ * 或映射后的 mock 错误码（authErrorText 的 map[code]||code 天然支持直出）。 */
+async function request(path: string, init?: RequestInit): Promise<any> {
+  const res = await fetch(path, init);
+  let body: any = null;
+  try { body = await res.json(); } catch (e) { /* 非 JSON 响应按 HTTP 码处理 */ }
+  if (!res.ok || !body || body.code !== 0) {
+    throw new Error(mapErrorCode(res.status, body?.code, body?.message || ''));
   }
-  return null;
-}
-async function hashPassword(password: string, salt: string): Promise<string> {
-  const h = await sha256Hex(salt + '\u0000' + password);
-  return h ? 'sha256:' + h : djb2(salt + password);
+  return body.data;
 }
 
-const users = () => readJSON<UserRec[]>(USERS_KEY, []);
-const saveUsers = (list: UserRec[]) => writeJSON(USERS_KEY, list);
+/* 错误映射（per D-05）：已知语义映射回 mock 错误码供 i18n；未命中直出后端原文。 */
+function mapErrorCode(httpStatus: number, _bodyCode: number | undefined, message: string): string {
+  if (httpStatus === 401) return 'bad-credentials';
+  if (httpStatus === 429) return 'locked';
+  if (httpStatus === 409 && message.includes('最后一名管理员')) return 'last-admin';
+  if (message.includes('不能删除当前登录账号')) return 'cannot-delete-self';
+  if (httpStatus === 409) return message.includes('已完成初始化') ? 'already-setup' : 'duplicate';
+  if (httpStatus === 400) {
+    if (message.includes('至少6位')) return 'pw-short';
+    if (message.includes('需包含字母和数字')) return 'pw-weak';
+    if (message.includes('用户名不合法')) return 'bad-username';
+  }
+  return message || 'bad-credentials';
+}
 
 export function passwordProblem(pw: string): string | null {
   if (!pw || pw.length < 6) return 'short';
@@ -48,108 +64,110 @@ export function passwordProblem(pw: string): string | null {
   return null;
 }
 
-/* 防爆破：进程内计数（真实实现按 IP+账号双维度） */
-let fails = { count: 0, lockUntil: 0 };
+/* needSetup/listUsers 同步缓存：签名冻结，值由启动引导/调用后刷新。 */
+let needSetupCache = true;
+let usersCache: UserPublic[] = [];
+
+async function authed(path: string, init?: RequestInit): Promise<any> {
+  const s = readSession();
+  if (!s) throw new Error('bad-credentials');
+  return request(path, { ...init, headers: { ...(init?.headers || {}), Authorization: 'Bearer ' + s.token } });
+}
+
+function toSession(data: any): Session {
+  const exp = Date.now() + SESSION_TTL;
+  const s: SessionEnvelope = { token: data.accessToken, username: data.user.username, role: data.user.role, exp };
+  writeSession(s);
+  return { username: s.username, role: s.role, exp };
+}
 
 export const AuthAPI = {
-  needSetup: (): boolean => users().length === 0,
+  needSetup: (): boolean => needSetupCache,
+
+  async refreshNeedSetup(): Promise<boolean> {
+    const data = await request('/v1/setup/need');
+    needSetupCache = !!data.needSetup;
+    return needSetupCache;
+  },
 
   session(): Session | null {
-    const s = readJSON<{ username: string; pwVer: number; exp: number } | null>(SESSION_KEY, null);
-    if (!s || !s.username || !s.exp || s.exp < Date.now()) return null;
-    const u = users().find(x => x.username === s.username);
-    if (!u || u.pwVer !== s.pwVer) return null;
-    return { username: u.username, role: u.role as 'admin' | 'member', exp: s.exp };
+    const s = readSession();
+    if (!s) return null;
+    return { username: s.username, role: s.role, exp: s.exp };
   },
 
   async setup(username: string, password: string): Promise<Session> {
-    if (users().length > 0) throw new Error('already-setup');
     if (!username || !/^[A-Za-z0-9_.-]{2,32}$/.test(username)) throw new Error('bad-username');
     const p = passwordProblem(password);
     if (p) throw new Error('pw-' + p);
-    const salt = Math.random().toString(36).slice(2, 12);
-    const hash = await hashPassword(password, salt);
-    saveUsers([{ username, role: 'admin', salt, hash, pwVer: 1, created: Date.now() }]);
-    return AuthAPI.login(username, password);
+    const data = await request('/v1/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return toSession(data);
   },
 
   async login(username: string, password: string): Promise<Session> {
-    if (fails.lockUntil > Date.now()) throw new Error('locked');
-    const u = users().find(x => x.username === username);
-    try {
-      if (!u) throw new Error('bad-credentials');
-      const hash = await hashPassword(password, u.salt);
-      if (hash !== u.hash) throw new Error('bad-credentials');
-      fails = { count: 0, lockUntil: 0 };
-      const exp = Date.now() + SESSION_TTL;
-      writeJSON(SESSION_KEY, { username: u.username, pwVer: u.pwVer, exp });
-      return { username: u.username, role: u.role as 'admin' | 'member', exp };
-    } catch (e) {
-      if ((e as Error).message === 'bad-credentials') {
-        fails.count++;
-        if (fails.count >= 5) fails = { count: 5, lockUntil: Date.now() + 10000 };
-      }
-      throw e;
-    }
+    const data = await request('/v1/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return toSession(data);
   },
 
   logout() { try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ } },
 
-  async verify(username: string, password: string): Promise<boolean> {
-    const u = users().find(x => x.username === username);
-    if (!u) return false;
-    return (await hashPassword(password, u.salt)) === u.hash;
-  },
-
-  async changePassword(username: string, currentPw: string, nextPw: string): Promise<boolean> {
-    const list = users();
-    const u = list.find(x => x.username === username);
-    if (!u) throw new Error('bad-credentials');
+  /* username 参数按 D-03 忽略（走 /v1/me/password 自身）；成功即清会话——
+   * 服务端 JWT 摘要绑定已使旧 token 失效，前端同步清包装回登录页。 */
+  async changePassword(_username: string, currentPw: string, nextPw: string): Promise<boolean> {
     const p = passwordProblem(nextPw);
     if (p) throw new Error('pw-' + p);
-    if ((await hashPassword(currentPw, u.salt)) !== u.hash) throw new Error('bad-credentials');
-    const salt = Math.random().toString(36).slice(2, 12);
-    u.salt = salt; u.hash = await hashPassword(nextPw, salt); u.pwVer = (u.pwVer || 1) + 1;
-    saveUsers(list);
+    await authed('/v1/me/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword: currentPw, newPassword: nextPw }),
+    });
     try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
     return true;
   },
 
   listUsers(): UserPublic[] {
-    return users().map(u => ({ username: u.username, role: u.role, created: u.created }));
+    return usersCache;
+  },
+
+  async refreshUsers(): Promise<void> {
+    const data = await request('/v1/users');
+    usersCache = (data as UserPublic[]) || [];
   },
 
   async createUser(username: string, password: string, role: string): Promise<boolean> {
-    const list = users();
-    if (list.some(x => x.username === username)) throw new Error('duplicate');
-    if (!username || !/^[A-Za-z0-9_.-]{2,32}$/.test(username)) throw new Error('bad-username');
     const p = passwordProblem(password);
     if (p) throw new Error('pw-' + p);
-    const salt = Math.random().toString(36).slice(2, 12);
-    list.push({ username, role: role === 'admin' ? 'admin' : 'member', salt, hash: await hashPassword(password, salt), pwVer: 1, created: Date.now() });
-    saveUsers(list);
+    if (!username || !/^[A-Za-z0-9_.-]{2,32}$/.test(username)) throw new Error('bad-username');
+    await authed('/v1/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
     return true;
   },
 
   async resetUserPassword(username: string, nextPw: string): Promise<boolean> {
-    const list = users();
-    const u = list.find(x => x.username === username);
-    if (!u) throw new Error('bad-credentials');
     const p = passwordProblem(nextPw);
     if (p) throw new Error('pw-' + p);
-    const salt = Math.random().toString(36).slice(2, 12);
-    u.salt = salt; u.hash = await hashPassword(nextPw, salt); u.pwVer = (u.pwVer || 1) + 1;
-    saveUsers(list);
+    await authed('/v1/users/' + encodeURIComponent(username) + '/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: nextPw }),
+    });
     return true;
   },
 
-  deleteUser(username: string): boolean {
-    const list = users();
-    const target = list.find(x => x.username === username);
-    if (!target) throw new Error('bad-credentials');
-    const admins = list.filter(x => x.role === 'admin');
-    if (target.role === 'admin' && admins.length <= 1) throw new Error('last-admin');
-    saveUsers(list.filter(x => x.username !== username));
+  /* 唯一异步化偏差（见文件头）：错误需 await 后直出后端 message。 */
+  async deleteUser(username: string): Promise<boolean> {
+    await authed('/v1/users/' + encodeURIComponent(username), { method: 'DELETE' });
     return true;
   }
 };

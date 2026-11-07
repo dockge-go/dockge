@@ -127,6 +127,7 @@ export const en: Record<string, string> = {
   'auth.loginTitle': 'Sign in to Dockge', 'auth.loginSubtitle': 'Access the console with your username and password',
   'auth.username': 'Username', 'auth.password': 'Password', 'auth.confirmPassword': 'Confirm password',
   'auth.createAdmin': 'Create admin & sign in', 'auth.signIn': 'Sign in', 'auth.signingIn': 'Signing in…',
+  'auth.booting': 'Connecting to server…',
   'auth.currentPassword': 'Current password', 'auth.newPassword': 'New password',
   'auth.badCredentials': 'Incorrect username or password', 'auth.locked': 'Too many attempts, try again shortly',
   'auth.pwShort': 'Password must be at least 6 characters', 'auth.pwWeak': 'Password must contain letters and digits',

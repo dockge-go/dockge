@@ -36,10 +36,36 @@ function loadExtras(): { socketPath?: string; liveEvents?: boolean } {
 export const [user, setUser] = createSignal<Session | null>(AuthAPI.session());
 export const [noUsers, setNoUsers] = createSignal(AuthAPI.needSetup());
 export const [userList, setUserList] = createSignal<UserPublic[]>(AuthAPI.listUsers());
-export function refreshAuthState() {
-  setNoUsers(AuthAPI.needSetup());
-  setUserList(AuthAPI.listUsers());
+/* 引导完成标志：AuthScreen 在 false 期间只渲染加载态，避免 needSetup 缓存初值误判分支（D-04） */
+export const [authBooted, setAuthBooted] = createSignal(false);
+export async function refreshAuthState() {
+  try {
+    await AuthAPI.refreshNeedSetup();
+    setNoUsers(AuthAPI.needSetup());
+  } catch (e) { /* 引导网络失败保持缓存值 */ }
+  /* GET /v1/users 为 admin-only：member 固定调用会 403 弹无意义权限 toast，
+   * member 的 userList 本就不可见——仅 admin 拉取（门控 per 02-CONTEXT）。 */
+  if (user()?.role === 'admin') {
+    try {
+      await AuthAPI.refreshUsers();
+      setUserList(AuthAPI.listUsers());
+    } catch (e) { toast(authErrorText((e as Error).message), 'error'); }
+  }
 }
+/* 应用启动引导（D-04）：刷新 needSetup 缓存后 AuthScreen 才做 setup/login 分支决策；
+ * 调用点固定在模块作用域——组件挂载时序不定会漏接导致 authBooted 恒 false。 */
+async function bootstrapAuth() {
+  try {
+    await AuthAPI.refreshNeedSetup();
+    setNoUsers(AuthAPI.needSetup());
+    if (user()?.role === 'admin') {
+      await AuthAPI.refreshUsers();
+      setUserList(AuthAPI.listUsers());
+    }
+  } catch (e) { /* 后端不可达：保持缓存默认，登录时错误经表单/toast 明细透出 */ }
+  setAuthBooted(true);
+}
+void bootstrapAuth();
 
 const storedTheme = (() => {
   try { const s = localStorage.getItem(LS_THEME); if (s === 'dark' || s === 'light') return s; } catch (e) { /* ignore */ }
@@ -327,7 +353,8 @@ export function authErrorText(code: string): string {
     'bad-username': t('auth.badUsername'),
     'already-setup': t('auth.alreadySetup'),
     'duplicate': t('auth.duplicateUser'),
-    'last-admin': t('auth.lastAdmin')
+    'last-admin': t('auth.lastAdmin'),
+    'cannot-delete-self': t('auth.cannotDeleteSelf')
   };
   return map[code] || code;
 }
@@ -422,9 +449,10 @@ export function deleteUser(username: string) {
   const cur = user();
   if (!cur) return;
   if (username === cur.username) { toast(t('auth.cannotDeleteSelf'), 'error'); return; }
-  confirmDlg(t('auth.confirmDeleteUser', { name: username }), () => {
+  confirmDlg(t('auth.confirmDeleteUser', { name: username }), async () => {
     try {
-      AuthAPI.deleteUser(username);
+      /* deleteUser 已异步化（02-CONTEXT D-01 唯一签名偏离）：await 后错误直出后端 message */
+      await AuthAPI.deleteUser(username);
       refreshAuthState();
       toast(t('auth.userDeleted', { name: username }), 'success');
     } catch (e) { toast(authErrorText((e as Error).message), 'error'); }

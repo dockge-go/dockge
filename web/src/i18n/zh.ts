@@ -128,6 +128,7 @@ export const zh: Record<string, string> = {
   'auth.loginTitle': '登录 Dockge', 'auth.loginSubtitle': '使用用户名和密码访问控制台',
   'auth.username': '用户名', 'auth.password': '密码', 'auth.confirmPassword': '确认密码',
   'auth.createAdmin': '创建管理员并进入', 'auth.signIn': '登录', 'auth.signingIn': '登录中…',
+  'auth.booting': '正在连接服务器…',
   'auth.currentPassword': '当前密码', 'auth.newPassword': '新密码',
   'auth.badCredentials': '用户名或密码错误', 'auth.locked': '尝试过于频繁，请稍后再试',
   'auth.pwShort': '密码至少需要 6 位', 'auth.pwWeak': '密码需同时包含字母与数字',

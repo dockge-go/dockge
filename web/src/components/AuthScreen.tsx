@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import { app, setApp, doSetup, doLogin, noUsers, pwChecks, t, lang, setLang } from '../store';
+import { app, setApp, doSetup, doLogin, noUsers, authBooted, pwChecks, t, lang, setLang } from '../store';
 
 /* 首启初始化 / 登录。
  * 多语言：进入即可切换 中/EN（无需登录），选择持久化；
@@ -23,6 +23,9 @@ export default function AuthScreen() {
           <div class="auth-brand-name">Dockge</div>
         </div>
 
+        <Show when={authBooted()} fallback={
+          <div class="auth-booting" role="status">{t('auth.booting')}</div>
+        }>
         <form onSubmit={submit}>
           <h1 class="auth-title">{noUsers() ? t('auth.setupTitle') : t('auth.loginTitle')}</h1>
           <p class="auth-subtitle">{noUsers() ? t('auth.setupSubtitle') : t('auth.loginSubtitle')}</p>
@@ -62,6 +65,7 @@ export default function AuthScreen() {
             {noUsers() ? t('auth.createAdmin') : (app.authForm.busy ? t('auth.signingIn') : t('auth.signIn'))}
           </button>
         </form>
+        </Show>
       </div>
     </div>
   );
