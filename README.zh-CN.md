@@ -47,10 +47,10 @@ docker compose -f deploy/compose.yaml up -d --build
 ```sh
 docker run -d --name dockge --restart unless-stopped -p 5001:5001 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/stacks:/opt/stacks makeshit/dockge:0.2.10
+  -v /opt/stacks:/opt/stacks makeshit/dockge:0.2.11
 ```
 
-GHCR 同步镜像为 `ghcr.io/dockge-go/dockge:0.2.10`；私有包拉取需要 `read:packages` 凭据。[部署、OIDC 与升级](deploy/README.md)。
+GHCR 同步镜像为 `ghcr.io/dockge-go/dockge:0.2.11`；私有包拉取需要 `read:packages` 凭据。[部署、OIDC 与升级](deploy/README.md)。
 
 ## 日常维护
 
