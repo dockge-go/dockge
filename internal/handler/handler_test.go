@@ -203,3 +203,17 @@ func TestJSONBodyDeadlineDoesNotLimitFollowingSSE(t *testing.T) {
 		t.Fatalf("正常读取后应允许长响应，实际 %s %v", body, err)
 	}
 }
+
+func TestBindLoginUsernameLength(t *testing.T) {
+	for _, size := range []int{32, 33} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("POST", "/", strings.NewReader(`{"username":"`+strings.Repeat("a", size)+`","password":"RealPass1"}`))
+		err := bindJSON(c, &v1.LoginRequest{})
+		if size == 32 && err != nil {
+			t.Fatalf("32 位用户名必须可登录：%v", err)
+		}
+		if size == 33 && (err == nil || !strings.Contains(err.Error(), "username") || !strings.Contains(err.Error(), "32")) {
+			t.Fatalf("33 位用户名应具体报错：%v", err)
+		}
+	}
+}

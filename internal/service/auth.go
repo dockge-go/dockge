@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	v1 "dockge/api/v1"
 	"dockge/internal/model"
@@ -64,9 +66,10 @@ func NewAuthService(i do.Injector) (AuthService, error) {
 	}, nil
 }
 
-// loginRateKey 组合限流键：IP 与账号双维度。
+// loginRateKey 使用定长摘要，避免限流桶长期保留原始输入；长度前缀避免键拼接歧义。
 func loginRateKey(clientIP, username string) string {
-	return clientIP + "|" + username
+	sum := sha256.Sum256([]byte(strconv.Itoa(len(clientIP)) + ":" + clientIP + username))
+	return fmt.Sprintf("%x", sum)
 }
 
 // dummyBcryptHash 是合法格式的 bcrypt 串：未知用户时也执行一次等成本校验，
@@ -75,6 +78,10 @@ const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL1
 
 // Login 仅校验唯一账号的用户名与密码；OIDC 模式禁止本地登录。
 func (s *authService) Login(ctx context.Context, req *v1.LoginRequest, clientIP string) (*v1.LoginResponseData, error) {
+	// 服务层也限制长度，避免内部调用绕过 DTO 后将异常输入送入限流或密码校验。
+	if length := utf8.RuneCountInString(req.Username); length > 32 {
+		return nil, &v1.Error{Code: http.StatusBadRequest, Message: fmt.Sprintf("username 过长：%d 个字符，最多允许 32 个字符", length)}
+	}
 	// 失败原因各自成文：都回「登录失效」会让用户把「密码错」「被限流」「账号停用」当成会话过期，
 	// 无法判断该改什么（上游同样区分 authIncorrectCreds / authUserInactiveOrDeleted）。
 	if !s.loginLimiter.Allow(loginRateKey(clientIP, req.Username)) {

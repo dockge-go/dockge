@@ -2,7 +2,7 @@
 package v1
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username" binding:"required,max=32"`
 	Password string `json:"password" binding:"required"`
 }
 
