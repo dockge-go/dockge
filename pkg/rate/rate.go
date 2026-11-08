@@ -20,11 +20,21 @@ func New(limit int, window time.Duration) *Limiter {
 }
 
 // Allow 检查是否允许请求；超过限制时返回 false。
-func (l *Limiter) Allow() bool { return l.allowAt(time.Now()) }
+func (l *Limiter) Allow() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// 在锁内取时，保证并发请求的 token 按时间顺序追加。
+	return l.allowLocked(time.Now())
+}
 
 func (l *Limiter) allowAt(now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.allowLocked(now)
+}
+
+// allowLocked 共用窗口计数逻辑；调用方必须持有 l.mu。
+func (l *Limiter) allowLocked(now time.Time) bool {
 	cutoff := now.Add(-l.window)
 	// 清理过期 token
 	for len(l.tokens) > 0 && l.tokens[0].Before(cutoff) {

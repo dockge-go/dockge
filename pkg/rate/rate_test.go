@@ -110,3 +110,25 @@ func TestKeyedLimiterInvalidCapacityStillBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestLimiterConcurrentLimit(t *testing.T) {
+	l := New(10, time.Minute)
+	var count atomic.Int32
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Go(func() {
+			if l.Allow() {
+				count.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if count.Load() != 10 {
+		t.Fatalf("普通限流器并发额度错误：%d", count.Load())
+	}
+	for i := 1; i < len(l.tokens); i++ {
+		if l.tokens[i].Before(l.tokens[i-1]) {
+			t.Fatal("并发 token 时间必须有序")
+		}
+	}
+}
