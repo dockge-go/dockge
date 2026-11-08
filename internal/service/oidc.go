@@ -38,15 +38,19 @@ type oidcTicket struct {
 
 // OIDCService 保管短期、单次使用的登录事务；不将外部令牌写进 URL 或数据库。
 type OIDCService struct {
-	Config   config.OIDC
-	repo     *repository.Repository
-	jwt      *jwt.JWT
-	client   *http.Client
-	mu       sync.Mutex
-	provider *oidc.Provider
-	oauth    *oauth2.Config
-	flows    map[string]oidcFlow
-	tickets  map[string]oidcTicket
+	Config  config.OIDC
+	repo    *repository.Repository
+	jwt     *jwt.JWT
+	client  *http.Client
+	mu      sync.Mutex // 仅保护 flows/tickets，不跨网络请求持有。
+	flows   map[string]oidcFlow
+	tickets map[string]oidcTicket
+
+	// 独立串行发现且允许等待者取消；provider/oauth 的读写均受 discoveryGate 保护。
+	discoveryOnce sync.Once
+	discoveryGate chan struct{}
+	provider      *oidc.Provider
+	oauth         *oauth2.Config
 }
 
 // NewOIDCService 不在启动时依赖提供方在线，登录时才发现元数据；失败可重试。
@@ -75,8 +79,20 @@ func oidcRandom() (string, error) {
 }
 
 func (s *OIDCService) discover(ctx context.Context) (*oidc.Provider, *oauth2.Config, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("OIDC 等待提供方发现：%w", err)
+	}
+	s.discoveryOnce.Do(func() { s.discoveryGate = make(chan struct{}, 1) })
+	select {
+	case s.discoveryGate <- struct{}{}:
+		defer func() { <-s.discoveryGate }()
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("OIDC 等待提供方发现：%w", ctx.Err())
+	}
+	// 权限可用和取消可能同时就绪，获得权限后再次检查，避免继续请求或返回缓存。
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("OIDC 等待提供方发现：%w", err)
+	}
 	if s.provider != nil {
 		return s.provider, s.oauth, nil
 	}

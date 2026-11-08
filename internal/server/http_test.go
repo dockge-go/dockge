@@ -2,14 +2,18 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dockge/internal/handler"
 	"dockge/internal/repository"
@@ -312,5 +316,103 @@ func TestAPI(t *testing.T) {
 	}
 	if code, payload := call(t, engine, "GET", "/v1/definitely-not-a-route", token, nil); code != http.StatusNotFound || !strings.Contains(fmt.Sprint(payload["message"]), "接口不存在") {
 		t.Fatalf("未知 API 路径应返回 404 JSON，实际 %d %v", code, payload)
+	}
+}
+
+// TestHTTPRecovery 验证生产装配捕获未写响应的 panic，并保留定位所需的动作与原因。
+func TestHTTPRecovery(t *testing.T) {
+	e := newTestServer(t)
+	e.GET("/panic-regression", func(c *gin.Context) { panic("test panic cause") })
+	w := httptest.NewRecorder()
+	var caught any
+	func() {
+		defer func() { caught = recover() }()
+		e.ServeHTTP(w, httptest.NewRequest("GET", "/panic-regression", nil))
+	}()
+	if caught != nil {
+		t.Fatalf("panic 逃出 HTTP 引擎：%v", caught)
+	}
+	if w.Code != 500 || !json.Valid(w.Body.Bytes()) || !strings.Contains(w.Body.String(), "test panic cause") {
+		t.Fatalf("panic 响应 = %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHTTPContextCancellation 保证传入 service 的 Gin context 能感知底层请求被取消。
+func TestHTTPContextCancellation(t *testing.T) {
+	e := newTestServer(t)
+	e.GET("/context-regression", func(c *gin.Context) {
+		if !errors.Is(c.Err(), context.Canceled) || c.Done() == nil {
+			t.Errorf("请求取消未传递：Err=%v Done=%v", c.Err(), c.Done())
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/context-regression", nil).WithContext(ctx))
+}
+
+// TestHTTPShutdownDeadline 超时退出后仍须关闭活动连接，使请求 context 取消。
+func TestHTTPShutdownDeadline(t *testing.T) {
+	entered, stopped, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+		close(stopped)
+	}))
+	defer srv.Close()
+	defer close(release)
+	clientDone := make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		res, err := srv.Client().Get(srv.URL)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("请求未进入")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := (&HTTPServer{Server: srv.Config}).Shutdown(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Shutdown=%v", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("Shutdown 超时后活动连接/请求未关闭")
+	}
+	select {
+	case <-clientDone:
+	case <-time.After(time.Second):
+		t.Fatal("客户端连接未退出")
+	}
+}
+
+// TestLoginForwardedHeadersCannotBypassLimit 未配置可信代理时不能靠伪造头切换限流键。
+func TestLoginForwardedHeadersCannotBypassLimit(t *testing.T) {
+	e := newTestServer(t)
+	if code, payload := call(t, e, "POST", "/v1/setup", "", map[string]string{"username": "admin", "password": "s3cret-pass"}); code != 200 {
+		t.Fatalf("setup=%d %v", code, payload)
+	}
+	for n := 0; n < 11; n++ {
+		req := httptest.NewRequest("POST", "/v1/login", strings.NewReader(`{}`))
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", n+1))
+		req.Header.Set("X-Real-IP", fmt.Sprintf("203.0.113.%d", n+1))
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, req)
+		want := 400
+		if n == 10 {
+			want = 429
+		}
+		if w.Code != want {
+			t.Fatalf("第 %d 次伪造头请求=%d %s，期望 %d", n+1, w.Code, w.Body.String(), want)
+		}
 	}
 }

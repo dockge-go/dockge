@@ -3,6 +3,8 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 
 	v1 "dockge/api/v1"
@@ -31,21 +33,29 @@ func StrictAuth(j *jwt.JWT, logger *log.Logger, sessions sessionChecker) gin.Han
 	return func(ctx *gin.Context) {
 		tokenString := ctx.Request.Header.Get("Authorization")
 		if tokenString == "" {
-			v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
+			v1.HandleError(ctx, http.StatusUnauthorized,
+				fmt.Errorf("%w: 缺少 Authorization 请求头，需要提供 Bearer token", v1.ErrUnauthorized), nil)
 			ctx.Abort()
 			return
 		}
 		claims, err := j.ParseToken(tokenString)
 		if err != nil {
 			logger.WithContext(ctx).Warn().Err(err).Msg("token error")
-			v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
+			v1.HandleError(ctx, http.StatusUnauthorized,
+				fmt.Errorf("%w: Authorization token 校验失败：%v", v1.ErrUnauthorized, err), nil)
 			ctx.Abort()
 			return
 		}
 		if sessions != nil {
 			if err := sessions.CheckSession(ctx, claims.UserId, claims.H); err != nil {
 				logger.WithContext(ctx).Warn().Uint("uid", claims.UserId).Err(err).Msg("session invalid")
-				v1.HandleError(ctx, http.StatusUnauthorized, v1.ErrUnauthorized, nil)
+				// 会话失效使用业务码；存储故障则为 500，不能误导用户反复登录。
+				status := http.StatusInternalServerError
+				var bizErr *v1.Error
+				if errors.As(err, &bizErr) {
+					status = bizErr.Code
+				}
+				v1.HandleError(ctx, status, fmt.Errorf("会话校验失败：%w", err), nil)
 				ctx.Abort()
 				return
 			}

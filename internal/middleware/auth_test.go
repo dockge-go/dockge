@@ -2,9 +2,12 @@ package middleware
 
 import (
 	"context"
+	v1 "dockge/api/v1"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,7 +106,7 @@ func TestStrictAuthChecksSession(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
-	newRouter(fakeSessions{err: errors.New("deactivated")}).ServeHTTP(w, req)
+	newRouter(fakeSessions{err: fmt.Errorf("%w: deactivated", v1.ErrUnauthorized)}).ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("deactivated session = %d, want 401", w.Code)
 	}
@@ -124,5 +127,40 @@ func TestStrictAuthChecksSession(t *testing.T) {
 	newRouter(nil).ServeHTTP(w3, req3)
 	if w3.Code != http.StatusOK {
 		t.Errorf("nil session checker = %d, want 200", w3.Code)
+	}
+}
+
+// TestStrictAuthErrorDetails 存储故障不能伪装成会话失效，JWT 解析原因必须可定位。
+func TestStrictAuthErrorDetails(t *testing.T) {
+	conf := viper.New()
+	conf.Set("security.jwt.key", "unit-test-key")
+	j := jwt.NewJWT(conf)
+	token, err := j.GenToken(7, "hash-value", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, token string
+		sessions    sessionChecker
+		status      int
+		detail      string
+	}{
+		{"缺少头", "", nil, 401, "Authorization"},
+		{"畸形JWT", "bad-token", nil, 401, "token"},
+		{"会话失效", "Bearer " + token, fakeSessions{err: fmt.Errorf("%w: 密码已修改", v1.ErrUnauthorized)}, 401, "密码已修改"},
+		{"存储故障", "Bearer " + token, fakeSessions{err: errors.New("database is closed")}, 500, "database is closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := gin.New()
+			e.Use(StrictAuth(j, &log.Logger{Logger: zerolog.Nop()}, tc.sessions))
+			e.GET("/me", func(c *gin.Context) { t.Error("认证失败后不应调用 handler") })
+			r := httptest.NewRequest("GET", "/me", nil)
+			r.Header.Set("Authorization", tc.token)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, r)
+			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.detail) {
+				t.Fatalf("响应=%d %s，期望 %d %s", w.Code, w.Body.String(), tc.status, tc.detail)
+			}
+		})
 	}
 }

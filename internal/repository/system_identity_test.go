@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,5 +74,31 @@ func TestCachedHostIdentity(t *testing.T) {
 		} else if q.Errors["identity"] == "" || q.Hostname != "" || q.OS != "" {
 			t.Fatalf("不应混入不同来源的缓存身份: %+v", q)
 		}
+	}
+}
+
+func TestCanceledHostIdentityDoesNotPoisonCache(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///test.sock")
+	t.Setenv("CONTAINER_HOST", "")
+	r := preflightRuntime(t, `echo '{"Name":"real-host","OperatingSystem":"Linux host","KernelVersion":"6.1","NCPU":4,"MemTotal":1024}'`+"\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	now := time.Now()
+	newSample := func() *v1.HostSystem {
+		cpus := 4
+		return &v1.HostSystem{Kernel: "6.1", CPUCount: &cpus, Memory: &v1.HostMemory{Total: 1024}, Errors: map[string]string{}}
+	}
+	q := newSample()
+	r.runtimeHostIdentity(ctx, q, now)
+	if !strings.Contains(q.Errors["identity"], context.Canceled.Error()) {
+		t.Fatalf("取消原因丢失: %+v", q)
+	}
+	if !r.systemIdentityAt.IsZero() || errors.Is(r.systemIdentityError, context.Canceled) {
+		t.Fatalf("取消结果被缓存: %v %v", r.systemIdentityAt, r.systemIdentityError)
+	}
+	q = newSample()
+	r.runtimeHostIdentity(context.Background(), q, now.Add(time.Second))
+	if q.Hostname != "real-host" || q.Errors["identity"] != "" {
+		t.Fatalf("正常查询被取消污染: %+v", q)
 	}
 }

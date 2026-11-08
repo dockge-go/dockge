@@ -35,6 +35,7 @@ func (h *EventsHandler) Events(c *gin.Context) {
 	go sampleEvents(ctx, 5*time.Second, snapshots, func(ctx context.Context) any {
 		bounded, stop := context.WithTimeout(ctx, 20*time.Second)
 		defer stop()
+		health := h.Repository.Preflight(bounded)
 		resources := h.Resources.Snapshot(bounded)
 		stacks := make([]any, 0)
 		list, err := h.Stacks.List(bounded, "")
@@ -50,7 +51,7 @@ func (h *EventsHandler) Events(c *gin.Context) {
 				}
 			}
 		}
-		return gin.H{"resources": resources, "stacks": stacks, "health": gin.H{"version": version.Version, "runtime": h.Repository.Preflight(bounded)}}
+		return gin.H{"resources": resources, "stacks": stacks, "health": gin.H{"version": version.Version, "runtime": health}}
 	})
 	heartbeat := time.NewTicker(5 * time.Second)
 	defer heartbeat.Stop()
@@ -75,6 +76,9 @@ func (h *EventsHandler) Events(c *gin.Context) {
 }
 func sampleEvents[T any](ctx context.Context, period time.Duration, out chan<- T, read func(context.Context) T) {
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		data := read(ctx)
 		select {
 		case <-ctx.Done():

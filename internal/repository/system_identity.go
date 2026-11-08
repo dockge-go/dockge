@@ -21,7 +21,13 @@ type hostIdentity struct {
 // runtimeHostIdentity 只从本机运行时读取宿主身份；CPU/内存占用仍来自真实内核计数。
 func (r *Repository) runtimeHostIdentity(ctx context.Context, q *v1.HostSystem, now time.Time) {
 	if r.systemIdentityAt.IsZero() || now.Sub(r.systemIdentityAt) >= 30*time.Second {
-		r.systemIdentity, r.systemIdentityError = r.readHostIdentity(ctx)
+		identity, err := r.readHostIdentity(ctx)
+		// 请求取消不是宿主身份故障，不能把它缓存给后续正常采样。
+		if ctx.Err() != nil {
+			q.Errors["identity"] = fmt.Sprintf("宿主身份采样请求已结束: %v", ctx.Err())
+			return
+		}
+		r.systemIdentity, r.systemIdentityError = identity, err
 		r.systemIdentityAt = now
 	}
 	if err := r.systemIdentityError; err != nil {

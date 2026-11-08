@@ -45,6 +45,10 @@ func (r *Repository) HostSystem(ctx context.Context) *v1.HostSystem {
 		if src.name == "kernel-proc" {
 			r.runtimeHostIdentity(ctx, q, now)
 		}
+		if err := ctx.Err(); err != nil {
+			q.Errors["request"] = err.Error()
+			return q
+		}
 		if current != nil {
 			if r.systemPrevious != nil {
 				q.CPUPercent, err = cpuUsage(*r.systemPrevious, *current)

@@ -227,3 +227,25 @@ func TestListRuntimeFailurePreservesFilesAsUnknown(t *testing.T) {
 		})
 	}
 }
+
+// TestDeleteCanceledKeepsDirectory 覆盖运行时清理成功后请求取消的目录删除边界。
+func TestDeleteCanceledKeepsDirectory(t *testing.T) {
+	r := &Repository{stacksDir: t.TempDir()}
+	stack := &model.Stack{Name: "canceled", Yaml: "services: {}\n", Env: "SECRET=keep\n"}
+	if err := r.Save(context.Background(), stack, true); err != nil {
+		t.Fatal(err)
+	}
+	dataPath := filepath.Join(r.StackPath(stack.Name), "data.txt")
+	putFixture(t, dataPath, "keep data")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := r.Delete(ctx, stack.Name); !errors.Is(err, context.Canceled) {
+		t.Errorf("已取消删除应返回 context.Canceled，实际 %v", err)
+	}
+	for filename, want := range map[string]string{"compose.yaml": stack.Yaml, ".env": stack.Env, "data.txt": "keep data"} {
+		data, err := os.ReadFile(filepath.Join(r.StackPath(stack.Name), filename))
+		if err != nil || string(data) != want {
+			t.Errorf("取消后 %s 不得丢失或变化：%q, %v", filename, data, err)
+		}
+	}
+}

@@ -129,7 +129,7 @@ func (h *AuthHandler) ToggleDisableAuth(ctx *gin.Context) {
 func (h *AuthHandler) AutoLogin(ctx *gin.Context) {
 	data, err := h.AuthService.AutoLogin(ctx)
 	if err != nil {
-		v1.HandleError(ctx, http.StatusUnauthorized, err, nil)
+		handleServiceError(ctx, err)
 		return
 	}
 	v1.HandleSuccess(ctx, data)

@@ -56,6 +56,7 @@ type Repository struct {
 	runtime Runtime
 	// preflight* 缓存运行时自检结果：健康检查会周期调用，避免每次起子进程
 	preflightMu     sync.Mutex
+	preflightDone   chan struct{}
 	preflightAt     time.Time
 	preflightStatus RuntimeStatus
 	// system* 串行差分采样并短时缓存，多个浏览器不会产生互相污染的 CPU 区间。

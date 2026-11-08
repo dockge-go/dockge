@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -321,11 +322,11 @@ func (r *Repository) ResourceStatistics(ctx context.Context, containers []v1.Res
 		return err
 	}
 	for _, x := range rows {
-		cpu, e := strconv.ParseFloat(strings.TrimSuffix(x.CPUPerc, "%"), 64)
+		cpu, e := parsePercent(x.CPUPerc)
 		if e != nil {
 			return fmt.Errorf("无法解析 CPU 用量 %q: %w", x.CPUPerc, e)
 		}
-		mem, e := strconv.ParseFloat(strings.TrimSuffix(x.MemPerc, "%"), 64)
+		mem, e := parsePercent(x.MemPerc)
 		if e != nil {
 			return fmt.Errorf("无法解析内存百分比 %q: %w", x.MemPerc, e)
 		}
@@ -342,6 +343,17 @@ func (r *Repository) ResourceStatistics(ctx context.Context, containers []v1.Res
 	}
 	return nil
 }
+func parsePercent(s string) (float64, error) {
+	n, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, "%")), 64)
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 {
+		return 0, fmt.Errorf("期望有限非负数，实际 %q", s)
+	}
+	return n, nil
+}
+
 func parseBytes(s string) (float64, error) {
 	s = strings.TrimSpace(s)
 	i := 0
@@ -357,7 +369,11 @@ func parseBytes(s string) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("无法识别字节单位 %q（原值 %q）", unit, s)
 	}
-	return n * factor, nil
+	bytes := n * factor
+	if math.IsNaN(bytes) || math.IsInf(bytes, 0) {
+		return 0, fmt.Errorf("字节用量 %q 单位换算溢出，期望有限非负数", s)
+	}
+	return bytes, nil
 }
 func unique(ss []string) []string {
 	seen := map[string]bool{}

@@ -6,11 +6,14 @@ import (
 	"dockge/pkg/jwt"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -192,5 +195,176 @@ func TestSSEJWTDeadline(t *testing.T) {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
 		t.Fatal("JWT 到期未结束 SSE")
+	}
+}
+
+// 只用本地子进程；事件通知避免依赖生产运行时或线上实例。
+type terminalEventWriter struct {
+	*httptest.ResponseRecorder
+	frames    chan string
+	failEvent string
+}
+
+func (w *terminalEventWriter) Write(p []byte) (int, error) {
+	frame := string(p)
+	if strings.HasPrefix(frame, "event: "+w.failEvent+"\n") {
+		return 0, errors.New("测试客户端写入断开")
+	}
+	select {
+	case w.frames <- frame:
+	default:
+	}
+	return w.ResponseRecorder.Write(p)
+}
+
+func awaitTerminalEvent(t *testing.T, frames <-chan string, event string) string {
+	t.Helper()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case frame := <-frames:
+			if strings.HasPrefix(frame, "event: "+event+"\n") {
+				return strings.TrimSuffix(strings.TrimPrefix(frame, "event: "+event+"\ndata: "), "\n\n")
+			}
+		case <-timer.C:
+			t.Fatalf("未收到终端事件 %s", event)
+		}
+	}
+}
+
+func TestPTYInputCancellationInterruptsBlockedWrite(t *testing.T) {
+	h := &TerminalHandler{}
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	writer := &terminalEventWriter{ResponseRecorder: httptest.NewRecorder(), frames: make(chan string, 10)}
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest("GET", "/stream", nil).WithContext(streamCtx)
+	c.Set("claims", &jwt.Claims{UserId: 1, H: "owner"})
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		h.serveSession(c, exec.CommandContext(streamCtx, "sh", "-c", "stty raw -echo; printf terminal-ready; exec sleep 30"), true, cancelStream)
+	}()
+	defer func() {
+		cancelStream()
+		select {
+		case <-ended:
+		case <-time.After(3 * time.Second):
+			t.Error("终端清理未退出")
+		}
+	}()
+	var id string
+	if err := json.Unmarshal([]byte(awaitTerminalEvent(t, writer.frames, "ready")), &id); err != nil {
+		t.Fatal(err)
+	}
+	awaitTerminalEvent(t, writer.frames, "bytes")
+	inputCtx, cancelInput := context.WithCancel(context.Background())
+	defer cancelInput()
+	body, _ := json.Marshal(map[string]string{"type": "input", "data": strings.Repeat("x", 16384)})
+	inputWriter := httptest.NewRecorder()
+	input, _ := gin.CreateTestContext(inputWriter)
+	input.Request = httptest.NewRequest("POST", "/input/"+id, strings.NewReader(string(body))).WithContext(inputCtx)
+	input.Params = gin.Params{{Key: "id", Value: id}}
+	input.Set("claims", &jwt.Claims{UserId: 1, H: "owner"})
+	inputEnded := make(chan struct{})
+	go func() { defer close(inputEnded); h.Input(input) }()
+	select {
+	case <-inputEnded:
+		t.Fatal("未构造出 PTY stdin 背压")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancelInput()
+	select {
+	case <-inputEnded:
+		if inputWriter.Code != 500 || !strings.Contains(inputWriter.Body.String(), "终端") {
+			t.Fatalf("输入错误明细丢失: %s", inputWriter.Body.String())
+		}
+	case <-time.After(time.Second):
+		cancelStream()
+		select {
+		case <-inputEnded:
+		case <-time.After(3 * time.Second):
+			t.Error("阻塞输入 goroutine 清理失败")
+		}
+		t.Fatal("POST 取消后，阻塞 stdin 写入仍未退出")
+	}
+	select {
+	case <-ended:
+	case <-time.After(time.Second):
+		t.Fatal("输入写入错误未清理终端")
+	}
+	if _, ok := h.sessions.Load(id); ok {
+		t.Fatal("输入错误后会话遗留")
+	}
+}
+
+func TestTerminalDirectExitBoundsInheritedOutputPipe(t *testing.T) {
+	h := &TerminalHandler{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &terminalEventWriter{ResponseRecorder: httptest.NewRecorder(), frames: make(chan string, 10)}
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest("GET", "/stream", nil).WithContext(ctx)
+	pidPath := t.TempDir() + "/child.pid"
+	cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("sleep 30 & echo $! > %q; exit 0", pidPath))
+	ended := make(chan struct{})
+	go func() { defer close(ended); h.serveSession(c, cmd, false, cancel) }()
+	awaitTerminalEvent(t, writer.frames, "ready")
+	select {
+	case <-ended:
+		if !strings.Contains(writer.Body.String(), exec.ErrWaitDelay.Error()) {
+			t.Fatalf("丢失管道回收原因: %s", writer.Body.String())
+		}
+	case <-time.After(3 * time.Second):
+		cancel()
+		// 旧实现还没有 Wait；取消会释放本测试创建的整个进程组。
+		select {
+		case <-ended:
+		case <-time.After(3 * time.Second):
+			t.Error("终端管道清理未退出")
+		}
+		data, _ := os.ReadFile(pidPath)
+		t.Fatalf("直接进程退出后，继承 stdout 的后代仍占住 SSE，child pid=%s", data)
+	}
+}
+
+func TestTerminalReadAndWriteErrorsCleanUp(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, failEvent, typ, detail string
+	}{
+		{name: "ready_write", command: "exec sleep 30", failEvent: "ready"},
+		{name: "output_write", command: "printf output; exec sleep 30", failEvent: "bytes"},
+		{name: "oversized_log", command: "printf '%01048576d\\n' 0; exec sleep 30", typ: "compose-logs", detail: "bufio.Scanner: token too long"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &TerminalHandler{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writer := &terminalEventWriter{ResponseRecorder: httptest.NewRecorder(), frames: make(chan string, 10), failEvent: tc.failEvent}
+			c, _ := gin.CreateTestContext(writer)
+			c.Request = httptest.NewRequest("GET", "/stream", nil).WithContext(ctx)
+			c.Params = gin.Params{{Key: "type", Value: tc.typ}}
+			cmd := exec.CommandContext(ctx, "sh", "-c", tc.command)
+			ended := make(chan struct{})
+			go func() { defer close(ended); h.serveSession(c, cmd, tc.typ == "", cancel) }()
+			select {
+			case <-ended:
+			case <-time.After(3 * time.Second):
+				cancel()
+				select {
+				case <-ended:
+				case <-time.After(3 * time.Second):
+					t.Error("错误路径清理未退出")
+				}
+				t.Fatal("输出/读取失败后终端未及时回收")
+			}
+			if ctx.Err() == nil || cmd.ProcessState == nil {
+				t.Fatal("错误后未取消会话并等待进程退出")
+			}
+			h.sessions.Range(func(_, _ any) bool { t.Error("错误后会话遗留"); return true })
+			if tc.detail != "" && !strings.Contains(writer.Body.String(), tc.detail) {
+				t.Fatalf("丢失读取错误明细: %s", writer.Body.String())
+			}
+		})
 	}
 }

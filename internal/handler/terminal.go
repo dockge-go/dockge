@@ -14,6 +14,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
+	"golang.org/x/sys/unix"
 	"io"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -45,7 +47,31 @@ type terminalSession struct {
 	owner  uint
 	hash   string
 	cancel context.CancelFunc
-	closed bool
+	closed atomic.Bool
+}
+
+// 关闭不获取输入锁，否则背压中的 Write 会阻止关闭自身。
+func (s *terminalSession) close() {
+	if !s.closed.Swap(true) {
+		s.cancel()
+		_ = s.master.Close()
+	}
+}
+
+func resizeTerminal(master *os.File, rows, cols uint16) error {
+	raw, err := master.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var ioctlErr error
+	err = raw.Control(func(fd uintptr) {
+		// pty.Setsize 使用 Fd()，会重新启用阻塞 I/O；直接 ioctl 保持 poller 可取消。
+		ioctlErr = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, &unix.Winsize{Row: rows, Col: cols})
+		if ioctlErr == nil {
+			ioctlErr = syscall.SetNonblock(int(fd), true)
+		}
+	})
+	return errors.Join(err, ioctlErr)
 }
 
 // Events 提供容器/栈日志与真实 PTY 输出，不把认证信息放入 URL。
@@ -178,9 +204,11 @@ func (h *TerminalHandler) Input(c *gin.Context) {
 		v1.HandleError(c, 403, fmt.Errorf("当前登录会话不能操作终端 %q", c.Param("id")), nil)
 		return
 	}
+	stopInput := context.AfterFunc(c.Request.Context(), session.close)
+	defer stopInput()
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	if session.closed {
+	if session.closed.Load() {
 		v1.HandleError(c, 410, fmt.Errorf("终端会话 %q 已关闭", c.Param("id")), nil)
 		return
 	}
@@ -191,20 +219,22 @@ func (h *TerminalHandler) Input(c *gin.Context) {
 			v1.HandleError(c, 400, fmt.Errorf("data 超过终端单次输入限制 16384 字节"), nil)
 			return
 		}
-		_ = session.master.SetWriteDeadline(time.Now().Add(3 * time.Second))
-		_, err = session.master.Write([]byte(input.Data))
+		err = session.master.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		if err == nil {
+			_, err = session.master.Write([]byte(input.Data))
+		}
 	case "resize":
 		if input.Rows < 1 || input.Rows > 500 || input.Cols < 1 || input.Cols > 500 {
 			v1.HandleError(c, 400, fmt.Errorf("rows=%d cols=%d，窗口尺寸必须为 1–500", input.Rows, input.Cols), nil)
 			return
 		}
-		err = pty.Setsize(session.master, &pty.Winsize{Rows: input.Rows, Cols: input.Cols})
+		err = resizeTerminal(session.master, input.Rows, input.Cols)
 	default:
 		v1.HandleError(c, 400, fmt.Errorf("未知终端控制类型 %q（input/resize）", input.Type), nil)
 		return
 	}
 	if err != nil {
-		session.cancel()
+		session.close()
 		v1.HandleError(c, 500, fmt.Errorf("终端 %s %s 失败: %w", c.Param("id"), input.Type, err), nil)
 		return
 	}
@@ -238,8 +268,13 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 			return
 		}
 		id = hex.EncodeToString(bytes)
+		if err := resizeTerminal(master, 24, 80); err != nil {
+			session.close()
+			_ = cmd.Wait()
+			s.finish(fmt.Errorf("初始化终端窗口与非阻塞 I/O 失败: %w", err))
+			return
+		}
 		h.sessions.Store(id, session)
-		_ = pty.Setsize(master, &pty.Winsize{Rows: 24, Cols: 80})
 	} else {
 		pr, pw, err := os.Pipe()
 		if err != nil {
@@ -256,21 +291,37 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 		_ = pw.Close()
 		reader = pr
 	}
-	// 断流立即关闭读写端，阻塞的 POST 输入及子进程一并释放。
-	closeReader := context.AfterFunc(ctx, func() { _ = reader.Close() })
-	defer func() {
-		h.sessions.Delete(id)
-		closeReader()
-		cancel()
-		_ = reader.Close()
+
+	// Wait 与读输出并行：直接进程退出不等于后代已释放 stdout/PTY。
+	waitDone := make(chan struct{})
+	var waitErr error
+	go func() { waitErr = cmd.Wait(); close(waitDone) }()
+	var readerDone chan struct{}
+	closeDone := make(chan struct{})
+	closeReader := context.AfterFunc(ctx, func() {
+		defer close(closeDone)
 		if session != nil {
-			session.mu.Lock()
-			session.closed = true
-			session.mu.Unlock()
+			session.close()
+		} else {
+			_ = reader.Close()
 		}
-		if cmd.ProcessState == nil {
-			_ = cmd.Wait()
+	})
+	defer func() {
+		if session != nil {
+			session.close()
 		}
+		h.sessions.Delete(id)
+		cancel()
+		// Wait 已返回时 CommandContext 不再监听取消，仍需回收持有输出端的后代。
+		_ = cmd.Cancel()
+		_ = reader.Close()
+		if !closeReader() {
+			<-closeDone
+		}
+		if readerDone != nil {
+			<-readerDone
+		}
+		<-waitDone
 	}()
 	if err := s.event("ready", id); err != nil {
 		return
@@ -278,7 +329,9 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 	chunks := make(chan []byte, 1)
 	var readErr error
 	isLog := c.Param("type") == "container-logs" || c.Param("type") == "compose-logs"
+	readerDone = make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		defer close(chunks)
 		if isLog {
 			scanner := bufio.NewScanner(reader)
@@ -314,8 +367,39 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 	}()
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
+	waitSignal := (<-chan struct{})(waitDone)
+	var drainTimer *time.Timer
+	var drainDeadline <-chan time.Time
+	defer func() {
+		if drainTimer != nil {
+			drainTimer.Stop()
+		}
+	}()
 	for {
+		if chunks == nil && waitSignal == nil {
+			if ctx.Err() != nil {
+				return
+			}
+			err := errors.Join(waitErr, readErr)
+			if err != nil {
+				s.finish(fmt.Errorf("终端命令 %s 结束: %w", cmd.Path, err))
+			} else {
+				s.finish(nil)
+			}
+			return
+		}
 		select {
+		case <-waitSignal:
+			waitSignal = nil
+			if chunks != nil {
+				drainTimer = time.NewTimer(2 * time.Second)
+				drainDeadline = drainTimer.C
+			}
+		case <-drainDeadline:
+			_ = cmd.Cancel()
+			_ = reader.Close()
+			s.finish(fmt.Errorf("终端命令 %s 已退出，但输出管道在 2 秒内未关闭: %w", cmd.Path, exec.ErrWaitDelay))
+			return
 		case <-ctx.Done():
 			return
 		case <-tick.C:
@@ -324,16 +408,12 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 			}
 		case data, ok := <-chunks:
 			if !ok {
+				chunks = nil
 				if readErr != nil {
-					cancel()
+					// 本地读取失败不等于客户端取消；先收尸，随后发送具体 error 帧。
+					_ = cmd.Cancel()
 				}
-				err := errors.Join(cmd.Wait(), readErr)
-				if err != nil {
-					s.finish(fmt.Errorf("终端命令 %s 结束: %w", cmd.Path, err))
-				} else {
-					s.finish(nil)
-				}
-				return
+				continue
 			}
 			// []byte 在 JSON 中编码为 base64，不会破坏跨块 UTF-8 或 ANSI 字节。
 			event, payload := "bytes", any(data)

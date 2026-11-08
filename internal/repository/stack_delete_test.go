@@ -303,3 +303,65 @@ func TestDeleteImplicitLatestReferences(t *testing.T) {
 		})
 	}
 }
+
+// TestDeleteBlocksForeignContainerBind 覆盖目录外项目和非 Compose 容器对栈内数据的实际引用。
+func TestDeleteBlocksForeignContainerBind(t *testing.T) {
+	for _, tc := range []struct {
+		name, project, state string
+		inside, symlink      bool
+	}{
+		{name: "运行中独立容器", state: "running", inside: true},
+		{name: "停止的独立容器", state: "exited", inside: true},
+		{name: "目录外项目", project: "outside", state: "running", inside: true},
+		{name: "符号链接引用", state: "exited", inside: true, symlink: true},
+		{name: "无关栈外挂载", state: "running"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, root := fixtureRuntime(t)
+			source := t.TempDir()
+			if tc.inside {
+				source = filepath.Join(r.StackPath("test"), "data")
+				if err := os.Mkdir(source, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				putFixture(t, filepath.Join(source, "keep.txt"), "shared data")
+			}
+			if tc.symlink {
+				link := filepath.Join(t.TempDir(), "shared")
+				if err := os.Symlink(source, link); err != nil {
+					t.Fatal(err)
+				}
+				source = link
+			}
+			c := inspectedContainer{ID: "foreign", Name: "/outside-reader"}
+			c.Config.Labels = map[string]string{"com.docker.compose.project": tc.project}
+			c.State.Status = tc.state
+			data := jsonFixture(t, c)
+			var row map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &row); err != nil {
+				t.Fatal(err)
+			}
+			row["Mounts"] = []map[string]string{{"Type": "bind", "Source": source, "Destination": "/shared"}}
+			putFixture(t, filepath.Join(root, "container.json"), jsonFixture(t, []interface{}{row}))
+			_, err := r.CleanStackResources(context.Background(), "test")
+			commands, readErr := os.ReadFile(filepath.Join(root, "commands"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tc.inside {
+				if err == nil || !strings.Contains(err.Error(), "foreign") || !strings.Contains(err.Error(), source) {
+					t.Errorf("实际共享引用应阻止删除并说明容器与来源：%v", err)
+				}
+				if strings.Contains(string(commands), " down ") {
+					t.Errorf("共享数据核验失败前执行了 down：%s", commands)
+				}
+				data, e := os.ReadFile(filepath.Join(source, "keep.txt"))
+				if e != nil || string(data) != "shared data" {
+					t.Fatalf("共享数据丢失：%q, %v", data, e)
+				}
+			} else if err != nil {
+				t.Fatalf("无关栈外数据不应阻止目标清理：%v", err)
+			}
+		})
+	}
+}

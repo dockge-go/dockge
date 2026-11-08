@@ -64,6 +64,13 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 	s.tlsKey = s.Config.GetString("ssl.key")
 
 	engine := gin.New()
+	// 认证/业务层收到 Gin context 时也能感知请求断开及截止时间。
+	engine.ContextWithFallback = true
+	// 未配置可信代理：转发头不能由直接客户端伪造来绕过登录限流。
+	if err := engine.SetTrustedProxies(nil); err != nil {
+		return nil, fmt.Errorf("设置 HTTP 可信代理：%w", err)
+	}
+	engine.Use(middleware.Recovery(s.Logger))
 
 	embedFolder, err := static.EmbedFolder(web.Assets(), "dist")
 	if err != nil {
@@ -193,7 +200,14 @@ func (s *HTTPServer) Start() error {
 
 // Shutdown 实现 do.ShutdownerWithContextAndError，容器关闭时被调用。
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
-	return s.Server.Shutdown(ctx)
+	if err := s.Server.Shutdown(ctx); err != nil {
+		// Shutdown 超时并不会关闭活动连接；先终止请求再允许容器回收依赖。
+		if closeErr := s.Server.Close(); closeErr != nil {
+			return errors.Join(fmt.Errorf("HTTP 优雅关闭：%w", err), fmt.Errorf("HTTP 强制关闭连接：%w", closeErr))
+		}
+		return fmt.Errorf("HTTP 优雅关闭超时或取消，已强制关闭连接：%w", err)
+	}
+	return nil
 }
 
 // TLSEnabled 返回是否启用 HTTPS。

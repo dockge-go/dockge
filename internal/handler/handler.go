@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"dockge/pkg/jwt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 	"github.com/samber/do/v2"
 )
@@ -69,8 +71,27 @@ func handleServiceError(ctx *gin.Context, err error) {
 
 // bindJSON 解析 JSON 请求体；失败时把绑定/校验错误翻译为指明字段与原因的
 // 具体文案（铁律：杜绝裸「参数错误」——缺哪个字段、类型错在哪必须直达用户）。
+const maxJSONBodyBytes = 4 << 20
+
 func bindJSON(ctx *gin.Context, obj any) error {
-	if err := ctx.ShouldBindJSON(obj); err != nil {
+	// 完整读取但限制内存；嵌套 MaxBytesReader 保留终端等接口更小的既有限制。
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxJSONBodyBytes)
+	data, err := io.ReadAll(ctx.Request.Body)
+	if err != nil {
+		return fmt.Errorf("%w: %s", v1.ErrBadRequest, bindErrDetail(reflect.TypeOf(obj), err))
+	}
+	data = bytes.Trim(data, " \t\r\n")
+	if len(data) == 0 {
+		return fmt.Errorf("%w: 请求体不能为空", v1.ErrBadRequest)
+	}
+	if bytes.Equal(data, []byte("null")) {
+		return fmt.Errorf("%w: 请求体应为 JSON 对象，不能为 null", v1.ErrBadRequest)
+	}
+	// Unmarshal 要求恰好一个 JSON 值，不能像单次 Decode 一样忽略尾随内容。
+	if err := json.Unmarshal(data, obj); err != nil {
+		return fmt.Errorf("%w: %s", v1.ErrBadRequest, bindErrDetail(reflect.TypeOf(obj), err))
+	}
+	if err := binding.Validator.ValidateStruct(obj); err != nil {
 		return fmt.Errorf("%w: %s", v1.ErrBadRequest, bindErrDetail(reflect.TypeOf(obj), err))
 	}
 	return nil
@@ -79,6 +100,10 @@ func bindJSON(ctx *gin.Context, obj any) error {
 // bindErrDetail 翻译 JSON 绑定错误：validator 校验失败给出字段与期望，
 // 类型不匹配给出期望与实际类型，其余解析错误保留原文。
 func bindErrDetail(t reflect.Type, err error) string {
+	var sizeErr *http.MaxBytesError
+	if errors.As(err, &sizeErr) {
+		return fmt.Sprintf("请求体超过大小限制（最大 %d 字节）", sizeErr.Limit)
+	}
 	var valErrs validator.ValidationErrors
 	if errors.As(err, &valErrs) {
 		parts := make([]string, 0, len(valErrs))

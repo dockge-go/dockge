@@ -26,6 +26,12 @@ func TestBindJSON(t *testing.T) {
 		{"字段类型错误", `{"username":123}`, "字段 username 应为 string 类型"},
 		{"请求体为空", ``, "请求体不能为空"},
 		{"JSON 语法错误", `{"username":`, "请求体解析失败"},
+		{"尾随空白", "{\"username\":\"admin\"} \n\t", ""},
+		{"非JSON空白", "\v{\"username\":\"admin\"}\u00a0", "请求体解析失败"},
+		{"第二个JSON对象", `{"username":"admin"}{"username":"other"}`, "请求体解析失败"},
+		{"尾随垃圾", `{"username":"admin"}garbage`, "请求体解析失败"},
+		{"超限字段", `{"username":"` + strings.Repeat("a", 4<<20) + `"}`, "4194304"},
+		{"超限尾随空白", `{"username":"admin"}` + strings.Repeat(" ", 4<<20), "4194304"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,5 +52,17 @@ func TestBindJSON(t *testing.T) {
 				t.Fatalf("错误明细应包含 %q，得到: %v", tt.wantSub, err)
 			}
 		})
+	}
+}
+
+// TestBindJSONNull 不带 required 的请求也必须提供对象，不能把 null 当作合法清空操作。
+func TestBindJSONNull(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/", strings.NewReader("null"))
+	err := bindJSON(c, &struct {
+		Enable bool `json:"enable"`
+	}{})
+	if err == nil || !strings.Contains(err.Error(), "JSON 对象") {
+		t.Fatalf("null 应拒绝且说明需要 JSON 对象，实际 %v", err)
 	}
 }

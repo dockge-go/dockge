@@ -136,6 +136,12 @@ func (r *Repository) PlanStackDelete(ctx context.Context, name string) (*v1.Stac
 	}
 	for _, c := range cs {
 		if projectOf(c.Labels) != name {
+			// 独立容器与目录外项目也可能挂载栈内数据，停止状态不代表引用已释放。
+			for _, m := range c.Mounts {
+				if m.Type == "bind" && r.stackSourceInside(name, m.Source) {
+					plan.Blockers = append(plan.Blockers, "栈目录内挂载 "+m.Source+" 仍被其他容器 "+c.ID+" ("+strings.Join(c.Names, ",")+") 引用")
+				}
+			}
 			continue
 		}
 		if configFiles := c.Labels["com.docker.compose.project.config_files"]; configFiles != "" && !r.configOwned(name, configFiles) {

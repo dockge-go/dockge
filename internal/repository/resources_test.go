@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	v1 "dockge/api/v1"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -128,5 +129,34 @@ func TestStartPausedContainerUsesUnpause(t *testing.T) {
 				t.Fatalf("暂停容器应恢复而非重复启动: %s", commands)
 			}
 		})
+	}
+}
+
+func TestResourceStatisticsRejectsInvalidNumbers(t *testing.T) {
+	for _, tc := range []struct{ field, value string }{{"CPUPerc", "NaN%"}, {"CPUPerc", "+Inf%"}, {"CPUPerc", "-1%"}, {"MemPerc", "NaN%"}, {"MemPerc", "+Inf%"}, {"MemPerc", "-1%"}} {
+		t.Run(tc.field+tc.value, func(t *testing.T) {
+			row := map[string]string{"ID": "cid", "CPUPerc": "125%", "MemPerc": "20%", "MemUsage": "1MiB / 2MiB"}
+			row[tc.field] = tc.value
+			raw, err := json.Marshal(row)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := preflightRuntime(t, "printf '%s' '"+string(raw)+"'\n")
+			containers := []v1.ResourceContainer{{ID: "cid", State: "running"}}
+			err = r.ResourceStatistics(context.Background(), containers)
+			if err == nil || !strings.Contains(err.Error(), tc.value) {
+				t.Fatalf("非法指标未明确拒绝: %v", err)
+			}
+			if _, err := json.Marshal(containers); err != nil {
+				t.Fatalf("非法指标污染了 SSE 数据: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseBytesRejectsUnitOverflow(t *testing.T) {
+	raw := "1" + strings.Repeat("0", 300) + "TiB"
+	if _, err := parseBytes(raw); err == nil {
+		t.Fatal("单位换算溢出未被拒绝")
 	}
 }

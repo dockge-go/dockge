@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -63,13 +64,15 @@ func runCmd(ctx context.Context, cmd *exec.Cmd, dir string, timeout time.Duratio
 	if err != nil {
 		msg := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
 		name := filepath.Base(cmd.Path)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return msg, fmt.Errorf("%s %s: 超时（%s）：%s", name, strings.Join(args, " "), timeout, msg)
-		}
+		cause := errors.Join(err, ctx.Err())
+		detail := ""
 		if msg != "" {
-			return msg, fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+			detail = ": " + msg
 		}
-		return msg, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return msg, fmt.Errorf("%s %s: 超时（命令上限 %s）: %w%s", name, strings.Join(args, " "), timeout, cause, detail)
+		}
+		return msg, fmt.Errorf("%s %s: %w%s", name, strings.Join(args, " "), cause, detail)
 	}
 	return stdout.String(), nil
 }
@@ -91,23 +94,30 @@ type commandStream struct {
 }
 
 func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
-	outPipe, err := cmd.StdoutPipe()
+	// 自持管道：Wait 与读取并行，避免 StdoutPipe 被 Wait 提前关闭而截断末尾输出。
+	outPipe, outWriter, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	errPipe, err := cmd.StderrPipe()
+	errPipe, errWriter, err := os.Pipe()
 	if err != nil {
 		outPipe.Close()
+		outWriter.Close()
 		return nil, err
 	}
-	// 独立进程组：孙进程（compose 插件等）继承管道，超时必须整组终止，
-	// 否则 scanner 等 EOF 永不返回（平台差异见 process_unix.go / process_windows.go）。
+	cmd.Stdout, cmd.Stderr = outWriter, errWriter
 	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		outPipe.Close()
 		errPipe.Close()
+		outWriter.Close()
+		errWriter.Close()
 		return nil, err
 	}
+	// 父进程不保留写端，否则即便所有子进程退出也收不到 EOF。
+	outWriter.Close()
+	errWriter.Close()
+	readCtx, stopReading := context.WithCancel(ctx)
 	ch := make(chan string, 64)
 	result := &commandStream{lines: ch}
 	var readMu sync.Mutex
@@ -119,12 +129,12 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			select {
-			case <-ctx.Done():
+			case <-readCtx.Done():
 				return
 			case ch <- scanner.Text() + "\n":
 			}
 		}
-		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		if err := scanner.Err(); err != nil && readCtx.Err() == nil {
 			readMu.Lock()
 			readErr = errors.Join(readErr, fmt.Errorf("读取命令输出失败（单行限制 1 MiB）: %w", err))
 			readMu.Unlock()
@@ -140,15 +150,39 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 		close(done)
 	}()
 	go func() {
+		defer stopReading()
+		defer outPipe.Close()
+		defer errPipe.Close()
+		waited := make(chan error, 1)
+		go func() { waited <- cmd.Wait() }()
+		var waitErr error
 		select {
 		case <-ctx.Done():
 			killProcessGroup(cmd)
-		case <-done:
+			outPipe.Close()
+			errPipe.Close()
+			waitErr = <-waited
+		case waitErr = <-waited:
 		}
-		// Wait 收尸设置 ProcessState；缺失时 ExitCode() 恒为 -1，
-		// 流式栈操作会被误报「失败」。
-		waitErr := cmd.Wait()
-		<-done
+		// 直接进程退出后仍给末尾输出留出读取时间；孙进程不能无限占用管道。
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			killProcessGroup(cmd)
+			outPipe.Close()
+			errPipe.Close()
+			<-done
+		case <-timer.C:
+			// 管道关闭不会解除向满通道发送的阻塞，需独立停止读取者。
+			stopReading()
+			killProcessGroup(cmd)
+			outPipe.Close()
+			errPipe.Close()
+			<-done
+			waitErr = errors.Join(waitErr, fmt.Errorf("命令进程已退出但输出管道在 2s 内未结束（可能由子进程持有）: %w", exec.ErrWaitDelay))
+		}
 		result.err = errors.Join(readErr, waitErr, ctx.Err())
 		close(ch)
 	}()

@@ -250,6 +250,9 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 // Delete 删除整个栈目录，调用方须先完成运行时资源清理与核验。
 func (r *Repository) Delete(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("删除栈 %q 已取消，目录保留: %w", name, err)
+	}
 	dir := r.StackPath(name)
 	if info, err := os.Lstat(dir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -259,8 +262,11 @@ func (r *Repository) Delete(ctx context.Context, name string) error {
 	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("栈目录 %s 必须是真实目录而非符号链接", dir)
 	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("删除栈 %q 已取消，目录 %s 保留: %w", name, dir, err)
+	}
 	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("remove stack dir: %w", err)
+		return fmt.Errorf("删除栈 %q 目录 %s 失败（目录可能已部分删除）: %w", name, dir, err)
 	}
 	return nil
 }

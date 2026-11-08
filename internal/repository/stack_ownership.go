@@ -45,7 +45,12 @@ func (r *Repository) configOwned(name, configFiles string) bool {
 		matched := false
 		for _, alias := range aliases {
 			for _, file := range acceptedComposeFileNames {
-				matched = matched || filepath.Clean(path) == filepath.Join(alias, file)
+				if filepath.Clean(path) != filepath.Join(alias, file) {
+					continue
+				}
+				// 宿主路径别名也必须映射到本地真实配置，不能凭栈内链接认领外部项目。
+				info, err := os.Lstat(filepath.Join(r.StackPath(name), file))
+				matched = matched || err == nil && info.Mode().IsRegular()
 			}
 		}
 		if !matched {

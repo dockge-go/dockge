@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -16,6 +17,7 @@ import (
 // sseWriter 统一帧格式与写入期限，慢客户端不能无限占住子进程。
 type sseWriter struct {
 	c  *gin.Context
+	rc *http.ResponseController
 	mu sync.Mutex
 }
 
@@ -24,7 +26,12 @@ func newSSE(c *gin.Context) *sseWriter {
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
-	return &sseWriter{c: c}
+	// 绕过 Gin 无返回值的 Flush，保留底层 FlushError 的断流/超时原因。
+	writer := http.ResponseWriter(c.Writer)
+	if wrapped, ok := writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+		writer = wrapped.Unwrap()
+	}
+	return &sseWriter{c: c, rc: http.NewResponseController(writer)}
 }
 func (s *sseWriter) event(name string, data any) error {
 	b, err := json.Marshal(data)
@@ -33,12 +40,13 @@ func (s *sseWriter) event(name string, data any) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rc := http.NewResponseController(s.c.Writer)
-	_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := s.rc.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return fmt.Errorf("SSE 事件 %q 设置写入期限失败: %w", name, err)
+	}
 	if _, err = fmt.Fprintf(s.c.Writer, "event: %s\ndata: %s\n\n", name, b); err != nil {
 		return err
 	}
-	return rc.Flush()
+	return s.rc.Flush()
 }
 func (s *sseWriter) Write(p []byte) (int, error) {
 	if err := s.event("output", string(p)); err != nil {

@@ -95,3 +95,35 @@ func TestBindSharedSymlinkIsInsideStack(t *testing.T) {
 		t.Fatal("外部目录误判栈内")
 	}
 }
+
+// TestStackOwnershipRejectsLinkedConfigFile 路径在栈内不等于配置属于栈，符号链接不得成为清理归属证明。
+func TestStackOwnershipRejectsLinkedConfigFile(t *testing.T) {
+	r, root := fixtureRuntime(t)
+	outside := filepath.Join(root, "outside-compose.yaml")
+	putFixture(t, outside, "services: {}")
+	linked := filepath.Join(r.StackPath("test"), "docker-compose.yml")
+	if err := os.Symlink(outside, linked); err != nil {
+		t.Fatal(err)
+	}
+	putFixture(t, filepath.Join(root, "container.json"), jsonFixture(t, []map[string]interface{}{{
+		"Id": "outside-container",
+		"Config": map[string]interface{}{"Labels": map[string]string{
+			"com.docker.compose.project":              "test",
+			"com.docker.compose.project.config_files": linked,
+		}},
+	}}))
+	if _, err := r.CleanStackResources(context.Background(), "test"); err == nil || !strings.Contains(err.Error(), linked) {
+		t.Errorf("链接配置不能证明归属，必须返回实际路径：%v", err)
+	}
+	commands, err := os.ReadFile(filepath.Join(root, "commands"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(commands), " down ") {
+		t.Errorf("归属不明时执行了 down：%s", commands)
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil || string(data) != "services: {}" {
+		t.Fatalf("栈外配置被改变：%q, %v", data, err)
+	}
+}

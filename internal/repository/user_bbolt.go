@@ -15,7 +15,14 @@ import (
 
 // CreateUser 在单个写事务中只允许首次初始化，避免并发创建多个账号。
 func (r *Repository) CreateUser(ctx context.Context, m *model.DockgeUser) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	err := r.db.Update(func(tx *bbolt.Tx) error {
+		// 等待写锁期间也可能取消，取得事务后必须重新检查。
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b, err := TxBucket(tx, bucketUsers)
 		if err != nil {
 			return err
@@ -34,6 +41,9 @@ func (r *Repository) CreateUser(ctx context.Context, m *model.DockgeUser) error 
 		}
 		if m.UpdatedAt.IsZero() {
 			m.UpdatedAt = now
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		return b.Put([]byte(m.Username), marshalUser(m))
 	})
@@ -56,7 +66,14 @@ func (r *Repository) CountUsers(ctx context.Context) (int64, error) {
 
 // updateUser 在 users bucket 中按 ID 定位并以原 key 原地更新。
 func (r *Repository) updateUser(ctx context.Context, uid uint, mutate func(*model.DockgeUser)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return r.db.Update(func(tx *bbolt.Tx) error {
+		// 等待写锁期间也可能取消，取得事务后必须重新检查。
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b, err := TxBucket(tx, bucketUsers)
 		if err != nil {
 			return err
@@ -82,6 +99,9 @@ func (r *Repository) updateUser(ctx context.Context, uid uint, mutate func(*mode
 		}
 		mutate(&user)
 		user.UpdatedAt = time.Now()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return b.Put(targetKey, marshalUser(&user))
 	})
 }
@@ -156,7 +176,14 @@ func (r *Repository) GetSetting(ctx context.Context, key string) (string, error)
 
 // SetSetting 写入设置项（payload 含类型分组）。
 func (r *Repository) SetSetting(ctx context.Context, key, value, typ string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return r.db.Update(func(tx *bbolt.Tx) error {
+		// 等待写锁期间也可能取消，取得事务后必须重新检查。
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b, err := TxBucket(tx, bucketSettings)
 		if err != nil {
 			return err
@@ -164,6 +191,9 @@ func (r *Repository) SetSetting(ctx context.Context, key, value, typ string) err
 		payload := settingPayload{Value: value, Type: typ}
 		data, err := json.Marshal(payload)
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return b.Put([]byte(key), data)
