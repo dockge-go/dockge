@@ -11,3 +11,12 @@ export function mergeStackRefresh(incoming: Stack, current?: Stack, before?: Sta
     deployLog: current.deployLog,
   };
 }
+
+// 每轮只建立一次索引，避免逐栈扫描旧列表；草稿规则仍由单栈合并统一处理。
+export function mergeStackListRefresh(incoming: Stack[], current: readonly Stack[]): Stack[] {
+  const byId = new Map<string, Stack>();
+  for (const stack of current) {
+    if (!byId.has(stack.id)) byId.set(stack.id, stack);
+  }
+  return incoming.map(stack => mergeStackRefresh(stack, byId.get(stack.id)));
+}

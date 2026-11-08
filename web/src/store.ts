@@ -9,7 +9,7 @@ import { AuthAPI, Session, passwordProblem } from './lib/auth';
 import { yamlProblem, parseServices } from './lib/yaml';
 import { api, stream, events, terminalPath } from './lib/api';
 import { LogBuffer } from './lib/log-buffer';
-import { mergeStackRefresh } from './lib/stack-refresh';
+import { mergeStackRefresh, mergeStackListRefresh } from './lib/stack-refresh';
 import type { HostSystem } from './lib/system';
 
 const LS_THEME = 'dockge.theme';
@@ -598,11 +598,10 @@ function applySnapshot(snapshot: LiveSnapshot) {
   if (!h.runtime.ready) errors.runtime = h.runtime.error || t('data.unknown');
   if (!h.runtime.stacks.writable) errors.stacksDirectory = h.runtime.stacks.error || t('data.unknown');
   if (!errors.stacks) {
-    const rows = snapshot.stacks.map(d => {
-      const current = app.stacks.find(s => s.id === d.name);
+    const rows = mergeStackListRefresh(snapshot.stacks.map(d => {
       const incoming: Stack = {id:d.name, name:d.name, compose_path:d.configFiles || '', status:stackStatus(d.status), compose:d.yaml || '', savedCompose:d.yaml || '', env:d.env || '', savedEnv:d.env || '', managed:d.managed, deployLog:[], busy:false, loadError:d.loadError || '', runtimeError:d.runtimeError || ''};
-      return mergeStackRefresh(incoming,current);
-    });
+      return incoming;
+    }), app.stacks);
     setApp('stacks',rows);
     if (!rows.some(s => s.id === app.selectedStack)) setApp('selectedStack',rows[0]?.id || null);
   }
