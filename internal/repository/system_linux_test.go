@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 func TestContainerUsesRealKernelWithoutExtraMounts(t *testing.T) {
@@ -17,31 +19,42 @@ func TestContainerUsesRealKernelWithoutExtraMounts(t *testing.T) {
 	}
 	t.Setenv("container", "dockge-test")
 	r := &Repository{stacksDir: t.TempDir()}
-	q := r.HostSystem(context.Background())
-	if q.Source != "kernel-proc" || q.CPUPercent != nil || q.Memory == nil || q.Disk == nil || q.CPUCount == nil {
-		t.Fatalf("标准 procfs 必须直接采样，首样本 CPU 不能伪造: %+v", q)
-	}
-	b, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mem, _, err := parseMemory(string(b))
-	if err != nil || q.Memory.Total != mem.Total {
-		t.Fatal("内存总量必须来自真实 procfs")
-	}
-	if r.HostSystem(context.Background()) != q {
-		t.Fatal("rapid requests must share the sampling interval")
-	}
-	var wg sync.WaitGroup
-	for range 20 {
-		wg.Go(func() {
-			got := r.HostSystem(context.Background())
-			if got != q {
-				t.Error("concurrent reader did not use cache")
-			}
-		})
-	}
-	wg.Wait()
+	// 仅控制测试时钟，procfs/statfs 仍真实读取；CI 调度与读取耗时不能决定缓存断言。
+	synctest.Test(t, func(t *testing.T) {
+		q := r.HostSystem(context.Background())
+		if q.Source != "kernel-proc" || q.CPUPercent != nil || q.Memory == nil || q.Disk == nil || q.CPUCount == nil {
+			t.Fatalf("标准 procfs 必须直接采样，首样本 CPU 不能伪造: %+v", q)
+		}
+		b, err := os.ReadFile("/proc/meminfo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mem, _, err := parseMemory(string(b))
+		if err != nil || q.Memory.Total != mem.Total {
+			t.Fatal("内存总量必须来自真实 procfs")
+		}
+		if r.HostSystem(context.Background()) != q {
+			t.Fatal("rapid requests must share the sampling interval")
+		}
+		var wg sync.WaitGroup
+		for range 20 {
+			wg.Go(func() {
+				got := r.HostSystem(context.Background())
+				if got != q {
+					t.Error("concurrent reader did not use cache")
+				}
+			})
+		}
+		wg.Wait()
+		time.Sleep(time.Second - time.Nanosecond)
+		if got := r.HostSystem(context.Background()); got != q {
+			t.Fatal("采样间隔到期前必须复用缓存")
+		}
+		time.Sleep(time.Nanosecond)
+		if got := r.HostSystem(context.Background()); got == q || got.SampledAt == q.SampledAt {
+			t.Fatal("采样间隔到期后必须重新读取真实内核数据")
+		}
+	})
 }
 
 func TestHostDiskMatchesStatfs(t *testing.T) {
