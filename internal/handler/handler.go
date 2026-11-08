@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
+	"time"
 
 	v1 "dockge/api/v1"
 	"dockge/internal/repository"
@@ -71,12 +73,13 @@ func handleServiceError(ctx *gin.Context, err error) {
 
 // bindJSON 解析 JSON 请求体；失败时把绑定/校验错误翻译为指明字段与原因的
 // 具体文案（铁律：杜绝裸「参数错误」——缺哪个字段、类型错在哪必须直达用户）。
-const maxJSONBodyBytes = 4 << 20
+const (
+	maxJSONBodyBytes    = 4 << 20
+	jsonBodyReadTimeout = 10 * time.Second
+)
 
 func bindJSON(ctx *gin.Context, obj any) error {
-	// 完整读取但限制内存；嵌套 MaxBytesReader 保留终端等接口更小的既有限制。
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxJSONBodyBytes)
-	data, err := io.ReadAll(ctx.Request.Body)
+	data, err := readJSONBody(ctx, jsonBodyReadTimeout)
 	if err != nil {
 		return fmt.Errorf("%w: %s", v1.ErrBadRequest, bindErrDetail(reflect.TypeOf(obj), err))
 	}
@@ -95,6 +98,35 @@ func bindJSON(ctx *gin.Context, obj any) error {
 		return fmt.Errorf("%w: %s", v1.ErrBadRequest, bindErrDetail(reflect.TypeOf(obj), err))
 	}
 	return nil
+}
+
+// readJSONBody 只约束正文读取，读完即撤销期限，后续部署与 SSE 不继承短超时。
+func readJSONBody(ctx *gin.Context, timeout time.Duration) ([]byte, error) {
+	writer := http.ResponseWriter(ctx.Writer)
+	if wrapped, ok := writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+		writer = wrapped.Unwrap()
+	}
+	rc := http.NewResponseController(writer)
+	if err := rc.SetReadDeadline(time.Now().Add(timeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return nil, fmt.Errorf("设置请求体读取期限失败：%w", err)
+	}
+	// 嵌套限制保留终端等接口更小的既有正文上限。
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxJSONBodyBytes)
+	data, err := io.ReadAll(ctx.Request.Body)
+	if err != nil {
+		// 不能撤销失败读取的期限后再排空正文，否则慢客户端仍可占住连接。
+		if ctx.Request.ProtoMajor == 1 {
+			ctx.Header("Connection", "close")
+		}
+		if os.IsTimeout(err) {
+			return nil, fmt.Errorf("请求体读取超时（最大 %s）：%w", timeout, err)
+		}
+		return nil, err
+	}
+	if err := rc.SetReadDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return nil, fmt.Errorf("清除请求体读取期限失败：%w", err)
+	}
+	return data, nil
 }
 
 // bindErrDetail 翻译 JSON 绑定错误：validator 校验失败给出字段与期望，
