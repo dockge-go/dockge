@@ -2,21 +2,26 @@ package handler
 
 import (
 	"context"
-	v1 "dockge/api/v1"
+	"sync"
+	"time"
+
 	"dockge/internal/repository"
 	"dockge/internal/service"
 	"dockge/internal/version"
+
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
-	"time"
 )
 
-// EventsHandler 独立采样主机与资源，重型运行时查询不会阻塞 CPU/内存推送。
+// EventsHandler 在活跃连接间共享主机与资源采样，避免多窗口重复查询运行时。
 type EventsHandler struct {
-	Resources  *service.ResourceService `do:""`
-	Stacks     service.StackService     `do:""`
-	Auth       service.AuthService      `do:""`
-	Repository *repository.Repository   `do:""`
+	Resources   *service.ResourceService `do:""`
+	Stacks      service.StackService     `do:""`
+	Auth        service.AuthService      `do:""`
+	Repository  *repository.Repository   `do:""`
+	streamsOnce sync.Once
+	systems     *eventSampler
+	snapshots   *eventSampler
 }
 
 // NewEventsHandler 注入真实采样服务。
@@ -28,31 +33,18 @@ func NewEventsHandler(i do.Injector) (*EventsHandler, error) {
 func (h *EventsHandler) Events(c *gin.Context) {
 	ctx, cancel := streamContext(c, h.Auth)
 	defer cancel()
+	if ctx.Err() != nil {
+		return
+	}
 	s := newSSE(c)
-	snapshots := make(chan any, 1)
-	systems := make(chan *v1.HostSystem, 1)
-	go sampleEvents(ctx, 2*time.Second, systems, func(ctx context.Context) *v1.HostSystem { return h.Resources.System(ctx) })
-	go sampleEvents(ctx, 5*time.Second, snapshots, func(ctx context.Context) any {
-		bounded, stop := context.WithTimeout(ctx, 20*time.Second)
-		defer stop()
-		health := h.Repository.Preflight(bounded)
-		resources := h.Resources.Snapshot(bounded)
-		stacks := make([]any, 0)
-		list, err := h.Stacks.List(bounded, "")
-		if err != nil {
-			resources.Errors["stacks"] = err.Error()
-		} else {
-			for _, summary := range list.List {
-				d, e := h.Stacks.Get(bounded, summary.Name)
-				if e != nil {
-					stacks = append(stacks, gin.H{"name": summary.Name, "status": summary.Status, "managed": summary.Managed, "configFiles": summary.ConfigFiles, "loadError": e.Error()})
-				} else {
-					stacks = append(stacks, d)
-				}
-			}
-		}
-		return gin.H{"resources": resources, "stacks": stacks, "health": gin.H{"version": version.Version, "runtime": health}}
+	h.streamsOnce.Do(func() {
+		h.systems = newEventSampler(2*time.Second, func(ctx context.Context) any { return h.Resources.System(ctx) })
+		h.snapshots = newEventSampler(5*time.Second, h.snapshot)
 	})
+	systems, stopSystems := h.systems.subscribe()
+	defer stopSystems()
+	snapshots, stopSnapshots := h.snapshots.subscribe()
+	defer stopSnapshots()
 	heartbeat := time.NewTicker(5 * time.Second)
 	defer heartbeat.Stop()
 	for {
@@ -60,11 +52,11 @@ func (h *EventsHandler) Events(c *gin.Context) {
 		case <-ctx.Done():
 			return
 		case data := <-systems:
-			if s.event("system", data) != nil {
+			if !writeEventSample(s, "system", data) {
 				return
 			}
 		case data := <-snapshots:
-			if s.event("snapshot", data) != nil {
+			if !writeEventSample(s, "snapshot", data) {
 				return
 			}
 		case <-heartbeat.C:
@@ -74,23 +66,34 @@ func (h *EventsHandler) Events(c *gin.Context) {
 		}
 	}
 }
-func sampleEvents[T any](ctx context.Context, period time.Duration, out chan<- T, read func(context.Context) T) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		data := read(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case out <- data:
-		}
-		timer := time.NewTimer(period)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
+
+// snapshot 保持资源查询与归属校验不变，共享采样只消除连接间重复工作。
+func (h *EventsHandler) snapshot(ctx context.Context) any {
+	bounded, stop := context.WithTimeout(ctx, 20*time.Second)
+	defer stop()
+	health := h.Repository.Preflight(bounded)
+	resources := h.Resources.Snapshot(bounded)
+	stacks := make([]any, 0)
+	list, err := h.Stacks.List(bounded, "")
+	if err != nil {
+		resources.Errors["stacks"] = err.Error()
+	} else {
+		for _, summary := range list.List {
+			d, e := h.Stacks.Get(bounded, summary.Name)
+			if e != nil {
+				stacks = append(stacks, gin.H{"name": summary.Name, "status": summary.Status, "managed": summary.Managed, "configFiles": summary.ConfigFiles, "loadError": e.Error()})
+			} else {
+				stacks = append(stacks, d)
+			}
 		}
 	}
+	return gin.H{"resources": resources, "stacks": stacks, "health": gin.H{"version": version.Version, "runtime": health}}
+}
+
+func writeEventSample(s *sseWriter, name string, sample eventSample) bool {
+	if sample.err != nil {
+		_ = s.event("error", sample.err.Error())
+		return false
+	}
+	return s.eventJSON(name, sample.data) == nil
 }

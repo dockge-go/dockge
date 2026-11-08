@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -38,13 +39,32 @@ func (s *sseWriter) event(name string, data any) error {
 	if err != nil {
 		return err
 	}
+	return s.eventJSON(name, b)
+}
+
+// eventJSON 复用共享采样已编码的不可变数据，避免每个连接再次序列化完整快照。
+func (s *sseWriter) eventJSON(name string, b []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.rc.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return fmt.Errorf("SSE 事件 %q 设置写入期限失败: %w", name, err)
 	}
-	if _, err = fmt.Fprintf(s.c.Writer, "event: %s\ndata: %s\n\n", name, b); err != nil {
+	// 分段直写 JSON，避免 fmt.Fprintf 为每个连接再复制一份完整快照。
+	header := "event: " + name + "\ndata: "
+	if n, err := s.c.Writer.WriteString(header); err != nil {
 		return err
+	} else if n != len(header) {
+		return io.ErrShortWrite
+	}
+	if n, err := s.c.Writer.Write(b); err != nil {
+		return err
+	} else if n != len(b) {
+		return io.ErrShortWrite
+	}
+	if n, err := s.c.Writer.WriteString("\n\n"); err != nil {
+		return err
+	} else if n != 2 {
+		return io.ErrShortWrite
 	}
 	return s.rc.Flush()
 }

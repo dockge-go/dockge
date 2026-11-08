@@ -28,3 +28,18 @@ test('终端字节解码不修改中文及 ANSI',()=>{
  assert.deepEqual(eventBytes(original.toString('base64')),new Uint8Array(original));
  assert.throws(()=>eventBytes(42));
 });
+
+test('长连接累计超过 16 MiB 仍按帧消费，不把累计流量当作单帧缓存',async()=>{
+ const count=20000, padding='x'.repeat(1024), encoder=new TextEncoder();
+ let sent=0, received=0, latest=null, totalBytes=0;
+ const body=new ReadableStream({pull(c){
+  if(sent===count){c.close();return;}
+  const frame=encoder.encode(`event: system\ndata: ${JSON.stringify({sampledAt:++sent,padding})}\n\n`);
+  totalBytes+=frame.length;c.enqueue(frame);
+ }});
+ await readSSE(new Response(body,{headers:{'Content-Type':'text/event-stream'}}),e=>{
+  assert.equal(e.event,'system');received++;latest=e.data;
+ });
+ assert.equal(received,count);assert.equal(latest.sampledAt,count);
+ assert.ok(totalBytes>16*1024*1024);assert.equal(body.locked,false);
+});

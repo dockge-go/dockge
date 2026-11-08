@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -151,5 +152,52 @@ func TestSSESlowHTTPClientHitsWriteDeadline(t *testing.T) {
 		}
 	case <-time.After(13 * time.Second):
 		t.Fatal("慢客户端超过 SSE 写期限仍占用请求线程")
+	}
+}
+
+// 分段写帧仍要传递每一段的真实失败，不能短写后 Flush 成功就当作完整事件。
+type segmentedSSEWriter struct {
+	*httptest.ResponseRecorder
+	writes int
+	failAt int
+	short  bool
+	err    error
+}
+
+func (w *segmentedSSEWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes == w.failAt {
+		if w.short {
+			return len(p) - 1, nil
+		}
+		return 0, w.err
+	}
+	return w.ResponseRecorder.Write(p)
+}
+
+func (w *segmentedSSEWriter) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
+
+func TestSSESegmentedWritesPropagateFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		failAt int
+		short  bool
+	}{
+		{"header", 1, false}, {"body", 2, false}, {"ending", 3, false}, {"short-header", 1, true}, {"short-body", 2, true}, {"short-ending", 3, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := errors.New("连接写入失败")
+			if tc.short {
+				want = io.ErrShortWrite
+			}
+			writer := &segmentedSSEWriter{ResponseRecorder: httptest.NewRecorder(), failAt: tc.failAt, short: tc.short, err: want}
+			c, _ := gin.CreateTestContext(writer)
+			if err := newSSE(c).eventJSON("snapshot", []byte(`{"value":1}`)); !errors.Is(err, want) {
+				t.Fatalf("第 %d 段错误应透出：%v", tc.failAt, err)
+			}
+			if writer.Flushed {
+				t.Fatal("不完整事件不得作为成功事件刷新")
+			}
+		})
 	}
 }

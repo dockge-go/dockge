@@ -203,6 +203,7 @@ type terminalEventWriter struct {
 	*httptest.ResponseRecorder
 	frames    chan string
 	failEvent string
+	pending   string
 }
 
 func (w *terminalEventWriter) Write(p []byte) (int, error) {
@@ -210,12 +211,23 @@ func (w *terminalEventWriter) Write(p []byte) (int, error) {
 	if strings.HasPrefix(frame, "event: "+w.failEvent+"\n") {
 		return 0, errors.New("测试客户端写入断开")
 	}
-	select {
-	case w.frames <- frame:
-	default:
+	w.pending += frame
+	for {
+		end := strings.Index(w.pending, "\n\n")
+		if end < 0 {
+			break
+		}
+		select {
+		case w.frames <- w.pending[:end+2]:
+		default:
+		}
+		w.pending = w.pending[end+2:]
 	}
 	return w.ResponseRecorder.Write(p)
 }
+
+// 帧边界由 SSE 分隔符决定，与服务端选择一次或分段 Write 无关。
+func (w *terminalEventWriter) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
 
 func awaitTerminalEvent(t *testing.T, frames <-chan string, event string) string {
 	t.Helper()
