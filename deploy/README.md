@@ -30,7 +30,7 @@ environment:
 
 ## 升级
 
-先备份栈目录（含隐藏账号目录）与业务卷，然后将自己部署配置的镜像改为 `makeshit/dockge:0.2.9`，或使用已认证的 `ghcr.io/dockge-go/dockge:0.2.9`：
+先备份栈目录（含隐藏账号目录）与业务卷，然后将自己部署配置的镜像改为 `makeshit/dockge:0.2.10`，或使用已认证的 `ghcr.io/dockge-go/dockge:0.2.10`：
 
 ```sh
 docker compose -f compose.yaml pull
@@ -115,6 +115,6 @@ main 推送与 PR 运行 Verify；`v*` tag 通过构建、测试、漏洞检查�
 
 - GHCR：使用任务级 `GITHUB_TOKEN` 和 `packages: write`，无需单独发布令牌。私有包拉取需 `read:packages` 凭据。
 - Docker Hub：需要 Actions Secrets `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`；Repository Variable `DOCKERHUB_IMAGE` 可覆盖默认 `makeshit/dockge`。
-- 两个仓库的发布任务独立执行。版本 tag `v0.2.9` 对应镜像 `0.2.9`、`0.2`、`latest`，重新运行该 tag 不生成 `dev`。
+- 两个仓库的发布任务独立执行。版本 tag `v0.2.10` 对应镜像 `0.2.10`、`0.2`、`latest`，重新运行该 tag 不生成 `dev`。
 
 使用未发布的源码改动时，先构建并推送自己的固定镜像标签，再更新部署。生产不要依赖浮动 `latest`。
