@@ -107,10 +107,14 @@ func (r *Repository) probeRuntime(ctx context.Context) RuntimeStatus {
 		status.Error = err.Error()
 		return status
 	}
-	ConfigureStreamingCommand(cmd, false)
+	wait := ConfigureStreamingCommand(cmd, false)
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
-	if err := cmd.Run(); err != nil {
+	err = cmd.Start()
+	if err == nil {
+		err = wait()
+	}
+	if err != nil {
 		cause := errors.Join(err, ctx.Err())
 		status.Error = fmt.Sprintf("%s info 自检失败（期限 %s）: %v", rt.bin, preflightTimeout, cause)
 		if detail := strings.TrimSpace(stderr.String()); detail != "" {

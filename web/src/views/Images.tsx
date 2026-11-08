@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import { app, setApp, paged, openSheet, removeImage, clearUnused, t } from '../store';
+import { app, setApp, paged, openSheet, removeImage, clearUnused, t, resourcesReady, resourceCount } from '../store';
 import { formatBytes, timeAgo } from '../lib/format';
 
 export default function Images() {
@@ -11,12 +11,12 @@ export default function Images() {
       <div class="section-header">
         <div>
           <h2 class="section-title">{t('img.title')}</h2>
-          <p class="section-subtitle">{t('img.count', { n: app.images.length })}</p>
+          <p class="section-subtitle">{t('img.count', { n: resourceCount('images', app.images.length) })}</p>
         </div>
         <div class="section-actions">
-          <button type="button" class="btn-clear" onClick={() => clearUnused('images')}>
+          <button type="button" class="btn-clear" disabled={!resourcesReady('images') || !unused() || app.actionBusy} onClick={() => clearUnused('images')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
-            {t('img.clearUnused', { n: unused() })}
+            {t('img.clearUnused', { n: resourceCount('images', unused()) })}
           </button>
           <button type="button" class="btn btn-primary" onClick={() => openSheet('pullImage')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -25,11 +25,13 @@ export default function Images() {
         </div>
       </div>
 
-      <Show when={!app.images.length}>
+      <Show when={!resourcesReady('images')}><p class="form-help" role="status">{app.loading ? t('data.loading') : t('data.unknown')}</p></Show>
+
+      <Show when={resourcesReady('images') && !app.images.length}>
         <div class="empty-state"><div class="empty-state-title">{t('img.emptyTitle')}</div></div>
       </Show>
 
-      <Show when={app.images.length}>
+      <Show when={resourcesReady('images') && app.images.length}>
         <div class="table-panel"><table class="data-table tbl-images">
           <thead><tr>
             <th>{t('common.repository')}</th><th>{t('common.tag')}</th><th>{t('common.size')}</th>

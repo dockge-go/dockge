@@ -16,26 +16,33 @@ type eventSample struct {
 
 type eventSampler struct {
 	mu       sync.Mutex
-	read     func(context.Context) any
+	read     func(context.Context, uint64) any
 	period   time.Duration
 	clients  map[chan eventSample]uint64
 	revision uint64
 	running  bool
+	closed   bool
+	done     chan struct{}
 	cancel   context.CancelFunc
 	wake     chan struct{}
 }
 
-func newEventSampler(period time.Duration, read func(context.Context) any) *eventSampler {
+func newEventSampler(period time.Duration, read func(context.Context, uint64) any) *eventSampler {
 	return &eventSampler{read: read, period: period, clients: make(map[chan eventSample]uint64), wake: make(chan struct{}, 1)}
 }
 
 func (s *eventSampler) subscribe() (<-chan eventSample, func()) {
 	out := make(chan eventSample, 1)
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return out, func() {}
+	}
 	s.revision++
 	s.clients[out] = s.revision
 	if !s.running {
 		s.running = true
+		s.done = make(chan struct{})
 		go s.run()
 	} else {
 		s.notify()
@@ -62,6 +69,24 @@ func (s *eventSampler) subscribe() (<-chan eventSample, func()) {
 	}
 }
 
+// refresh 丢弃待发旧状态并唤醒一次采样；代数仅标记刷新边界，不保留事件历史。
+func (s *eventSampler) refresh() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revision++
+	for out := range s.clients {
+		s.clients[out] = s.revision
+		select {
+		case <-out:
+		default:
+		}
+	}
+	if len(s.clients) > 0 {
+		s.notify()
+	}
+	return s.revision
+}
+
 // notify 在 mu 内调用；唤醒最多排队一次，重连不会堆积采样任务。
 func (s *eventSampler) notify() {
 	select {
@@ -73,8 +98,9 @@ func (s *eventSampler) notify() {
 func (s *eventSampler) run() {
 	for {
 		s.mu.Lock()
-		if len(s.clients) == 0 {
+		if s.closed || len(s.clients) == 0 {
 			s.running = false
+			close(s.done)
 			s.mu.Unlock()
 			return
 		}
@@ -89,7 +115,7 @@ func (s *eventSampler) run() {
 		s.cancel = cancel
 		s.mu.Unlock()
 
-		data := s.read(ctx)
+		data := s.read(ctx, revision)
 		sample := eventSample{}
 		if ctx.Err() == nil {
 			sample.data, sample.err = json.Marshal(data)
@@ -102,9 +128,9 @@ func (s *eventSampler) run() {
 		canceled := ctx.Err() != nil
 		cancel()
 		s.cancel = nil
-		if !canceled {
+		if !canceled && !s.closed {
 			for out, joined := range s.clients {
-				// 操作完成后重连必须收到重连之后开始的查询，不能把旧在途结果当作刷新成功。
+				// 刷新或新订阅必须收到其边界之后开始的查询，不能把旧在途结果当作刷新成功。
 				if joined > revision {
 					continue
 				}
@@ -137,4 +163,32 @@ func sendLatestEvent(out chan eventSample, sample eventSample) {
 	default:
 	}
 	out <- sample
+}
+
+// shutdown 不关闭消费通道；请求由服务器取消，采样器只负责收回查询与单槽数据。
+func (s *eventSampler) shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.closed = true
+	if s.cancel != nil {
+		s.cancel()
+	}
+	for out := range s.clients {
+		delete(s.clients, out)
+		select {
+		case <-out:
+		default:
+		}
+	}
+	s.notify()
+	done, running := s.done, s.running
+	s.mu.Unlock()
+	if !running {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("等待 SSE 共享采样退出: %w", ctx.Err())
+	}
 }

@@ -13,3 +13,11 @@ func killProcessGroup(cmd *exec.Cmd) {
 		_ = cmd.Process.Kill()
 	}
 }
+
+func waitForProcessExit(cmd *exec.Cmd) (waited bool, err error) {
+	return true, cmd.Wait()
+}
+
+func killCommandProcessGroup(cmd *exec.Cmd) {
+	killProcessGroup(cmd)
+}

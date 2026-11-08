@@ -1,4 +1,5 @@
-import { onMount, onCleanup, For, Show, type JSX } from 'solid-js';
+import { useLocation } from '@solidjs/router';
+import { createEffect, on, onMount, onCleanup, For, Show, type JSX } from 'solid-js';
 import { app, setApp, closeSheet, dialogCancel, user, refreshData, t } from './store';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
@@ -8,6 +9,11 @@ import Dialog from './components/Dialog';
 import Toasts from './components/Toasts';
 
 export default function App(props: { children?: JSX.Element }) {
+  const location = useLocation();
+  // 路由切换释放检视流，不重建概览连接，也不取消后台部署任务。
+  createEffect(on(() => location.pathname, () => {
+    if (['logs', 'stackLogs', 'serviceLogs', 'terminal', 'history'].includes(app.sheet.kind || '')) closeSheet();
+  }, {defer:true}));
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof Element && e.target.closest('.terminal-pane.interactive')) return;

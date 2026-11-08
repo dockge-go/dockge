@@ -4,9 +4,11 @@ import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from 'node:module';
 const moduleURL = text => 'data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(text)).toString('base64');
 const sseURL = moduleURL(readFileSync(new URL('../src/lib/sse.ts',import.meta.url),'utf8'));
+const scopeURL = moduleURL(readFileSync(new URL('../src/lib/request-scope.ts',import.meta.url),'utf8'));
 const bufferURL = moduleURL(readFileSync(new URL('../src/lib/log-buffer.ts',import.meta.url),'utf8'));
 const source = readFileSync(new URL('../src/lib/api.ts',import.meta.url),'utf8')
  .replace("import { AuthAPI } from './auth';", "const AuthAPI = { token: () => 'isolated-test-token' };")
+ .replace("from './request-scope'", `from '${scopeURL}'`)
  .replace("from './sse'", `from '${sseURL}'`)
  .replace("from './log-buffer'", `from '${bufferURL}'`);
 const {stream} = await import(moduleURL(source));

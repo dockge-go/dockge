@@ -19,6 +19,7 @@ import (
 var StackNamePattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 type StackService interface {
+	Snapshot(ctx context.Context) ([]v1.StackConfigData, error)
 	List(ctx context.Context, filter string) (*v1.StackListData, error)
 	Get(ctx context.Context, name string) (*v1.StackDetailData, error)
 	Save(ctx context.Context, req *v1.StackSaveRequest, isAdd bool) error
@@ -55,6 +56,30 @@ func (s *stackService) List(ctx context.Context, filter string) (*v1.StackListDa
 		data.List = append(data.List, stackSummary(stack))
 	}
 	return data, nil
+}
+
+// Snapshot 一次查询栈列表状态，只读配置不等待部署锁，也不加载按需容器详情。
+func (s *stackService) Snapshot(ctx context.Context) ([]v1.StackConfigData, error) {
+	stacks, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, stackError(err)
+	}
+	rows := make([]v1.StackConfigData, 0, len(stacks))
+	for _, summary := range stacks {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		row := v1.StackConfigData{StackSummaryData: stackSummary(summary)}
+		config, err := s.repo.ReadStackConfig(ctx, summary.Name)
+		if err != nil {
+			row.LoadError = err.Error()
+		} else {
+			row.Yaml, row.Env = config.Yaml, config.Env
+			row.ComposeFileName, row.ConfigFiles = config.ComposeFileName, config.ConfigFiles
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 // Get 返回栈详情：文件内容、状态、容器列表与 x-dockge.urls。

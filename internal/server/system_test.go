@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -22,6 +23,16 @@ func TestSystemRequiresAuthentication(t *testing.T) {
 	if token == "" {
 		t.Fatal("missing token")
 	}
+	if code, _ := call(t, engine, "POST", "/v1/events/refresh", "", nil); code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized events refresh=%d", code)
+	}
+	code, payload = call(t, engine, "POST", "/v1/events/refresh", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("events refresh %d %v", code, payload)
+	}
+	if revision, ok := payload["data"].(map[string]any)["revision"].(float64); !ok || revision <= 0 {
+		t.Fatalf("missing refresh boundary: %v", payload)
+	}
 	if code, _ := call(t, engine, "GET", "/v1/system", "", nil); code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized system=%d", code)
 	}
@@ -35,5 +46,23 @@ func TestSystemRequiresAuthentication(t *testing.T) {
 	}
 	if data["cpuPercent"] != nil {
 		t.Fatal("first CPU sample must be unknown")
+	}
+}
+
+// 实时采样与认证响应不能被浏览器或代理存成历史状态。
+func TestAPIResponsesDoNotStore(t *testing.T) {
+	engine := newTestServer(t)
+	for _, path := range []string{"/v1/health", "/v1/system", "/v1/resources", "/v1/stacks", "/v1/events/refresh", "/v1/not-found"} {
+		t.Run(path, func(t *testing.T) {
+			method := http.MethodGet
+			if path == "/v1/events/refresh" {
+				method = http.MethodPost
+			}
+			result := httptest.NewRecorder()
+			engine.ServeHTTP(result, httptest.NewRequest(method, path, nil))
+			if got := result.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("%s Cache-Control=%q", path, got)
+			}
+		})
 	}
 }

@@ -43,3 +43,12 @@ test('长连接累计超过 16 MiB 仍按帧消费，不把累计流量当作单
  assert.equal(received,count);assert.equal(latest.sampledAt,count);
  assert.ok(totalBytes>16*1024*1024);assert.equal(body.locked,false);
 });
+
+test('异步消费者完成当前帧之前，不投递后续帧',async()=>{
+ let complete;const blocked=new Promise(resolve=>{complete=resolve});const seen=[];
+ const reading=readSSE(response('data: 1\n\ndata: 2\n\n'),async e=>{
+  seen.push(e.data);if(e.data===1)await blocked;
+ });
+ await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(seen,[1]);
+ complete();await reading;assert.deepEqual(seen,[1,2]);
+});

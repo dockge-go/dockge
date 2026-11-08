@@ -21,9 +21,6 @@ func (r *Repository) HostSystem(ctx context.Context) *v1.HostSystem {
 	r.systemMu.Lock()
 	defer r.systemMu.Unlock()
 	now := time.Now()
-	if r.systemSnapshot != nil && now.Sub(r.systemAt) < time.Second {
-		return r.systemSnapshot
-	}
 	q := &v1.HostSystem{SampledAt: now.UTC().Format(time.RFC3339Nano), Errors: map[string]string{}}
 	if err := ctx.Err(); err != nil {
 		q.Errors["request"] = err.Error()
@@ -61,7 +58,6 @@ func (r *Repository) HostSystem(ctx context.Context) *v1.HostSystem {
 			r.systemPrevious = nil
 		}
 	}
-	r.systemAt, r.systemSnapshot = now, q
 	return q
 }
 

@@ -1,5 +1,5 @@
 import { A, useLocation } from '@solidjs/router';
-import { app, setApp, runningCount, user, doLogout, t } from '../store';
+import { app, setApp, runningCount, resourceCount, user, doLogout, t } from '../store';
 
 interface NavItem { route: string; label: string; icon: string; badge?: 'containers' | 'stacks' | 'images' }
 interface NavGroup { group: string; items: NavItem[] }
@@ -38,9 +38,9 @@ export default function Sidebar() {
     return p === route;
   };
   const badgeText = (b?: string) => {
-    if (b === 'containers') return runningCount() + '/' + app.containers.length;
-    if (b === 'stacks') return String(app.stacks.length);
-    if (b === 'images') return String(app.images.length);
+    if (b === 'containers') return resourceCount('containers', runningCount()) + '/' + resourceCount('containers', app.containers.length);
+    if (b === 'stacks') return resourceCount('stacks', app.stacks.length);
+    if (b === 'images') return resourceCount('images', app.images.length);
     return '';
   };
 
@@ -71,7 +71,7 @@ export default function Sidebar() {
       </nav>
       <div class="sidebar-footer">
         <div class="engine-badge" style="margin-bottom:var(--space-2)">
-          <span class="engine-dot" style={{background:app.errors.runtime || app.errors.info || !app.runtime ? 'var(--meta)' : 'var(--success)'}} />
+          <span class="engine-dot" style={{background:app.errors.request || app.errors.runtime || app.errors.info || !app.runtime ? 'var(--meta)' : 'var(--success)'}} />
           <span>{app.runtime || t('data.unknown')} · {app.info.ServerVersion || t('data.unknown')}</span>
         </div>
         <div class="user-chip">

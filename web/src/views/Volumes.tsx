@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import { app, setApp, paged, openSheet, removeVolume, clearUnused, volumeUsedBy, t } from '../store';
+import { app, setApp, paged, openSheet, removeVolume, clearUnused, volumeUsedBy, t, resourcesReady, resourceCount } from '../store';
 
 export default function Volumes() {
   const pg = () => paged('volumes', app.volumes);
@@ -11,12 +11,12 @@ export default function Volumes() {
       <div class="section-header">
         <div>
           <h2 class="section-title">{t('vol.title')}</h2>
-          <p class="section-subtitle">{t('vol.count', { n: app.volumes.length })}</p>
+          <p class="section-subtitle">{t('vol.count', { n: resourceCount('volumes', app.volumes.length) })}</p>
         </div>
         <div class="section-actions">
-          <button type="button" class="btn-clear" onClick={() => clearUnused('volumes')}>
+          <button type="button" class="btn-clear" disabled={!resourcesReady('volumes') || !unused() || app.actionBusy} onClick={() => clearUnused('volumes')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
-            {t('vol.clearUnused', { n: unused() })}
+            {t('vol.clearUnused', { n: resourceCount('volumes', unused()) })}
           </button>
           <button type="button" class="btn btn-primary" onClick={() => openSheet('newVolume')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -25,11 +25,13 @@ export default function Volumes() {
         </div>
       </div>
 
-      <Show when={!app.volumes.length}>
+      <Show when={!resourcesReady('volumes')}><p class="form-help" role="status">{app.loading ? t('data.loading') : t('data.unknown')}</p></Show>
+
+      <Show when={resourcesReady('volumes') && !app.volumes.length}>
         <div class="empty-state"><div class="empty-state-title">{t('vol.emptyTitle')}</div></div>
       </Show>
 
-      <Show when={app.volumes.length}>
+      <Show when={resourcesReady('volumes') && app.volumes.length}>
         <div class="table-panel"><table class="data-table">
           <thead><tr>
             <th>{t('common.name')}</th><th>{t('common.driver')}</th><th>{t('common.usage')}</th><th>{t('vol.usedBy')}</th><th style="width:80px" />

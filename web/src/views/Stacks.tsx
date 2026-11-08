@@ -1,7 +1,7 @@
 import { For, Show, lazy } from 'solid-js';
 import {
   app, setApp, paged, selectedStackObj, stackDirty, stackServiceNames,
-  createStack, saveStack, stackAction, removeStack, deployStack, openSheet, t
+  resourcesReady, createStack, saveStack, stackAction, removeStack, deployStack, openSheet, t
 } from '../store';
 const TerminalPane = lazy(() => import('../components/TerminalPane'));
 import YamlEditor from '../components/YamlEditor';
@@ -21,7 +21,7 @@ export default function Stacks() {
             </button>
           </div>
           <div class="stack-list-body">
-            <Show when={!pg().rows.length}>
+            <Show when={resourcesReady('stacks') && !pg().rows.length}>
               <div style="padding:var(--space-3);color:var(--muted);font-size:var(--text-sm)">{t('stack.emptyTitle')}</div>
             </Show>
             <For each={pg().rows}>{s => (

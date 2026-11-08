@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -70,7 +71,7 @@ func waitEventSamplerStopped(t *testing.T, s *eventSampler) {
 func TestEventSamplerSharesSamplingAndJSON(t *testing.T) {
 	var calls atomic.Int32
 	started, release := make(chan struct{}), make(chan struct{})
-	s := newEventSampler(time.Hour, func(context.Context) any {
+	s := newEventSampler(time.Hour, func(context.Context, uint64) any {
 		n := calls.Add(1)
 		if n == 1 {
 			close(started)
@@ -119,7 +120,7 @@ func TestEventSamplerSharesSamplingAndJSON(t *testing.T) {
 func TestEventSamplerSlowSubscriberKeepsOnlyLatest(t *testing.T) {
 	var calls atomic.Int32
 	started, release := make(chan struct{}), make(chan struct{})
-	s := newEventSampler(time.Hour, func(context.Context) any {
+	s := newEventSampler(time.Hour, func(context.Context, uint64) any {
 		n := calls.Add(1)
 		if n == 1 {
 			close(started)
@@ -155,7 +156,7 @@ func TestEventSamplerFreshSubscriptionExcludesInflightSnapshot(t *testing.T) {
 	var value atomic.Int32
 	var calls atomic.Int32
 	value.Store(1)
-	s := newEventSampler(time.Hour, func(context.Context) any {
+	s := newEventSampler(time.Hour, func(context.Context, uint64) any {
 		n := calls.Add(1)
 		result := value.Load()
 		if n == 1 {
@@ -187,7 +188,7 @@ func TestEventSamplerFreshSubscriptionExcludesInflightSnapshot(t *testing.T) {
 func TestEventSamplerLastUnsubscribeCancelsWithoutOverlappingRestart(t *testing.T) {
 	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var calls, active, peak atomic.Int32
-	s := newEventSampler(time.Hour, func(ctx context.Context) any {
+	s := newEventSampler(time.Hour, func(ctx context.Context, _ uint64) any {
 		n := calls.Add(1)
 		current := active.Add(1)
 		for previous := peak.Load(); current > previous && !peak.CompareAndSwap(previous, current); previous = peak.Load() {
@@ -223,7 +224,7 @@ func TestEventSamplerLastUnsubscribeCancelsWithoutOverlappingRestart(t *testing.
 
 func TestEventSamplerEncodingErrorHasDetailsAndCanRecover(t *testing.T) {
 	var calls atomic.Int32
-	s := newEventSampler(time.Hour, func(context.Context) any {
+	s := newEventSampler(time.Hour, func(context.Context, uint64) any {
 		if calls.Add(1) == 1 {
 			return make(chan int)
 		}
@@ -243,7 +244,7 @@ func TestEventSamplerEncodingErrorHasDetailsAndCanRecover(t *testing.T) {
 
 func TestEventSamplerConcurrentSubscribeUnsubscribe(t *testing.T) {
 	var active, peak atomic.Int32
-	s := newEventSampler(time.Millisecond, func(ctx context.Context) any {
+	s := newEventSampler(time.Millisecond, func(ctx context.Context, _ uint64) any {
 		current := active.Add(1)
 		for previous := peak.Load(); current > previous && !peak.CompareAndSwap(previous, current); previous = peak.Load() {
 		}
@@ -283,8 +284,8 @@ func TestEventsFirstFramesAndRequestCancellation(t *testing.T) {
 	h := &EventsHandler{}
 	blocked, snapshotCanceled := make(chan struct{}), make(chan struct{})
 	h.streamsOnce.Do(func() {
-		h.systems = newEventSampler(time.Hour, func(context.Context) any { <-blocked; return map[string]int{"cpu": 10} })
-		h.snapshots = newEventSampler(time.Hour, func(ctx context.Context) any {
+		h.systems = newEventSampler(time.Hour, func(context.Context, uint64) any { <-blocked; return map[string]int{"cpu": 10} })
+		h.snapshots = newEventSampler(time.Hour, func(ctx context.Context, _ uint64) any {
 			close(blocked)
 			<-ctx.Done()
 			close(snapshotCanceled)
@@ -344,4 +345,187 @@ func TestWriteEventSamplePreservesSSEContract(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEventSamplerRefreshDiscardsQueuedAndInflightState(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	s := newEventSampler(time.Hour, func(_ context.Context, revision uint64) any {
+		if calls.Add(1) == 2 {
+			close(started)
+			<-release
+		}
+		return revision
+	})
+	out, stop := s.subscribe()
+	t.Cleanup(stop)
+	// 第一帧留在队列中；第二帧在途，二者都必须被刷新边界淘汰。
+	s.mu.Lock()
+	initial := s.revision
+	s.mu.Unlock()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(out) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(out) != 1 {
+		t.Fatal("首帧未进入待发队列")
+	}
+	triggerEventSample(s)
+	<-started
+	revision := s.refresh()
+	if revision <= initial || len(out) != 0 {
+		t.Fatal("刷新必须淘汰待发帧并建立新的采样边界")
+	}
+	close(release)
+	if got := receiveEventSample(t, out); string(got.data) != fmt.Sprint(revision) {
+		t.Fatalf("刷新后收到旧在途结果: %s", got.data)
+	}
+	stop()
+	waitEventSamplerStopped(t, s)
+}
+
+func TestEventsRefreshDoesNotStartSamplingWithoutSubscribers(t *testing.T) {
+	h := &EventsHandler{}
+	var calls atomic.Int32
+	h.streamsOnce.Do(func() {
+		h.systems = newEventSampler(time.Hour, func(context.Context, uint64) any { calls.Add(1); return nil })
+		h.snapshots = newEventSampler(time.Hour, func(context.Context, uint64) any { calls.Add(1); return nil })
+	})
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/events/refresh", nil)
+	h.Refresh(c)
+	if writer.Code != http.StatusOK || writer.Header().Get("Cache-Control") != "no-store" || !strings.Contains(writer.Body.String(), `"revision":1`) {
+		t.Fatalf("刷新响应错误: %s", writer.Body.String())
+	}
+	if calls.Load() != 0 {
+		t.Fatal("无订阅者时刷新不得启动后台采样")
+	}
+}
+
+// 同一条真实 HTTP 流多次刷新，不建立第二条概览连接，也不回放历史状态。
+func TestEventsRefreshUsesExistingHTTPStream(t *testing.T) {
+	h := &EventsHandler{}
+	h.streamsOnce.Do(func() {
+		h.systems = newEventSampler(time.Hour, func(context.Context, uint64) any { return nil })
+		h.snapshots = newEventSampler(time.Hour, func(_ context.Context, revision uint64) any {
+			return map[string]uint64{"revision": revision}
+		})
+	})
+	var connections atomic.Int32
+	engine := gin.New()
+	engine.GET("/v1/events", func(c *gin.Context) { connections.Add(1); h.Events(c) })
+	engine.POST("/v1/events/refresh", h.Refresh)
+	server := httptest.NewServer(engine)
+	defer server.Close()
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Get(server.URL + "/v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	scanner := bufio.NewScanner(response.Body)
+	readRevision := func(want uint64) {
+		t.Helper()
+		event := ""
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "event: ") {
+				event = strings.TrimPrefix(line, "event: ")
+			}
+			if event != "snapshot" || !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var data struct {
+				Revision uint64 `json:"revision"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &data); err != nil {
+				t.Fatal(err)
+			}
+			if data.Revision >= want {
+				return
+			}
+		}
+		t.Fatalf("未收到 revision >= %d 的新采样: %v", want, scanner.Err())
+	}
+	readRevision(1)
+	for want := uint64(2); want <= 10; want++ {
+		ack, err := client.Post(server.URL+"/v1/events/refresh", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Data struct {
+				Revision uint64 `json:"revision"`
+			} `json:"data"`
+		}
+		err = json.NewDecoder(ack.Body).Decode(&payload)
+		ack.Body.Close()
+		if err != nil || ack.StatusCode != http.StatusOK || payload.Data.Revision != want {
+			t.Fatalf("刷新确认: status=%d revision=%d err=%v", ack.StatusCode, payload.Data.Revision, err)
+		}
+		readRevision(want)
+	}
+	if connections.Load() != 1 {
+		t.Fatalf("刷新重建了 SSE: %d", connections.Load())
+	}
+	response.Body.Close()
+	waitEventSamplerStopped(t, h.systems)
+	waitEventSamplerStopped(t, h.snapshots)
+}
+
+func TestEventSamplerShutdownWaitsForCanceledRead(t *testing.T) {
+	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	s := newEventSampler(time.Hour, func(ctx context.Context, _ uint64) any {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		<-release
+		return 1
+	})
+	out, stop := s.subscribe()
+	defer stop()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.shutdown(ctx) }()
+	<-canceled
+	select {
+	case err := <-done:
+		t.Fatalf("查询还没回收即返回: %v", err)
+	default:
+	}
+	fresh, stopFresh := s.subscribe()
+	defer stopFresh()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 || len(fresh) != 0 {
+		t.Fatal("停机不得发送旧结果或重新启动采样")
+	}
+	if err := s.shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitEventSamplerStopped(t, s)
+}
+
+func TestEventSamplerShutdownDeadlineAndRecovery(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	s := newEventSampler(time.Hour, func(context.Context, uint64) any { close(started); <-release; return 1 })
+	_, stop := s.subscribe()
+	defer stop()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := s.shutdown(ctx)
+	close(release)
+	if err == nil || !strings.Contains(err.Error(), "等待 SSE 共享采样退出") {
+		t.Fatalf("停机超时须有明细: %v", err)
+	}
+	if err := s.shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitEventSamplerStopped(t, s)
 }

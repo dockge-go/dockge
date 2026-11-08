@@ -1,7 +1,7 @@
 import { For, Show, createEffect } from 'solid-js';
 import { useNavigate, useParams } from '@solidjs/router';
 import {
-  app, setApp, detail, detailEnv, detailNets, detailMounts, openDetail,
+  app, setApp, resourcesReady, detail, detailEnv, detailNets, detailMounts, openDetail,
   openSheet, containerAction, removeContainer, renameContainer, commitContainer, t, healthBadge
 } from '../store';
 import { ctrName, statusKind, statusLabel, statusText, portsText } from '../lib/format';
@@ -22,7 +22,7 @@ export default function ContainerDetail() {
   /* 路由参数 → store.detailId；容器不存在时回列表 */
   createEffect(() => {
     const id = params.id;
-    if (app.loading || app.errors.resources || app.errors.containers) return;
+    if (!id || !resourcesReady('containers')) return;
     if (!app.containers.some(x => x.Id === id)) { nav('/containers', { replace: true }); return; }
     if (app.detailId !== id) openDetail(id);
   });
@@ -45,8 +45,8 @@ export default function ContainerDetail() {
           </Show>
           <Show when={c()!.State === 'running'}><span class="live-dot" /></Show>
           <div class="detail-tools">
-            <button type="button" class="btn btn-secondary" onClick={() => openSheet('logs', app.detailId)}>{t('tab.logs')}</button>
-            <button type="button" class="btn btn-secondary" disabled={c()!.State !== 'running' || c()!.system} onClick={() => openSheet('terminal', app.detailId)}>{t('tab.exec')}</button>
+            <button type="button" class="btn btn-secondary" onClick={() => openSheet('logs', c()!.Id)}>{t('tab.logs')}</button>
+            <button type="button" class="btn btn-secondary" disabled={c()!.State !== 'running' || c()!.system} onClick={() => openSheet('terminal', c()!.Id)}>{t('tab.exec')}</button>
             <Show when={c()!.State === 'running'} fallback={
               <button type="button" class="btn btn-primary" onClick={() => containerAction(app.detailId!, 'start')}>{t('act.start')}</button>}>
               <button type="button" class="btn btn-secondary" onClick={() => containerAction(app.detailId!, 'stop')}>{t('act.stop')}</button>

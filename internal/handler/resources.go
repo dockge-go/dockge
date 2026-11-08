@@ -19,6 +19,7 @@ func NewResourceHandler(i do.Injector) (*ResourceHandler, error) {
 
 // Snapshot 查询各类真实资源。
 func (h *ResourceHandler) Snapshot(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	v1.HandleSuccess(c, h.Service.Snapshot(c.Request.Context()))
 }
 

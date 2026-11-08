@@ -2,7 +2,7 @@ import { For, Show } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import {
   app, setApp, paged, filteredContainers, runningCount, stoppedEditable, openDetail,
-  clearStopped, openSheet, containerAction, t, healthBadge
+  clearStopped, openSheet, containerAction, t, healthBadge, resourcesReady, resourceCount
 } from '../store';
 import { ctrName, statusKind, statusLabel, statusText, portsText } from '../lib/format';
 
@@ -33,13 +33,13 @@ export default function Containers() {
     <div class="view-section">
       <div class="section-header">
         <div>
-          <h2 class="section-title">{t('ctn.title')}<span class="live-dot" /></h2>
-          <p class="section-subtitle">{t('common.totalRunning', { total: app.containers.length, running: runningCount() })}</p>
+          <h2 class="section-title">{t('ctn.title')}<span class="live-dot" classList={{ stale: !resourcesReady('containers') }} /></h2>
+          <p class="section-subtitle">{t('common.totalRunning', { total: resourceCount('containers', app.containers.length), running: resourceCount('containers', runningCount()) })}</p>
         </div>
         <div class="section-actions">
-          <button type="button" class="btn-clear" onClick={clearStopped}>
+          <button type="button" class="btn-clear" disabled={!resourcesReady('containers') || !stoppedEditable() || app.actionBusy} onClick={clearStopped}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
-            {t('ctn.clearStopped', { n: stoppedEditable() })}
+            {t('ctn.clearStopped', { n: resourceCount('containers', stoppedEditable()) })}
           </button>
           <div class="seg" role="tablist" aria-label="filter">
             <button type="button" classList={{ active: !app.showAll }}
@@ -54,7 +54,9 @@ export default function Containers() {
         </div>
       </div>
 
-      <Show when={!pg().rows.length}>
+      <Show when={!resourcesReady('containers')}><p class="form-help" role="status">{app.loading ? t('data.loading') : t('data.unknown')}</p></Show>
+
+      <Show when={resourcesReady('containers') && !pg().rows.length}>
         <div class="empty-state">
           <div class="empty-state-title">{app.showAll ? t('ctn.emptyAll') : t('ctn.emptyRunning')}</div>
           <Show when={!app.showAll}>
@@ -66,7 +68,7 @@ export default function Containers() {
         </div>
       </Show>
 
-      <Show when={pg().rows.length}>
+      <Show when={resourcesReady('containers') && pg().rows.length}>
         <div class="table-panel">
         <table class="data-table tbl-containers">
           <thead><tr>
@@ -122,7 +124,7 @@ export default function Containers() {
         </div>
       </Show>
 
-      <Show when={pg().pages > 1}>
+      <Show when={resourcesReady('containers') && pg().pages > 1}>
         <div class="pagination">
           <button type="button" class="pg-btn" disabled={pg().page <= 1} onClick={() => setApp('page', 'containers', pg().page - 1)} aria-label={t('pg.prev')}>‹</button>
           <span>{t('pg.info', { p: pg().page, n: pg().pages, t: pg().total })}</span>

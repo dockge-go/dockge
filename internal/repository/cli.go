@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -52,7 +53,7 @@ func runCmd(ctx context.Context, cmd *exec.Cmd, dir string, timeout time.Duratio
 	old := cmd
 	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
 	cmd.Env, cmd.Dir = old.Env, old.Dir
-	ConfigureStreamingCommand(cmd, false)
+	group := newCommandProcessGroup(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -60,7 +61,10 @@ func runCmd(ctx context.Context, cmd *exec.Cmd, dir string, timeout time.Duratio
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		err = group.finish()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
 		name := filepath.Base(cmd.Path)
@@ -106,7 +110,7 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = outWriter, errWriter
-	setProcessGroup(cmd)
+	group := newCommandProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		outPipe.Close()
 		errPipe.Close()
@@ -138,7 +142,7 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 			readMu.Lock()
 			readErr = errors.Join(readErr, fmt.Errorf("读取命令输出失败（单行限制 1 MiB）: %w", err))
 			readMu.Unlock()
-			killProcessGroup(cmd)
+			group.kill()
 		}
 	}
 	wg.Add(2)
@@ -153,16 +157,16 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 		defer stopReading()
 		defer outPipe.Close()
 		defer errPipe.Close()
-		waited := make(chan error, 1)
-		go func() { waited <- cmd.Wait() }()
+		exited := make(chan error, 1)
+		go func() { exited <- group.waitForExit() }()
 		var waitErr error
 		select {
 		case <-ctx.Done():
-			killProcessGroup(cmd)
+			group.kill()
 			outPipe.Close()
 			errPipe.Close()
-			waitErr = <-waited
-		case waitErr = <-waited:
+			waitErr = <-exited
+		case waitErr = <-exited:
 		}
 		// 直接进程退出后仍给末尾输出留出读取时间；孙进程不能无限占用管道。
 		timer := time.NewTimer(2 * time.Second)
@@ -170,30 +174,86 @@ func streamCmd(ctx context.Context, cmd *exec.Cmd) (*commandStream, error) {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			killProcessGroup(cmd)
+			group.kill()
 			outPipe.Close()
 			errPipe.Close()
 			<-done
 		case <-timer.C:
 			// 管道关闭不会解除向满通道发送的阻塞，需独立停止读取者。
 			stopReading()
-			killProcessGroup(cmd)
+			group.kill()
 			outPipe.Close()
 			errPipe.Close()
 			<-done
 			waitErr = errors.Join(waitErr, fmt.Errorf("命令进程已退出但输出管道在 2s 内未结束（可能由子进程持有）: %w", exec.ErrWaitDelay))
 		}
+		// EOF 只表示描述符已关闭；组内仍可能有重定向输出的后台后代。
+		// Linux 此时组长尚未收尸，PGID 不会重用；其他平台已禁用迟到清理。
+		group.kill()
+		waitErr = errors.Join(waitErr, group.wait())
 		result.err = errors.Join(readErr, waitErr, ctx.Err())
 		close(ch)
 	}()
 	return result, nil
 }
 
-// ConfigureStreamingCommand 统一日志/终端的整组取消；PTY 自建 session，不能同时 Setpgid。
-func ConfigureStreamingCommand(cmd *exec.Cmd, usePTY bool) {
+// commandProcessGroup 将取消和最终清理串成一次操作。Linux 先杀组再收尸；
+// 不支持保留退出状态的平台只通过 os.Process 取消，不在收尸后按数字 PGID 杀组。
+type commandProcessGroup struct {
+	cmd    *exec.Cmd
+	once   sync.Once
+	waited bool // 仅等待协程写入，调用者收到退出结果后读取。
+}
+
+func newCommandProcessGroup(cmd *exec.Cmd) *commandProcessGroup {
+	return configureCommandProcessGroup(cmd, false)
+}
+
+func configureCommandProcessGroup(cmd *exec.Cmd, usePTY bool) *commandProcessGroup {
 	if !usePTY {
 		setProcessGroup(cmd)
 	}
-	cmd.Cancel = func() error { killProcessGroup(cmd); return nil }
+	group := &commandProcessGroup{cmd: cmd}
+	// 普通 exec.Command 不允许设置 Cancel；CommandContext 则必须覆盖默认的
+	// 单进程取消，避免其与最终整组清理独立触发。
+	if cmd.Cancel != nil {
+		cmd.Cancel = func() error { group.kill(); return nil }
+	}
 	cmd.WaitDelay = 2 * time.Second
+	return group
+}
+
+func (g *commandProcessGroup) kill() {
+	g.once.Do(func() { killCommandProcessGroup(g.cmd) })
+}
+
+// waitForExit 在支持非收尸等待的平台保留组长 PID，直到最终清理完成。
+func (g *commandProcessGroup) waitForExit() error {
+	waited, err := waitForProcessExit(g.cmd)
+	g.waited = waited
+	if waited || errors.Is(err, syscall.ECHILD) {
+		// 平台降级或外部已收尸时禁止迟到的数字 PID 清理。
+		g.once.Do(func() {})
+	}
+	return err
+}
+
+func (g *commandProcessGroup) wait() error {
+	if g.waited {
+		return nil
+	}
+	return g.cmd.Wait()
+}
+
+func (g *commandProcessGroup) finish() error {
+	err := g.waitForExit()
+	g.kill()
+	return errors.Join(err, g.wait())
+}
+
+// ConfigureStreamingCommand 统一日志、终端与自检的安全退出流程。
+// Start 成功后必须调用返回的等待函数而非 cmd.Wait；它先清组再收尸，
+// 并使完成后的重复 Cancel 无害。PTY 自建 session，不能同时 Setpgid。
+func ConfigureStreamingCommand(cmd *exec.Cmd, usePTY bool) func() error {
+	return configureCommandProcessGroup(cmd, usePTY).finish
 }

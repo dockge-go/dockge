@@ -1,5 +1,6 @@
 /* /v1 认证接口与浏览器会话存储。 */
 import { t } from '../i18n';
+import { requests } from './request-scope';
 
 export interface Session { username: string; role: 'admin'; exp: number }
 
@@ -51,7 +52,7 @@ let needSetupCache = true;
 async function authed<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const s = readSession();
   if (!s) throw new Error('bad-credentials');
-  return request<T>(path, { ...init, headers: { ...(init?.headers || {}), Authorization: 'Bearer ' + s.token } });
+  return requests.run(signal => request<T>(path, { ...init, signal, headers: { ...(init?.headers || {}), Authorization: 'Bearer ' + s.token } }), init?.signal);
 }
 
 interface LoginData { accessToken: string; expiresAt: number; user: { username: string; role: 'admin' } }
@@ -59,6 +60,7 @@ function toSession(data: LoginData): Session {
   const exp = data.expiresAt;
   if (!Number.isFinite(exp) || exp <= Date.now()) throw new Error(t('auth.invalidExpiry'));
   const s: SessionEnvelope = { token: data.accessToken, username: data.user.username, role: data.user.role, exp };
+  requests.cancel();
   writeSession(s);
   return { username: s.username, role: s.role, exp };
 }
@@ -100,7 +102,7 @@ export const AuthAPI = {
     return toSession(data);
   },
 
-  logout() { try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ } },
+  logout() { requests.cancel(); try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ } },
 
   /* username 参数忽略（走 /v1/me/password 自身）；成功即清会话——
    * 服务端 JWT 摘要绑定已使旧 token 失效，前端同步清包装回登录页。 */
@@ -132,10 +134,12 @@ export const AuthAPI = {
     if (!s) return null;
     try {
       const data = await authed<{username: string}>('/v1/me');
+      if (s.token !== this.token()) return null;
       const verified = {...s, username:data.username, role:'admin' as const};
       writeSession(verified);
       return {username:verified.username, role:verified.role, exp:verified.exp};
     } catch (e) {
+      if (s.token !== this.token()) return null;
       this.logout();
       throw e;
     }

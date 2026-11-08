@@ -27,13 +27,17 @@ import (
 	"time"
 )
 
+// 单用户面板仍允许多个窗口；限制独占 CLI 的长连接，避免进程耗尽。
+const maxTerminalStreams = 16
+
 var serviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // TerminalHandler 每个 SSE 连接独占进程，HTTP 上行只接受对应认证会话的输入。
 type TerminalHandler struct {
-	Repository *repository.Repository `do:""`
-	Auth       service.AuthService    `do:""`
-	sessions   sync.Map
+	Repository    *repository.Repository `do:""`
+	Auth          service.AuthService    `do:""`
+	sessions      sync.Map
+	activeStreams atomic.Int32
 }
 
 // NewTerminalHandler 注入终端依赖。
@@ -74,8 +78,25 @@ func resizeTerminal(master *os.File, rows, cols uint16) error {
 	return errors.Join(err, ioctlErr)
 }
 
+func (h *TerminalHandler) acquireStream() bool {
+	for {
+		active := h.activeStreams.Load()
+		if active >= maxTerminalStreams {
+			return false
+		}
+		if h.activeStreams.CompareAndSwap(active, active+1) {
+			return true
+		}
+	}
+}
+
 // Events 提供容器/栈日志与真实 PTY 输出，不把认证信息放入 URL。
 func (h *TerminalHandler) Events(ctx *gin.Context) {
+	if !h.acquireStream() {
+		v1.HandleError(ctx, http.StatusTooManyRequests, fmt.Errorf("日志与终端同时连接已达到上限 %d，请关闭其他日志或终端窗口后重试", maxTerminalStreams), nil)
+		return
+	}
+	defer h.activeStreams.Add(-1)
 	streamCtx, cancel := streamContext(ctx, h.Auth)
 	defer cancel()
 	ctx.Request = ctx.Request.WithContext(streamCtx)
@@ -243,7 +264,7 @@ func (h *TerminalHandler) Input(c *gin.Context) {
 func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY bool, cancel context.CancelFunc) {
 	s := newSSE(c)
 	ctx := c.Request.Context()
-	repository.ConfigureStreamingCommand(cmd, usePTY)
+	wait := repository.ConfigureStreamingCommand(cmd, usePTY)
 	var reader *os.File
 	var session *terminalSession
 	var id string
@@ -263,14 +284,14 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 		if _, err := rand.Read(bytes); err != nil {
 			_ = master.Close()
 			cancel()
-			_ = cmd.Wait()
+			_ = wait()
 			s.finish(err)
 			return
 		}
 		id = hex.EncodeToString(bytes)
 		if err := resizeTerminal(master, 24, 80); err != nil {
 			session.close()
-			_ = cmd.Wait()
+			_ = wait()
 			s.finish(fmt.Errorf("初始化终端窗口与非阻塞 I/O 失败: %w", err))
 			return
 		}
@@ -295,7 +316,7 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 	// Wait 与读输出并行：直接进程退出不等于后代已释放 stdout/PTY。
 	waitDone := make(chan struct{})
 	var waitErr error
-	go func() { waitErr = cmd.Wait(); close(waitDone) }()
+	go func() { waitErr = wait(); close(waitDone) }()
 	var readerDone chan struct{}
 	closeDone := make(chan struct{})
 	closeReader := context.AfterFunc(ctx, func() {
@@ -312,7 +333,7 @@ func (h *TerminalHandler) serveSession(c *gin.Context, cmd *exec.Cmd, usePTY boo
 		}
 		h.sessions.Delete(id)
 		cancel()
-		// Wait 已返回时 CommandContext 不再监听取消，仍需回收持有输出端的后代。
+		// 安全等待已完成时 Cancel 是无害的；未完成时负责终止整个进程组。
 		_ = cmd.Cancel()
 		_ = reader.Close()
 		if !closeReader() {

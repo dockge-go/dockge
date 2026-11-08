@@ -72,8 +72,10 @@ func (r *Repository) List(ctx context.Context) ([]model.Stack, error) {
 	return stacks, nil
 }
 
-// Get 只读取托管目录的真实文件；运行时不可达或配置损坏也必须保留编辑入口。
-func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) {
+// ReadStackConfig 只读取真实配置，供概览复用一次列表状态，避免逐栈启动运行时查询。
+func (r *Repository) ReadStackConfig(ctx context.Context, name string) (model.Stack, error) {
+	r.configMu.RLock()
+	defer r.configMu.RUnlock()
 	dir, files, err := r.resolveStackExec(ctx, name)
 	if err != nil {
 		return model.Stack{}, err
@@ -91,6 +93,15 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return model.Stack{}, fmt.Errorf("读取栈 %q 的环境文件 %s: %w", name, envPath, err)
 	}
+	return stack, nil
+}
+
+// Get 在真实配置之上加载容器详情；运行时失败不关闭配置编辑入口。
+func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) {
+	stack, err := r.ReadStackConfig(ctx, name)
+	if err != nil {
+		return model.Stack{}, err
+	}
 	if lsItems, err := r.ComposeLs(ctx); err == nil {
 		for _, item := range lsItems {
 			if item.Name == name {
@@ -98,7 +109,7 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 					stack.Status = StackStatusFromString(item.Status)
 				} else {
 					stack.Status = model.StatusUnknown
-					stack.RuntimeError = fmt.Sprintf("同名目录外项目配置 %q 不属于托管目录 %s", item.ConfigFiles, dir)
+					stack.RuntimeError = fmt.Sprintf("同名目录外项目配置 %q 不属于托管目录 %s", item.ConfigFiles, r.StackPath(name))
 				}
 				break
 			}
@@ -121,6 +132,8 @@ func (r *Repository) Get(ctx context.Context, name string) (model.Stack, error) 
 // Save 把 compose 文件写入栈目录；isAdd 时创建目录并拒绝重名，
 // 否则要求目录已存在。栈目录其余文件（如 .env 之外的挂载卷）不受影响。
 func (r *Repository) Save(ctx context.Context, stack *model.Stack, isAdd bool) (resultErr error) {
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

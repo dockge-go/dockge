@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,6 +57,12 @@ esac
 // newTestServer 装配与生产同构的服务（去掉 app.App 生命周期），返回 gin 引擎。
 func newTestServer(t *testing.T) *gin.Engine {
 	t.Helper()
+	srv, _ := newTestHTTPServer(t)
+	return srv.engine
+}
+
+func newTestHTTPServer(t *testing.T) (*HTTPServer, do.Injector) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	root := t.TempDir()
 	stub := stubCLI(t)
@@ -84,7 +91,7 @@ func newTestServer(t *testing.T) *gin.Engine {
 	)
 	t.Cleanup(func() { _ = injector.Shutdown() })
 	srv := do.MustInvoke[*HTTPServer](injector)
-	return srv.engine
+	return srv, injector
 }
 
 // call 发起一次请求并返回状态码与解析后的响应包。
@@ -414,5 +421,54 @@ func TestLoginForwardedHeadersCannotBypassLimit(t *testing.T) {
 		if w.Code != want {
 			t.Fatalf("第 %d 次伪造头请求=%d %s，期望 %d", n+1, w.Code, w.Body.String(), want)
 		}
+	}
+}
+
+// 生产装配的根 context 取消须使长连接在超时前退出，采样线程先于存储回收。
+func TestHTTPShutdownCancelsRequestsAndDependencySamplers(t *testing.T) {
+	s, injector := newTestHTTPServer(t)
+	entered, canceled := make(chan struct{}), make(chan struct{})
+	s.engine.GET("/shutdown-probe", func(c *gin.Context) {
+		close(entered)
+		<-c.Request.Context().Done()
+		close(canceled)
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serving := make(chan error, 1)
+	go func() { serving <- s.Server.Serve(listener) }()
+	clientDone := make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		res, err := http.Get("http://" + listener.Addr().String() + "/shutdown-probe")
+		if err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("长请求未进入")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	report := injector.ShutdownWithContext(ctx)
+	if !report.Succeed {
+		t.Fatalf("依赖关闭失败: %v", report)
+	}
+	select {
+	case <-canceled:
+	default:
+		t.Fatal("根 context 未取消")
+	}
+	select {
+	case <-clientDone:
+	case <-ctx.Done():
+		t.Fatal("客户端未退出")
+	}
+	if err := <-serving; !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve: %v", err)
 	}
 }

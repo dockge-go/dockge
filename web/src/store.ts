@@ -1,16 +1,21 @@
 import { LogReplay, type LogRecord } from './lib/log-replay';
 /* 资源与界面状态；资源操作以服务端响应为准。 */
-import { createSignal, createEffect, createMemo, createRoot } from 'solid-js';
-import { createStore, produce } from 'solid-js/store';
+import { batch, createSignal, createMemo } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import { t, setLang, lang } from './i18n';
 import { defaultCompose, Container, Image, Volume, Network, Stack } from './lib/data';
 import { ctrName, statusKind, formatBytes, timeAgo } from './lib/format';
 import { AuthAPI, Session, passwordProblem } from './lib/auth';
 import { yamlProblem, parseServices } from './lib/yaml';
 import { api, stream, events, terminalPath } from './lib/api';
-import { LogBuffer } from './lib/log-buffer';
-import { mergeStackRefresh, mergeStackListRefresh } from './lib/stack-refresh';
-import type { HostSystem } from './lib/system';
+import { FrameUpdate } from './lib/frame-update';
+import { LogBuffer, type LogLine } from './lib/log-buffer';
+import { TerminalBuffer } from './lib/terminal-output';
+import { LiveState } from './lib/live-state';
+import { DemandStream } from './lib/demand-stream';
+import { requests } from './lib/request-scope';
+import { mergeStackListRefresh } from './lib/stack-refresh';
+import { resourceKnown, type HostSystem } from './lib/system';
 
 const LS_THEME = 'dockge.theme';
 const PAGE_SIZE = 15;
@@ -98,7 +103,7 @@ export interface SheetState { open: boolean; kind: string | null; param: string 
 export interface DialogState {
   open: boolean; mode: 'confirm' | 'prompt'; message: string; value: string;
   placeholder: string; okLabel: string | null; danger: boolean; requireValue: boolean;
-  cb: ((value?: string) => void) | null;
+  cb: ((value: string) => void) | null;
 }
 
 export const [app, setApp] = createStore({
@@ -125,7 +130,7 @@ export const [app, setApp] = createStore({
   form: {} as Record<string, string>,
   authForm: { username: '', password: '', confirm: '', error: '', busy: false },
   pwForm: { current: '', next: '', confirm: '', error: '', busy: false },
-  logView: { kind: null as string | null, param: null as string | null, lines: [] as { id: string; raw: string }[], filter: '', follow: true, paused: false, timer: 0, connection: 'ended' }
+  logView: { kind: null as string | null, param: null as string | null, lines: [] as LogLine[], filter: '', follow: true, paused: false, connection: 'ended' }
 });
 
 /* ── 派生数据（UI 同步的根基） ── */
@@ -256,7 +261,7 @@ export function dialogOk() {
   if (d.mode === 'prompt' && d.requireValue && !v) { toast(t('toast.nameRequired'), 'error'); return; }
   setApp('dialog', 'open', false);
   setApp('dialog', 'cb', null);
-  if (d.cb) d.cb(d.mode === 'prompt' ? v : undefined);
+  if (d.cb) d.cb(d.mode === 'prompt' ? v : '');
 }
 export function dialogCancel() { setApp('dialog', 'open', false); setApp('dialog', 'cb', null); }
 
@@ -344,15 +349,25 @@ export async function changePassword() {
   }
 }
 /* ── Sheet ── */
+let historyRequest: AbortController | null = null;
 export function openSheet(kind: string, param?: string) {
   if (app.actionBusy) return;
   closeSheet();
-  setApp('form', {});
+  setApp('form', reconcile({}));
   setApp('sheet', { open: true, kind, param: param ?? null });
-  if (kind === 'history') { setImageHistoryLayers([]); const token = AuthAPI.token(); void api<HistoryLayer[]>('/resources/images/' + encodeURIComponent(param!) + '/history').then(rows => { if (token === AuthAPI.token() && app.sheet.kind === kind && app.sheet.param === param) setImageHistoryLayers(rows); }).catch(e => toast((e as Error).message, 'error')); }
+  if (kind === 'history') {
+    setImageHistoryLayers([]);
+    const token = AuthAPI.token(), controller = new AbortController();
+    historyRequest = controller;
+    const current = () => !controller.signal.aborted && token === AuthAPI.token() && historyRequest === controller;
+    void api<HistoryLayer[]>('/resources/images/' + encodeURIComponent(param!) + '/history', {signal:controller.signal})
+      .then(rows => { if (current()) setImageHistoryLayers(rows); })
+      .catch(e => { if (current()) toast((e as Error).message, 'error'); });
+  }
   if (kind === 'logs' || kind === 'stackLogs' || kind === 'serviceLogs') openLog(kind, param!);
 }
 export function closeSheet() {
+  historyRequest?.abort(); historyRequest = null;
   setApp('sheet', 'open', false);
   setApp('sheet', 'kind', null);
   setApp('sheet', 'param', null);
@@ -376,47 +391,51 @@ export function sheetTitle(): string {
 }
 interface HistoryLayer { id: string; cmd: string; size: string }
 export const [imageHistoryLayers, setImageHistoryLayers] = createSignal<HistoryLayer[]>([]);
-let logController: AbortController | null = null;
+let logStream: DemandStream | null = null;
 let resetLogBuffer = () => {};
-let logGeneration = 0, logSeq = 0;
+function logRequested(kind: string, param: string): boolean {
+  return !!user() && document.visibilityState !== 'hidden' && app.sheet.open && app.sheet.kind === kind && app.sheet.param === param;
+}
 export function openLog(kind: string, param: string) {
   stopLog(); setPausedLog([]);
-  setApp('logView', { kind, param, lines: [], filter: '', follow: true, paused: false, timer: 0, connection: 'connecting' });
-  const generation = logGeneration;
-  const buffer = new LogBuffer(), replay = new LogReplay(); resetLogBuffer = () => buffer.clear();
+  setApp('logView', { kind, param, lines: [], filter: '', follow: true, paused: false, connection: 'connecting' });
+  const buffer = new LogBuffer(), replay = new LogReplay();
+  const drawing = new FrameUpdate(() => {
+    if (!logRequested(kind, param)) return;
+    setApp('logView', 'lines', reconcile(buffer.snapshot(), {key:'id'}));
+    scrollLogEnd();
+  });
+  resetLogBuffer = () => { drawing.cancel(); buffer.clear(); };
   const append = (text: string) => {
-    const rows = buffer.push(text);
-    setApp('logView', 'lines', rows.map(raw => ({ id: String(++logSeq), raw })));
-    requestAnimationFrame(scrollLogEnd);
+    if (!text) return;
+    buffer.push(text); drawing.schedule();
   };
-  const connect = () => {
-    if (generation !== logGeneration || !user()) return;
-    let name = param, type = 'container-logs'; const extra: Record<string,string> = {};
-    if (kind === 'stackLogs') { name = app.stacks.find(s => s.id === param)?.name || param; type = 'compose-logs'; }
-    if (kind === 'serviceLogs') { const p = param.split('||'); name = p[0]; extra.service = p[1]; type = 'compose-logs'; }
-    const controller = new AbortController(); logController = controller;
-    const since = replay.begin();
-    if (since) { extra.since = since; extra.tail = 'all'; }
-    void events(terminalPath(name, type, extra), ({event, data}) => {
-      if (generation !== logGeneration) return;
-      if (event === 'ready') setApp('logView', 'connection', 'live');
-      if (event === 'log') append(replay.push(data as LogRecord));
-      if (event === 'error') throw new Error(String(data));
-    }, controller.signal).catch(e => {
-      if (generation === logGeneration && !controller.signal.aborted) append('\n' + (e as Error).message + '\n');
-    }).finally(() => {
-      if (generation !== logGeneration) return;
-      setApp('logView', 'connection', 'ended');
-      setApp('logView', 'timer', window.setTimeout(connect, 3000));
-    });
-  };
-  connect();
+  logStream = new DemandStream({
+    active: () => logRequested(kind, param),
+    state: connection => setApp('logView', 'connection', connection),
+    failed: error => append('\n' + error.message + '\n'),
+    connect: signal => {
+      let name = param, type = 'container-logs'; const extra: Record<string,string> = {};
+      if (kind === 'stackLogs') { name = app.stacks.find(s => s.id === param)?.name || param; type = 'compose-logs'; }
+      if (kind === 'serviceLogs') { const p = param.split('||'); name = p[0]; extra.service = p[1]; type = 'compose-logs'; }
+      const since = replay.begin();
+      if (since) { extra.since = since; extra.tail = 'all'; }
+      return events(terminalPath(name, type, extra), ({event, data}) => {
+        if (signal.aborted || !logRequested(kind, param)) return;
+        if (event === 'ready') setApp('logView', 'connection', 'live');
+        if (event === 'log') append(replay.push(data as LogRecord));
+        if (event === 'error') throw new Error(String(data));
+      }, signal);
+    },
+  });
+  logStream.start();
 }
 export function stopLog() {
-  ++logGeneration; clearTimeout(app.logView.timer);
-  logController?.abort(); logController = null;
-  setApp('logView', 'connection', 'ended');
+  logStream?.stop(); logStream = null;
+  resetLogBuffer(); resetLogBuffer = () => {}; setPausedLog([]);
+  setApp('logView', {connection:'ended', lines:[]});
 }
+
 export const logFiltered = createMemo(() => {
   const q = app.logView.filter.trim().toLowerCase();
   const lines = app.logView.paused ? pausedLog() : app.logView.lines;
@@ -428,8 +447,8 @@ export function logLevelClass(line: string): string {
   if (/\bWARN\b/.test(line)) return 'log-lv-warn';
   return 'log-lv-info';
 }
-const [pausedLog, setPausedLog] = createSignal<{ id:string; raw:string }[]>([]);
-export function toggleLogPause() { setPausedLog(app.logView.lines.slice()); setApp('logView', 'paused', !app.logView.paused); }
+const [pausedLog, setPausedLog] = createSignal<LogLine[]>([]);
+export function toggleLogPause() { setPausedLog(app.logView.lines.map(l => ({id:l.id, raw:l.raw}))); setApp('logView', 'paused', !app.logView.paused); }
 export function clearLog() { resetLogBuffer(); setPausedLog([]); setApp('logView', 'lines', []); }
 export function scrollLogEnd() {
   if (!app.logView.follow) return;
@@ -476,8 +495,15 @@ const action = (kind: string, id: string, op: string, value?: string) => api<{ou
 export function containerAction(id: string, op: 'start'|'stop'|'restart') { void perform(() => action('containers', id, op)); }
 export function removeContainer(id: string) { const c=app.containers.find(c=>c.Id===id); confirmDlg(t('confirm.deleteContainerScope', {name:c ? ctrName(c) : id}), () => { void perform(() => action('containers', id, 'delete'), t('toast.containerRemoved')); }); }
 async function removeBatch(kind: string, ids: string[]) {
+  const token = AuthAPI.token();
+  const checkSession = () => { if (!token || token !== AuthAPI.token()) throw new DOMException('Session ended', 'AbortError'); };
   const failures: string[] = []; let removed = 0;
-  for (const id of ids) { try { await action(kind,id,'delete'); removed++; } catch(e) { failures.push(id + ': ' + (e as Error).message); } }
+  for (const id of ids) {
+    checkSession();
+    try { await action(kind,id,'delete'); checkSession(); removed++; }
+    catch(e) { checkSession(); if (e instanceof DOMException && e.name === 'AbortError') throw e; failures.push(id + ': ' + (e as Error).message); }
+  }
+  checkSession();
   if (failures.length) throw new Error(t('data.batchResult', {removed, failed:failures.length}) + '\n' + failures.join('\n'));
   toast(t('data.batchResult', {removed, failed:0}), 'success');
 }
@@ -500,21 +526,21 @@ export function stackAction(id: string, op?: string) {
   const s = app.stacks.find(s => s.id === id); if (s) void runStack(id, op || (s.status === 'up' ? 'stop' : 'start'), false);
 }
 export async function removeStack(id: string) {
+  const token = AuthAPI.token();
   try {
-    const token = AuthAPI.token();
     const plan = await api<DeletePlan>('/stacks/' + encodeURIComponent(id) + '/delete-plan');
     if (token !== AuthAPI.token()) return;
     if (plan.blockers.length) { toast(plan.blockers.join('\n'), 'error'); return; }
     const summary = t('stack.deleteScope', { directory:plan.directory, containers:plan.containers.length, volumes:plan.volumes.length, networks:plan.networks.length, images:plan.images.length }) + (plan.retained.length ? '\n' + t('stack.retained') + '\n' + plan.retained.join('\n') : '');
-    confirmDlg(summary, () => { void perform(async () => {
+    confirmDlg(summary, () => { if (token !== AuthAPI.token()) return; void perform(async () => {
       const result = await api<{output:string}>('/stacks/' + encodeURIComponent(id), {method:'DELETE'});
       if (token === AuthAPI.token() && result.output) toast(result.output, 'info');
     }, t('toast.stackRemoved')); });
-  } catch(e) { toast((e as Error).message, 'error'); }
+  } catch(e) { if (token === AuthAPI.token()) toast((e as Error).message, 'error'); }
 }
 interface DeletePlan { directory:string; containers:string[]; volumes:string[]; networks:string[]; images:string[]; retained:string[]; blockers:string[] }
-async function saveDraft(id: string, yaml: string, env: string) {
-  await api('/stacks/' + encodeURIComponent(id), { method:'PUT', body:JSON.stringify({name:id, yaml, env}) });
+async function saveDraft(id: string, yaml: string, env: string, signal?: AbortSignal) {
+  await api('/stacks/' + encodeURIComponent(id), { method:'PUT', signal, body:JSON.stringify({name:id, yaml, env}) });
 }
 export async function saveStack(id: string) {
   const s = app.stacks.find(s => s.id === id); if (!s || !s.managed || s.busy) return;
@@ -532,26 +558,37 @@ async function runStack(id: string, op: string, save: boolean) {
   if (save) { const problem = yamlProblem(submitted); if (problem) { toast(problem.msg, 'error'); return; } }
   const controller = new AbortController(); streams.add(controller);
   setApp('stacks', s => s.id === id, {busy:true, deployLog:[]});
-  let output = '';
+  const output = new TerminalBuffer(); let rows: string[] = [];
+  const drawing = new FrameUpdate(() => {
+    if (token !== AuthAPI.token()) return;
+    setApp('stacks', s => s.id === id, 'deployLog', rows);
+    const el = document.getElementById('wb-terminal'); if (el) el.scrollTop = el.scrollHeight;
+  });
   try {
-    if (save) { await saveDraft(id, submitted, env); if (token === AuthAPI.token()) setApp('stacks', s => s.id === id, {savedCompose:submitted, savedEnv:env}); }
+    if (save) { await saveDraft(id, submitted, env, controller.signal); }
+    if (controller.signal.aborted || token !== AuthAPI.token()) return;
+    if (save) setApp('stacks', s => s.id === id, {savedCompose:submitted, savedEnv:env});
     await stream('/stacks/' + encodeURIComponent(id) + '/' + op, text => {
       if (token !== AuthAPI.token()) return;
-      output += text; setApp('stacks', s => s.id === id, 'deployLog', output.split('\n'));
-      requestAnimationFrame(() => { const el = document.getElementById('wb-terminal'); if (el) el.scrollTop = el.scrollHeight; });
+      rows = output.push(text); drawing.schedule();
     }, undefined, controller.signal);
     if (token === AuthAPI.token()) { toast(t('toast.deployDone'), 'success'); }
   } catch(e) { if (token === AuthAPI.token()) toast((e as Error).message, 'error'); }
-  finally { streams.delete(controller); if (token === AuthAPI.token()) { setApp('stacks', s => s.id === id, 'busy', false); await freshData(); } }
+  finally { drawing.flush(); streams.delete(controller); if (token === AuthAPI.token()) { setApp('stacks', s => s.id === id, 'busy', false); await freshData(); } }
 }
 export function deployStack(id: string) { void runStack(id, 'start', true); }
 
 /* 镜像、卷、网络操作都由运行时决定结果；禁止 force/prune 绕过共享引用。 */
 export async function pullImage() {
   const ref = app.form.imageRef?.trim(); if (!ref) return;
-  const token = AuthAPI.token(), controller = new AbortController(); streams.add(controller); setApp('form', 'output', '');
-  try { await perform(() => stream('/images/pull', text => { if (token === AuthAPI.token()) setApp('form', 'output', old => (old || '') + text); }, {image:ref}, controller.signal), t('toast.pulled', {name:ref})); }
-  finally { streams.delete(controller); }
+  const token = AuthAPI.token(), controller = new AbortController(), output = new TerminalBuffer(); streams.add(controller); setApp('form', 'output', '');
+  let rows: string[] = [];
+  const drawing = new FrameUpdate(() => { if (token === AuthAPI.token()) setApp('form', 'output', rows.join('\n')); });
+  try { await perform(async () => {
+    try { await stream('/images/pull', text => { if (token === AuthAPI.token()) { rows = output.push(text); drawing.schedule(); } }, {image:ref}, controller.signal); }
+    finally { drawing.flush(); }
+  }, t('toast.pulled', {name:ref})); }
+  finally { drawing.cancel(); streams.delete(controller); }
 }
 export async function tagImage(id: string) {
   if (await perform(() => action('images', id, 'tag', app.form.newTag?.trim()), t('toast.tagged', {name:app.form.newTag || ''}))) closeSheet();
@@ -579,69 +616,80 @@ export function sysdfPrune(key: string) {
 interface DiskRow {key:string; used:string; reclaim:string; count:number; reclaimBytes:number; reclaimKnown:boolean}
 interface Snapshot { containers:Container[]; images:Image[]; volumes:Volume[]; networks:Network[]; info:Record<string,string>; disk:DiskRow[]; errors:Record<string,string>; runtime:string }
 interface StackDTO {name:string; status:number; managed:boolean; configFiles?:string; yaml?:string; env?:string; runtimeError?:string; loadError?:string}
-interface LiveSnapshot { resources:Snapshot; stacks:StackDTO[]; health:{version:string; runtime:{cli:string; compose:string; ready:boolean; error?:string; stacks:{path:string; writable:boolean; error?:string}}} }
-let refreshGeneration = 0;
-let refreshPromise: Promise<void> | null = null;
-let liveController: AbortController | null = null;
-let liveTimer = 0;
-let settleRefresh: (() => void) | null = null;
-async function freshData() { stopLiveData(); await refreshData(); }
+interface LiveSnapshot { revision:number; resources:Snapshot; stacks:StackDTO[]; health:{version:string; runtime:{cli:string; compose:string; ready:boolean; error?:string; stacks:{path:string; writable:boolean; error?:string}}} }
+async function freshData() { await liveState.refresh(true); }
 function stopLiveData() {
-  ++refreshGeneration; clearTimeout(liveTimer); liveController?.abort(); liveController = null;
-  settleRefresh?.(); settleRefresh = null; refreshPromise = null;
+  liveState.stop();
+  setApp('errors', 'request', t('data.reconnecting'));
+  setApp({system:null, systemReceivedAt:0});
 }
+// 未采到、断线或查询失败都不是零；各入口使用相同的新鲜度判断。
+export function resourcesReady(kind: string): boolean { return resourceKnown(app.loading, app.errors, kind); }
+export function resourceCount(kind: string, value: number): string { return resourcesReady(kind) ? String(value) : '—'; }
 function applySnapshot(snapshot: LiveSnapshot) {
-  const r = snapshot.resources, errors = {...r.errors}, h = snapshot.health;
-  setApp({containers:r.containers || [], images:r.images || [], volumes:r.volumes || [], networks:r.networks || [], info:r.info, disk:r.disk, runtime:r.runtime});
-  setApp('version', h.version);
-  setApp('deployment', h.runtime.cli + ' / ' + h.runtime.compose + ' · ' + h.runtime.stacks.path);
-  if (!h.runtime.ready) errors.runtime = h.runtime.error || t('data.unknown');
-  if (!h.runtime.stacks.writable) errors.stacksDirectory = h.runtime.stacks.error || t('data.unknown');
-  if (!errors.stacks) {
-    const rows = mergeStackListRefresh(snapshot.stacks.map(d => {
-      const incoming: Stack = {id:d.name, name:d.name, compose_path:d.configFiles || '', status:stackStatus(d.status), compose:d.yaml || '', savedCompose:d.yaml || '', env:d.env || '', savedEnv:d.env || '', managed:d.managed, deployLog:[], busy:false, loadError:d.loadError || '', runtimeError:d.runtimeError || ''};
-      return incoming;
-    }), app.stacks);
-    setApp('stacks',rows);
-    if (!rows.some(s => s.id === app.selectedStack)) setApp('selectedStack',rows[0]?.id || null);
-  }
-  setApp('errors',errors); setApp('refreshedAt',Date.now()); setApp('loading',false);
-}
-// 手动刷新与操作完成都重连同一个 SSE；不并行保留 HTTP 轮询。
-export function refreshData(): Promise<void> {
-  if (!user() || document.visibilityState === 'hidden') return Promise.resolve();
-  if (refreshPromise) return refreshPromise;
-  stopLiveData();
-  const token = AuthAPI.token(), generation = refreshGeneration, controller = new AbortController();
-  liveController = controller;
-  refreshPromise = new Promise<void>(resolve => { settleRefresh = resolve; });
-  const initial = refreshPromise;
-  const settle = () => { settleRefresh?.(); settleRefresh = null; refreshPromise = null; };
-  void events('/events',({event,data}) => {
-    if (generation !== refreshGeneration || token !== AuthAPI.token()) return;
-    if (event === 'snapshot') { applySnapshot(data as LiveSnapshot); settle(); }
-    if (event === 'system') setApp({system:data as HostSystem,systemReceivedAt:Date.now(),systemError:''});
-    if (event === 'error') throw new Error(String(data));
-  },controller.signal).catch(e => {
-    if (generation === refreshGeneration && !controller.signal.aborted) setApp({errors:{request:(e as Error).message},loading:false,system:null,systemError:(e as Error).message});
-  }).finally(() => {
-    if (generation !== refreshGeneration) return;
-    // 正常 EOF 也表示订阅已失联，不能继续展示为有效实时快照。
-    setApp('errors','request',app.errors.request || t('data.reconnecting'));
-    setApp({system:null,systemReceivedAt:0,loading:false}); settle(); liveController = null;
-    liveTimer = window.setTimeout(() => { if (user()) void refreshData(); },3000);
+  batch(() => {
+    const r = snapshot.resources, errors = {...r.errors}, h = snapshot.health;
+    setApp('containers', reconcile(r.containers || [], {key:'Id'}));
+    setApp('images', reconcile(r.images || [], {key:'Id'}));
+    setApp('volumes', reconcile(r.volumes || [], {key:'Name'}));
+    setApp('networks', reconcile(r.networks || [], {key:'ID'}));
+    setApp('disk', reconcile(r.disk, {key:'key'})); setApp('runtime',r.runtime);
+    setApp('info', reconcile(r.info));
+    setApp('version', h.version);
+    setApp('deployment', h.runtime.cli + ' / ' + h.runtime.compose + ' · ' + h.runtime.stacks.path);
+    if (!h.runtime.ready) errors.runtime = h.runtime.error || t('data.unknown');
+    if (!h.runtime.stacks.writable) errors.stacksDirectory = h.runtime.stacks.error || t('data.unknown');
+    if (!errors.stacks) {
+      const rows = mergeStackListRefresh(snapshot.stacks.map(d => {
+        const incoming: Stack = {id:d.name, name:d.name, compose_path:d.configFiles || '', status:stackStatus(d.status), compose:d.yaml || '', savedCompose:d.yaml || '', env:d.env || '', savedEnv:d.env || '', managed:d.managed, deployLog:[], busy:false, loadError:d.loadError || '', runtimeError:d.runtimeError || ''};
+        return incoming;
+      }), app.stacks);
+      setApp('stacks',reconcile(rows, {key:'id'}));
+      if (!rows.some(s => s.id === app.selectedStack)) setApp('selectedStack',rows[0]?.id || null);
+    }
+    // 最新错误集合必须替换，不能保留已恢复的断线或来源错误。
+    setApp('errors',reconcile(errors)); setApp('refreshedAt',Date.now()); setApp('loading',false);
   });
-  return initial;
 }
+// 实时数据只覆盖当前状态，刷新和操作完成复用现有连接。
+const liveState = new LiveState({
+  active: () => !!user() && document.visibilityState !== 'hidden',
+  connect: (receive, signal) => events('/events', receive, signal),
+  requestRefresh: signal => api<{revision:number}>('/events/refresh', {method:'POST', signal}),
+  receive: ({event, data}) => {
+    if (event === 'snapshot') applySnapshot(data as LiveSnapshot);
+    if (event === 'system') {
+      setApp('system',reconcile(data as HostSystem));
+      setApp({systemReceivedAt:Date.now(),systemError:''});
+    }
+    if (event === 'error') throw new Error(String(data));
+  },
+  disconnected: error => {
+    setApp('errors','request',error?.message || t('data.reconnecting'));
+    setApp({system:null,systemReceivedAt:0,systemError:error?.message || '',loading:false});
+  },
+});
+export function refreshData(): Promise<void> { return liveState.refresh(); }
 function stackStatus(n: number): Stack['status'] { return n === 3 ? 'up' : n === 0 ? 'unknown' : 'down'; }
 function endDataSession() {
+  requests.cancel();
   stopLiveData();
   streams.forEach(c => c.abort()); streams.clear();
-  setApp({system:null, systemReceivedAt:0, systemError:'', containers:[], images:[], volumes:[], networks:[], stacks:[], info:{}, disk:[], errors:{}, selectedStack:null, detailId:null, loading:true, actionBusy:false, version:'', deployment:'', refreshedAt:0, form:{}, pwForm:{current:'',next:'',confirm:'',error:'',busy:false}});
+  setApp({system:null, systemReceivedAt:0, systemError:'', containers:[], images:[], volumes:[], networks:[], stacks:[], disk:[], selectedStack:null, detailId:null, loading:true, actionBusy:false, version:'', deployment:'', refreshedAt:0, pwForm:{current:'',next:'',confirm:'',error:'',busy:false}});
+  setApp('errors',reconcile({}));
+  setApp('info',reconcile({}));
+  setApp('form',reconcile({}));
   setImageHistoryLayers([]);
 }
 void bootstrapAuth().then(() => { if (user()) void refreshData(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopLiveData(); else if (user()) void refreshData(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { stopLiveData(); stopLog(); }
+  else if (user()) {
+    void refreshData();
+    const {open, kind, param} = app.sheet;
+    if (open && param && (kind === 'logs' || kind === 'stackLogs' || kind === 'serviceLogs')) openLog(kind, param);
+  }
+});
 window.addEventListener('storage', e => {
  if (e.key !== 'crate_token') return;
  closeSheet(); dialogCancel(); endDataSession(); setToasts([]);

@@ -324,8 +324,14 @@ func TestTerminalDirectExitBoundsInheritedOutputPipe(t *testing.T) {
 	awaitTerminalEvent(t, writer.frames, "ready")
 	select {
 	case <-ended:
-		if !strings.Contains(writer.Body.String(), exec.ErrWaitDelay.Error()) {
-			t.Fatalf("丢失管道回收原因: %s", writer.Body.String())
+		if !strings.Contains(writer.Body.String(), "event: done") || strings.Contains(writer.Body.String(), "event: error") {
+			t.Fatalf("正常退出未完成安全清理: %s", writer.Body.String())
+		}
+		if cmd.ProcessState == nil {
+			t.Fatal("终端退出后组长未收尸")
+		}
+		if err := cmd.Cancel(); err != nil {
+			t.Fatalf("完成后重复取消失败: %v", err)
 		}
 	case <-time.After(3 * time.Second):
 		cancel()

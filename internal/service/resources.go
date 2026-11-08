@@ -122,3 +122,8 @@ func (s *ResourceService) History(ctx context.Context, id string) ([]map[string]
 func (s *ResourceService) System(ctx context.Context) *v1.HostSystem {
 	return s.repo.HostSystem(ctx)
 }
+
+// RuntimeStatus 将运行时自检留在用例层，传输层只负责编码与连接生命周期。
+func (s *ResourceService) RuntimeStatus(ctx context.Context) repository.RuntimeStatus {
+	return s.repo.Preflight(ctx)
+}

@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import { sysdfRows, sysdfPrune, refreshData, app, t } from '../store';
+import { sysdfRows, sysdfPrune, refreshData, app, t, resourcesReady } from '../store';
 
 export default function SysDf() {
   return (
@@ -12,6 +12,7 @@ export default function SysDf() {
         <button type="button" class="btn btn-secondary" disabled={app.loading} onClick={() => void refreshData()}>{t('common.refresh')}</button>
       </div>
       <Show when={app.errors.disk}><p class="auth-error">{app.errors.disk}</p></Show>
+      <Show when={resourcesReady('disk')} fallback={<p class="form-help" role="status">{app.loading ? t('data.loading') : t('data.unknown')}</p>}>
       <div class="table-panel"><table class="data-table">
         <thead><tr>
           <th>{t('th.type')}</th><th>{t('th.used')}</th><th>{t('th.reclaimable')}</th><th style="width:100px" />
@@ -37,6 +38,7 @@ export default function SysDf() {
           )}</For>
         </tbody>
       </table></div>
+      </Show>
     </div>
   );
 }

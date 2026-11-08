@@ -58,6 +58,14 @@ type StackListData struct {
 	List []StackSummaryData `json:"list"`
 }
 
+// StackConfigData 在概览中保留编辑配置与真实状态，不携带按需容器详情。
+type StackConfigData struct {
+	StackSummaryData
+	Yaml      string `json:"yaml"`
+	Env       string `json:"env"`
+	LoadError string `json:"loadError,omitempty"`
+}
+
 type StackDetailData struct {
 	Name            string           `json:"name"`
 	Status          int              `json:"status"`

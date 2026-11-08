@@ -1,6 +1,6 @@
 import { For, Show, createEffect, lazy } from 'solid-js';
 import {
-  app, setApp, openSheet, closeSheet, sheetTitle, imageHistoryLayers,
+  app, setApp, closeSheet, sheetTitle, imageHistoryLayers,
   createContainer, pullImage, createVolume, createNetwork, tagImage,
   logFiltered, logLevelClass, logScroll, toggleLogPause, clearLog, copyLog,
   t
@@ -40,7 +40,7 @@ export default function Sheet() {
 
   return (
     <div class="sheet-overlay" classList={{ open: app.sheet.open }} aria-hidden={!app.sheet.open} inert={!app.sheet.open} onClick={e => { if (e.target === e.currentTarget) closeSheet(); }}>
-      <div class="sheet" role="dialog" aria-modal="true" aria-label={sheetTitle()}>
+      <div class="sheet" classList={{ 'sheet-stream': ['logs', 'stackLogs', 'serviceLogs', 'terminal'].includes(kind() || '') }} role="dialog" aria-modal="true" aria-label={sheetTitle()}>
         <div class="sheet-header">
           <h2 class="sheet-title">{sheetTitle()}</h2>
           <button type="button" class="btn-icon" disabled={app.actionBusy} onClick={closeSheet} aria-label={t('common.close')}>
@@ -121,7 +121,7 @@ export default function Sheet() {
 
           <Show when={kind() === 'logs' || kind() === 'stackLogs' || kind() === 'serviceLogs'}>
             <div class="log-toolbar">
-              <input class="form-input log-filter" value={app.logView.filter} placeholder={t('log.filterPh')}
+              <input aria-label={t('log.filterPh')} class="form-input log-filter" value={app.logView.filter} placeholder={t('log.filterPh')}
                      onInput={e => setApp('logView', 'filter', e.currentTarget.value)} />
               <button type="button" class="btn btn-secondary log-tool-btn" onClick={toggleLogPause}>
                 {app.logView.paused ? t('log.resume') : t('log.pause')}
@@ -144,7 +144,7 @@ export default function Sheet() {
             </div>
           </Show>
 
-          <Show when={kind() === 'terminal' && app.sheet.param}>
+          <Show when={app.sheet.open && kind() === 'terminal' && app.sheet.param}>
             <TerminalPane containerID={app.sheet.param!} />
           </Show>
 

@@ -188,3 +188,31 @@ func TestStreamCmdPreservesAllOutputOnExit(t *testing.T) {
 		t.Fatalf("输出行数=%d，期望8000", len(seen))
 	}
 }
+
+func TestRunCmdPreservesAllOutputOnExit(t *testing.T) {
+	for _, exitCode := range []int{0, 7} {
+		t.Run(fmt.Sprintf("exit-%d", exitCode), func(t *testing.T) {
+			body := fmt.Sprintf(`i=0; while [ $i -lt 4000 ]; do printf 'out-%%s\n' "$i"; printf 'err-%%s\n' "$i" >&2; i=$((i+1)); done; exit %d`, exitCode)
+			out, err := runCmd(context.Background(), exec.Command("sh", "-c", body), "", 5*time.Second, []string{"test"})
+			if (err != nil) != (exitCode != 0) {
+				t.Fatalf("exit=%d err=%v", exitCode, err)
+			}
+			seen := make(map[string]int)
+			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+				seen[line]++
+			}
+			prefixes := []string{"out"}
+			if exitCode != 0 {
+				prefixes = append(prefixes, "err")
+			}
+			for i := range 4000 {
+				for _, prefix := range prefixes {
+					line := fmt.Sprintf("%s-%d", prefix, i)
+					if seen[line] != 1 {
+						t.Fatalf("输出截断或重复: %q 出现 %d 次", line, seen[line])
+					}
+				}
+			}
+		})
+	}
+}

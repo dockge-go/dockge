@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	nethttp "net/http"
 	"strings"
 	"time"
@@ -47,9 +48,10 @@ type HTTPServer struct {
 
 	EventsHandler *handler.EventsHandler `do:""`
 
-	engine  *gin.Engine
-	tlsCert string // ssl_cert, 空表示 HTTP
-	tlsKey  string // ssl_key, 空表示 HTTP
+	cancelRequests context.CancelFunc
+	engine         *gin.Engine
+	tlsCert        string // ssl_cert, 空表示 HTTP
+	tlsKey         string // ssl_key, 空表示 HTTP
 	*nethttp.Server
 }
 
@@ -76,10 +78,12 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	// SPA shell（index.html 及无扩展名路径）禁止缓存；/assets 下的文件
+	// API 不存储响应，SPA shell 每次回源；/assets 下的文件
 	// 文件名自带内容 hash，可长期缓存。否则发版后浏览器继续跑旧 bundle。
 	engine.Use(func(c *gin.Context) {
-		if !strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+			c.Header("Cache-Control", "no-store")
+		} else if !strings.HasPrefix(c.Request.URL.Path, "/assets/") {
 			c.Header("Cache-Control", "no-cache")
 		}
 		c.Next()
@@ -135,6 +139,7 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 			strictAuthRouter.POST("/me/disableauth", s.AuthHandler.ToggleDisableAuth)
 
 			strictAuthRouter.GET("/events", s.EventsHandler.Events)
+			strictAuthRouter.POST("/events/refresh", s.EventsHandler.Refresh)
 			strictAuthRouter.GET("/resources", s.ResourceHandler.Snapshot)
 			strictAuthRouter.GET("/system", s.ResourceHandler.System)
 			strictAuthRouter.POST("/resources/:kind", s.ResourceHandler.Create)
@@ -168,9 +173,12 @@ func NewHTTPServer(i do.Injector) (*HTTPServer, error) {
 	}
 
 	s.engine = engine
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	s.cancelRequests = cancelRequests
 	s.Server = &nethttp.Server{
-		Addr:    fmt.Sprintf("%s:%d", s.Config.GetString("http.host"), s.Config.GetInt("http.port")),
-		Handler: engine,
+		BaseContext: func(net.Listener) context.Context { return requestCtx },
+		Addr:        fmt.Sprintf("%s:%d", s.Config.GetString("http.host"), s.Config.GetInt("http.port")),
+		Handler:     engine,
 		// 防御慢速连接与空闲连接堆积；不设 Read/Write 超时——
 		// 栈操作是长时流式响应、终端是 SSE，均需长连接。
 		ReadHeaderTimeout: 10 * time.Second,
@@ -200,6 +208,10 @@ func (s *HTTPServer) Start() error {
 
 // Shutdown 实现 do.ShutdownerWithContextAndError，容器关闭时被调用。
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
+	// 长连接必须先取消，否则 Shutdown 会等待 SSE/PTY 直到外层超时。
+	if s.cancelRequests != nil {
+		s.cancelRequests()
+	}
 	if err := s.Server.Shutdown(ctx); err != nil {
 		// Shutdown 超时并不会关闭活动连接；先终止请求再允许容器回收依赖。
 		if closeErr := s.Server.Close(); closeErr != nil {

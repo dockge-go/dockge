@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"go.etcd.io/bbolt"
+	"github.com/samber/do/v2"
+	"github.com/spf13/viper"
 
 	"dockge/internal/model"
 	"dockge/internal/repository"
@@ -20,15 +21,20 @@ func hashBcryptForTest(pw string) string {
 // newTestAuthRepo 在临时文件上建库并种入 admin 用户，供 service 层测试直接构造 authService。
 func newTestAuthRepo(t *testing.T) (*repository.Repository, uint) {
 	t.Helper()
-	db, err := bbolt.Open(t.TempDir()+"/test.db", 0o600, nil)
+	conf := viper.New()
+	conf.Set("data.db.user.dsn", t.TempDir()+"/test.db")
+	injector := do.New()
+	do.ProvideValue(injector, conf)
+	db, err := repository.NewBBolt(injector)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := repository.InitBuckets(db); err != nil {
+	do.ProvideValue(injector, db)
+	repo, err := repository.New(injector)
+	if err != nil {
 		t.Fatal(err)
 	}
-	repo := repository.NewRepositoryForTest(db)
 	seed := &model.DockgeUser{Username: "admin", Password: "x", Role: model.RoleAdmin, Active: true}
 	if err := repo.CreateUser(context.Background(), seed); err != nil {
 		t.Fatal(err)

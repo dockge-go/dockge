@@ -154,6 +154,7 @@ body {
   margin-inline-start: auto; background: var(--fill-strong); color: var(--muted);
   font-size: 11px; font-weight: 600; padding: 1px 7px;
   border-radius: 999px; min-width: 20px; text-align: center;
+  white-space: nowrap; font-variant-numeric: tabular-nums; flex-shrink: 0;
 }
 .nav-item.active .nav-item-badge { background: color-mix(in oklab, var(--accent), transparent 78%); color: var(--accent); }
 .sidebar-footer {
@@ -343,7 +344,7 @@ body {
   padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--sep);
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-shrink: 0;
 }
-.sheet-title { font-family: var(--font-display); font-size: var(--text-lg); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+.sheet-title { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-display); font-size: var(--text-lg); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 .sheet-body { flex: 1; overflow-y: auto; padding: var(--space-5); min-height: 0; }
 .sheet-footer {
   padding: var(--space-3) var(--space-5); border-top: 1px solid var(--sep);
@@ -487,7 +488,7 @@ body {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
   padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--sep);
 }
-.wb-title { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.012em; }
+.wb-title { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.012em; }
 .wb-actions { margin-inline-start: auto; display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .wb-services {
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
@@ -623,7 +624,7 @@ body {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
   margin-bottom: var(--space-4);
 }
-.detail-name { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.012em; }
+.detail-name { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.012em; }
 .detail-tools { margin-inline-start: auto; display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .summary-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3);
@@ -760,7 +761,6 @@ body {
   }
   .sheet-overlay.open .sheet { transform: translateY(0); }
   .sheet-body { padding: var(--space-4); }
-  .log-toolbar .log-filter { max-width: none; flex: 1; }
 }
 
 /* ≤480px：警告框按钮改 iOS 堆叠全宽；隐藏语言切换（保留在认证页） */
@@ -878,7 +878,7 @@ body {
 
 /* ── Terminal / logs（随 Apple System 主题切换） ────────────────────────────────── */
  .terminal-pane { min-width: 0; }
-.terminal-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.terminal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
 .terminal-toolbar .form-label { display: flex; align-items: center; gap: var(--space-2); margin: 0; }
 .terminal-toolbar .form-select { width: auto; }
 .terminal-toolbar .btn { margin-inline-start: auto; }
@@ -901,12 +901,12 @@ body {
 
 /* ── 日志流 ───────────────────────────────────────────────────────────── */
 .log-toolbar { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); flex-wrap: wrap; }
-.log-toolbar .log-filter { max-width: 180px; height: 28px; padding: 0 10px; font-size: var(--text-sm); }
+.log-toolbar .log-filter { flex: 1 1 150px; min-width: 0; max-width: none; height: 28px; padding: 0 10px; font-size: var(--text-sm); }
 .log-tool-btn { height: 28px; padding: 0 12px; font-size: var(--text-xs); }
 .log-tool-btn.active { background: var(--accent-soft); color: var(--accent); }
 .log-toolbar .log-count {
   font-size: var(--text-xs); color: var(--muted); margin-inline-start: auto;
-  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
   font-variant-numeric: tabular-nums;
 }
 .log-stream { min-height: 260px; max-height: 420px; }
@@ -1003,4 +1003,22 @@ body {
   .charts-grid { grid-template-columns:minmax(0,1fr); }
   .system-summary { min-width:0; table-layout:fixed; }
   .system-summary td:first-child, .system-summary th:first-child { width:110px; }
+}
+
+/* 检视流占用可用高度；滚动留在日志与终端内部，不撑开页面。 */
+.sheet-stream { height: min(720px, 100dvh); }
+.sheet-stream .sheet-body { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.sheet-stream .terminal-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.sheet-stream .terminal-surface { height: auto; flex: 1; min-height: 0; }
+.sheet-stream .log-stream { flex: 1; min-width: 0; min-height: 0; max-height: none; }
+.sheet-stream .log-toolbar, .sheet-stream .terminal-toolbar { flex-shrink: 0; }
+.data-source, .summary-cell-value, .host-facts dd { overflow-wrap: anywhere; }
+.btn-clear:disabled { opacity: 0.45; cursor: default; transform: none; background: none; }
+.live-dot.stale { background: var(--meta); animation: none; }
+@media (max-width: 768px) {
+  .sheet-stream { height: 92dvh; }
+  .sheet-footer { padding-bottom: max(var(--space-3), env(safe-area-inset-bottom)); }
+  .log-toolbar .log-filter { flex-basis: 100%; }
+  .log-toolbar .log-count { flex-basis: 100%; margin-inline-start: 0; }
+  .sheet-stream .terminal-surface { padding: var(--space-2); }
 }

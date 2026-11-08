@@ -1,6 +1,6 @@
 // fetch SSE 允许 Authorization 头；增量拆帧保留跨块 UTF-8 与多行 data。
 export interface SSEEvent { event: string; data: unknown }
-export async function readSSE(response: Response, onEvent: (event: SSEEvent) => void, signal?: AbortSignal): Promise<void> {
+export async function readSSE(response: Response, onEvent: (event: SSEEvent) => void | Promise<void>, signal?: AbortSignal): Promise<void> {
   if (!response.ok) {
     const text = await response.text(); let message = text;
     try { message = JSON.parse(text).message || text; } catch { /* 保留非 JSON 错误原文 */ }
@@ -25,7 +25,8 @@ export async function readSSE(response: Response, onEvent: (event: SSEEvent) => 
       while ((end = pending.indexOf('\n')) >= 0) {
         const line = pending.slice(0, end).replace(/\r$/, ''); pending = pending.slice(end + 1);
         if (!line) {
-          if (data.length) onEvent({ event, data: JSON.parse(data.join('\n')) });
+          if (data.length) await onEvent({ event, data: JSON.parse(data.join('\n')) });
+          if (signal?.aborted) throw signal.reason || new Error('SSE 已取消');
           event = 'message'; data = []; frameSize = 0;
         } else if (line.startsWith('event:')) event = line.slice(6).trim();
         else if (line.startsWith('data:')) { frameSize += line.length; if (frameSize > 16 * 1024 * 1024) throw new Error('SSE 帧超过 16 MiB，连接已关闭'); data.push(line.slice(5).replace(/^ /, '')); }

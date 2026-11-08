@@ -21,8 +21,6 @@ import (
 
 	"github.com/samber/do/v2"
 	"github.com/spf13/viper"
-
-	v1 "dockge/api/v1"
 )
 
 // bbolt bucket 名称。
@@ -52,6 +50,8 @@ var Package = do.Package(
 type Repository struct {
 	db        *bbolt.DB
 	stacksDir string
+	// configMu 仅保护 YAML/.env 配对读写，不与耗时部署共用生命周期锁。
+	configMu sync.RWMutex
 	// runtime 是容器运行时命令行（docker/podman/nerdctl 等，可配置/自动探测）
 	runtime Runtime
 	// preflight* 缓存运行时自检结果：健康检查会周期调用，避免每次起子进程
@@ -59,11 +59,9 @@ type Repository struct {
 	preflightDone   chan struct{}
 	preflightAt     time.Time
 	preflightStatus RuntimeStatus
-	// system* 串行差分采样并短时缓存，多个浏览器不会产生互相污染的 CPU 区间。
+	// system* 串行真实采样，只保留计算 CPU 区间必需的上一组计数器。
 	systemMu            sync.Mutex
-	systemAt            time.Time
 	systemPrevious      *cpuCounters
-	systemSnapshot      *v1.HostSystem
 	systemIdentityAt    time.Time
 	systemIdentity      hostIdentity
 	systemIdentityError error
@@ -182,18 +180,6 @@ func initBuckets(db *bbolt.DB) error {
 		}
 		return nil
 	})
-}
-
-// InitBuckets 是 initBuckets 的导出别名：service 层测试需要在自建的临时库上准备 bucket
-// （Repository 构造走 do.Injector，测试无法注入，故以最小构造器暴露）。
-func InitBuckets(db *bbolt.DB) error {
-	return initBuckets(db)
-}
-
-// NewRepositoryForTest 以仅含 db 的最小构造创建 Repository（测试专用：其余字段为 nil，
-// 只可调用用户/设置等纯存储方法，禁止触碰 runtime/stacksDir 相关方法）。
-func NewRepositoryForTest(db *bbolt.DB) *Repository {
-	return &Repository{db: db}
 }
 
 // StacksDirFromConf 解析 stacks 目录：DOCKGE_STACKS_DIR 环境变量

@@ -249,3 +249,43 @@ func TestDeleteCanceledKeepsDirectory(t *testing.T) {
 		}
 	}
 }
+
+// 配置文件分别原子替换，配对读还须避开保存中途的 YAML/.env 混搭。
+func TestReadStackConfigPairDuringSave(t *testing.T) {
+	r := &Repository{stacksDir: t.TempDir()}
+	ctx := context.Background()
+	initial := &model.Stack{Name: "pair", Yaml: "value: 0\n", Env: "VALUE=0\n"}
+	if err := r.Save(ctx, initial, true); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		for n := 1; n <= 30; n++ {
+			if err := r.Save(ctx, &model.Stack{Name: "pair", Yaml: fmt.Sprintf("value: %d\n", n), Env: fmt.Sprintf("VALUE=%d\n", n)}, false); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	for n := 0; n < 100; n++ {
+		row, err := r.ReadStackConfig(ctx, "pair")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var yamlN, envN int
+		if _, err := fmt.Sscanf(row.Yaml, "value: %d", &yamlN); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Sscanf(row.Env, "VALUE=%d", &envN); err != nil {
+			t.Fatal(err)
+		}
+		if yamlN != envN {
+			t.Errorf("保存中的配对读不一致: %s / %s", row.Yaml, row.Env)
+			break
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

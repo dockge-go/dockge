@@ -2,10 +2,11 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
-	"dockge/internal/repository"
+	v1 "dockge/api/v1"
 	"dockge/internal/service"
 	"dockge/internal/version"
 
@@ -18,7 +19,6 @@ type EventsHandler struct {
 	Resources   *service.ResourceService `do:""`
 	Stacks      service.StackService     `do:""`
 	Auth        service.AuthService      `do:""`
-	Repository  *repository.Repository   `do:""`
 	streamsOnce sync.Once
 	systems     *eventSampler
 	snapshots   *eventSampler
@@ -37,10 +37,7 @@ func (h *EventsHandler) Events(c *gin.Context) {
 		return
 	}
 	s := newSSE(c)
-	h.streamsOnce.Do(func() {
-		h.systems = newEventSampler(2*time.Second, func(ctx context.Context) any { return h.Resources.System(ctx) })
-		h.snapshots = newEventSampler(5*time.Second, h.snapshot)
-	})
+	h.initStreams()
 	systems, stopSystems := h.systems.subscribe()
 	defer stopSystems()
 	snapshots, stopSnapshots := h.snapshots.subscribe()
@@ -67,27 +64,37 @@ func (h *EventsHandler) Events(c *gin.Context) {
 	}
 }
 
-// snapshot 保持资源查询与归属校验不变，共享采样只消除连接间重复工作。
-func (h *EventsHandler) snapshot(ctx context.Context) any {
+func (h *EventsHandler) initStreams() {
+	h.streamsOnce.Do(func() {
+		h.systems = newEventSampler(2*time.Second, func(ctx context.Context, _ uint64) any { return h.Resources.System(ctx) })
+		h.snapshots = newEventSampler(5*time.Second, h.snapshot)
+	})
+}
+
+// Refresh 仅触发采样，真实数据仍通过现有 SSE 返回；不重建连接或回放历史。
+func (h *EventsHandler) Refresh(c *gin.Context) {
+	if c.Request.Context().Err() != nil {
+		return
+	}
+	h.initStreams()
+	revision := h.snapshots.refresh()
+	h.systems.refresh()
+	c.Header("Cache-Control", "no-store")
+	v1.HandleSuccess(c, gin.H{"revision": revision})
+}
+
+// snapshot 聚合真实资源与轻量栈配置，不启动逐栈容器详情查询。
+func (h *EventsHandler) snapshot(ctx context.Context, revision uint64) any {
 	bounded, stop := context.WithTimeout(ctx, 20*time.Second)
 	defer stop()
-	health := h.Repository.Preflight(bounded)
+	health := h.Resources.RuntimeStatus(bounded)
 	resources := h.Resources.Snapshot(bounded)
-	stacks := make([]any, 0)
-	list, err := h.Stacks.List(bounded, "")
+	stacks, err := h.Stacks.Snapshot(bounded)
 	if err != nil {
 		resources.Errors["stacks"] = err.Error()
-	} else {
-		for _, summary := range list.List {
-			d, e := h.Stacks.Get(bounded, summary.Name)
-			if e != nil {
-				stacks = append(stacks, gin.H{"name": summary.Name, "status": summary.Status, "managed": summary.Managed, "configFiles": summary.ConfigFiles, "loadError": e.Error()})
-			} else {
-				stacks = append(stacks, d)
-			}
-		}
+		stacks = []v1.StackConfigData{}
 	}
-	return gin.H{"resources": resources, "stacks": stacks, "health": gin.H{"version": version.Version, "runtime": health}}
+	return gin.H{"revision": revision, "resources": resources, "stacks": stacks, "health": gin.H{"version": version.Version, "runtime": health}}
 }
 
 func writeEventSample(s *sseWriter, name string, sample eventSample) bool {
@@ -96,4 +103,10 @@ func writeEventSample(s *sseWriter, name string, sample eventSample) bool {
 		return false
 	}
 	return s.eventJSON(name, sample.data) == nil
+}
+
+// Shutdown 等待共享查询回收，避免 HTTP 退出后后台任务继续访问已关闭的依赖。
+func (h *EventsHandler) Shutdown(ctx context.Context) error {
+	h.initStreams()
+	return errors.Join(h.systems.shutdown(ctx), h.snapshots.shutdown(ctx))
 }
